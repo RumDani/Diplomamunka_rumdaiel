@@ -1,0 +1,576 @@
+import matplotlib.pyplot as plt     # kirajzolásra- szimuláció           --> cmd:pip install matplotlib numpy
+import math                         # matematikai műveletekre pl.:pi
+
+import numpy as np      #gyorsabb számolás miatt --> ez C-ben írodott
+
+import pandas as pd
+import time
+"""
+get_robot_kinematics : a kerékadatokból v,w párokat számol --> differenciális meghajtású robot elmélete
+"""
+def get_robot_kinematics(w_L, w_R, config):
+    v = ((w_L + w_R) / 2) * config.r_kerek
+    w = ((w_R - w_L) / (2 * config.b)) * config.r_kerek
+    return v, w
+
+"""
+Akadály osztály
+"""
+class Obstacle:
+    def __init__(self, x, y, radius=0.1, vx=0.0, vy=0.0):
+        self.x = x
+        self.y = y
+        self.radius = radius
+        self.vx = vx  # sebesség x irányban
+        self.vy = vy  # sebesség y irányban
+
+    def move(self, dt):
+        self.x += self.vx * dt
+        self.y += self.vy * dt
+
+
+"""        
+Akadályok példányosítása
+"""
+obstacle_list = [
+    
+    Obstacle(1.5, 1.0, radius=0.4),
+    Obstacle(2.5, 1.2, radius=0.4),
+    Obstacle(3.5, 0.8, radius=0.4),
+    Obstacle(2.0, 4.0, radius=0.4),
+    Obstacle(3.0, 4.2, radius=0.4),
+    Obstacle(4.0, 3.8, radius=0.4),
+    Obstacle(5.0, 2.5, radius=0.6),
+    Obstacle(2.5, -1.0, radius=0.3, vx=0.0, vy=0.3),
+    Obstacle(5.0, 6.0, radius=0.25, vx=0.0, vy=-0.5),
+    Obstacle(3.5, 2.8, radius=0.2, vx=0.6, vy=0.0),
+    Obstacle(6.0, 1.5, radius=0.2, vx=-0.4, vy=0.1),
+    Obstacle(1.2, 5.5, radius=0.15),
+    Obstacle(6.8, 4.5, radius=0.2),
+    Obstacle(7.2, 2.0, radius=0.15),
+    
+    ]
+    
+"""""
+    Obstacle(0.6, 0.25, radius=0.15),
+    Obstacle(1.5, 0.5, radius=0.15),  
+    Obstacle(2.0, -0.2, radius=0.08),
+    Obstacle(0.8, 1.2, radius=0.2),
+    Obstacle(2.5, 1.0, radius=0.1),
+    Obstacle(1.0, 2.5, radius=0.15),
+    Obstacle(3.0, 0.5, radius=0.3),
+    Obstacle(4.5, 1.5, radius=0.2),
+    Obstacle(2.0, 3.5, radius=0.25),
+    Obstacle(5.5, 3.5, radius=0.3),
+    Obstacle(4.0, 4.5, radius=0.2),
+    Obstacle(6.5, 2.0, radius=0.2),
+    Obstacle(2.5, 1.5, 0.25, vx=0.2, vy=0.1),  # Mozgó
+    Obstacle(4.5, 1.5, 0.2, vx=-0.15, vy=0.3), # Mozgó
+    Obstacle(3.0, 3.0, 0.25, vx=0.3, vy=-0.2), # Mozgó
+    Obstacle(3.5, 0.0, radius=0.6, vx=0.0, vy=0.4)
+    """
+
+
+"""
+Cél kitűzése
+"""
+class Goal:
+    def __init__(self, x, y, tolerance=0.15):
+        self.x = x
+        self.y = y
+        self.tolerance = tolerance
+
+"""
+Kiszámítja a megtett utat az ív mentén az első ütközésig.
+Ha nincs ütközés a predict_time alatt, egy nagy értéket ad vissza.
+"""
+def get_dist_on_trajectory(state, config, w_L, w_R, obstacle_list):
+    temp_robot = robotstate(x=state.x, y=state.y, irany=state.irany, w_L=state.w_L, w_R=state.w_R)
+    accumulated_dist = 0.0
+    v_actual, _ = get_robot_kinematics(w_L, w_R, config)
+    
+    # --- SZENZOR PARAMÉTEREK ---
+    max_sensor_dist = 3.0  # 3 méterig lát el a Lidar
+    fov_angle = math.radians(180) # 180 fokos látószög elöl
+    
+    for t in np.arange(0, config.predict_time, config.dt):
+        for obs in obstacle_list:
+            # 1. Szenzor szűrés: Csak azt látja, ami közel van
+            dist_now = math.hypot(state.x - obs.x, state.y - obs.y)
+            if dist_now > max_sensor_dist:
+                continue
+                
+            # 2. FOV szűrés: Csak azt látja, ami előtte van (+-90 fok)
+            angle_to_obs = math.atan2(obs.y - state.y, obs.x - state.x)
+            diff_angle = math.atan2(math.sin(angle_to_obs - state.irany), math.cos(angle_to_obs - state.irany))
+            if abs(diff_angle) > fov_angle / 2:
+                continue
+
+            # 3. DINAMIKUS PREDIKCIÓ: Hol lesz az akadály 't' idő múlva?
+            obs_future_x = obs.x + obs.vx * t
+            obs_future_y = obs.y + obs.vy * t
+            
+            dist_centers = math.hypot(temp_robot.x - obs_future_x, temp_robot.y - obs_future_y)
+            
+            if dist_centers <= (config.rob_radius + obs.radius + config.safety_margin):
+                return accumulated_dist 
+        
+        update(temp_robot, config, w_L, w_R, config.dt)
+        accumulated_dist += abs(v_actual) * config.dt
+                
+    return 10.0
+
+
+#############xx FÉKEZÉSI FELTÉTELEK ###############
+def AdmissableVelocity(robotconfig, w_L, w_R, state, obstacle_list):
+    """
+    Ellenőrzi, hogy a robot meg tud-e állni az adott íven az ütközés előtt.
+    """
+    # 1. Kiszámítjuk a távolságot az ív mentén az ütközésig
+    dist_to_obs = get_dist_on_trajectory(state, robotconfig, w_L, w_R, obstacle_list)
+    
+    # 2. Megkapjuk a lineáris sebességet (v)
+    v, _ = get_robot_kinematics(w_L, w_R, robotconfig)
+    
+    #Ez a képlet le van vezetve --> admissable velocity lap
+    if abs(v) <= math.sqrt(2 * robotconfig.a_max * dist_to_obs):
+        return True
+    return False
+   
+############################################################
+"""#Differenciális meghajtású robot esetén"""
+class robotconfig:
+    def __init__(robot):
+        # feltételezem hogy a negativ és poziti sebességek megegyeznek v_max = v_min és w_max=w_min --> ezeket kiszámolom a kerekek adataibol és a robot konfigurációjából/ felépítéséből
+        robot.r_kerek = 0.033   #[m]
+        robot.b = 0.08 #[m]
+        robot.w_kerek_max = 15 #rad/s
+        robot.a_max = 2 # [m/s^2] gyorsulás
+       
+        robot.w_kerek_min = -robot.w_kerek_max
+       
+        # Felbontások a mintavételezéshez (most a kerék szögsebességére vonatkozóan)
+        robot.w_kerek_resolution = 1 # [rad/s] A kerék szögsebesség mintavételezési finomsága.
+       
+        #DWA időparaméterek
+        robot.dt = 0.1 # [s] --> időléspés (felbontás)
+        robot.predict_time = 3 # [s] --> mennyi időre lásson előre
+   
+        #robot-alakja--> legyen kör az egyszerűség kedvéért
+        robot.rob_radius = robot.b + 0.02 #[m]
+        
+        robot.safety_margin = 0.15
+       
+        ########Optimalizáció###########
+       
+        #G(v,w)= Alfa*heading(v,w)+Beta*dist(v,w)+Gamma*vel(v,w)
+        robot.Alfa = 3  #célra tarás súlya  2
+        robot.Beta = 3 # Akadály kerülés súlya  2
+        robot.Gamma = 7 #Sebesség súlya 5
+       
+"""
+Robot jelenlegi állapotának eltárolása
+"""
+class robotstate:
+    def __init__(robot, x=0, y=0, v=0, w=0, irany = 0, w_L=0, w_R=0):  #default konstruktor
+        robot.x = x
+        robot.y = y
+        robot.v = v
+        robot.w = w
+        robot.irany = irany
+        robot.w_L = w_L
+        robot.w_R = w_R
+
+"""
+Robot állapotának frissítése
+"""
+def update(robot, config, w_L_target, w_R_target, dt):
+    # Gyorsulás korlátozása
+    max_w_dot = config.a_max / config.r_kerek  # max kerék szögsebesség változás
+    
+    # Korlátozzuk, hogy mennyit változhat a keréksebesség ennyi idő alatt
+    w_L_new = robot.w_L + np.clip(w_L_target - robot.w_L, -max_w_dot * dt, max_w_dot * dt)
+    w_R_new = robot.w_R + np.clip(w_R_target - robot.w_R, -max_w_dot * dt, max_w_dot * dt)
+    
+    # Most számoljuk a kinematikát a KORLÁTOZOTT sebességgel
+    v, w = get_robot_kinematics(w_L_new, w_R_new, config)
+    
+    # Pozíció frissítés (ugyanaz, mint előbb)
+    theta_0 = robot.irany
+    
+    if(abs(w) > 1e-6):  # kis küszöb a nullához
+        robot.x += (v/w) * (math.sin(theta_0 + w*dt) - math.sin(theta_0))
+        robot.y += - (v/w) * (math.cos(theta_0 + w*dt) - math.cos(theta_0))
+    else:
+        robot.x += v * math.cos(theta_0) * dt
+        robot.y += v * math.sin(theta_0) * dt
+    
+    robot.irany += w * dt
+    robot.v = v
+    robot.w = w
+    robot.w_L = w_L_new
+    robot.w_R = w_R_new
+    
+    return np.array([robot.x, robot.y, robot.irany, robot.v, robot.w, robot.w_L, robot.w_R])
+
+"""        
+Összes választható v,w pár kiszámolása kerekekből számítva
+"""
+def pairstochoose (robotconfig, robotstate):
+
+    w_dot_max = robotconfig.a_max / robotconfig.r_kerek         #w=a/r
+   
+    w_L_min_actual = max(robotconfig.w_kerek_min, robotstate.w_L - w_dot_max * robotconfig.dt)
+    w_L_max_actual = min(robotconfig.w_kerek_max, robotstate.w_L + w_dot_max * robotconfig.dt)
+
+    w_R_min_actual = max(robotconfig.w_kerek_min, robotstate.w_R - w_dot_max * robotconfig.dt)
+    w_R_max_actual = min(robotconfig.w_kerek_max, robotstate.w_R + w_dot_max * robotconfig.dt)
+   
+    w_L_samples = np.arange(w_L_min_actual, w_L_max_actual + robotconfig.w_kerek_resolution, robotconfig.w_kerek_resolution)
+    w_R_samples = np.arange(w_R_min_actual, w_R_max_actual + robotconfig.w_kerek_resolution, robotconfig.w_kerek_resolution)
+
+    all_pairs = []
+    for w_L in w_L_samples:
+        for w_R in w_R_samples:
+            v, w = get_robot_kinematics(w_L, w_R, robotconfig)
+
+            all_pairs.append([v, w, w_L, w_R])
+    return all_pairs
+
+########################Összes lehetséges válaztható pálya eltárolása ami biztonságos megállást biztosít, ez frissüljön minden egyes döntáshozásnál#######################x
+
+def safepairs (robotconfig, state, obstacle_list):
+    w_dot_max = robotconfig.a_max / robotconfig.r_kerek
+    
+    # Dinamikus ablak kiszámítása (mint a pairstochoose-ban)
+    w_L_min_actual = max(robotconfig.w_kerek_min, state.w_L - w_dot_max * robotconfig.dt)
+    w_L_max_actual = min(robotconfig.w_kerek_max, state.w_L + w_dot_max * robotconfig.dt)
+
+    w_R_min_actual = max(robotconfig.w_kerek_min, state.w_R - w_dot_max * robotconfig.dt)
+    w_R_max_actual = min(robotconfig.w_kerek_max, state.w_R + w_dot_max * robotconfig.dt)
+    
+    w_L_samples = np.arange(w_L_min_actual, w_L_max_actual + robotconfig.w_kerek_resolution, robotconfig.w_kerek_resolution)
+    w_R_samples = np.arange(w_R_min_actual, w_R_max_actual + robotconfig.w_kerek_resolution, robotconfig.w_kerek_resolution)
+
+    admissible_list = [] # Ebben csak a "jó" párok lesznek
+    
+    for w_L in w_L_samples:
+        for w_R in w_R_samples:
+            if AdmissableVelocity(robotconfig, w_L, w_R, state, obstacle_list):
+                v, w = get_robot_kinematics(w_L, w_R, robotconfig)
+                admissible_list.append([v, w, w_L, w_R])
+                
+    return admissible_list
+
+################################################
+
+############# optimalizáció #####################
+def optimisation(robotconfig, state, goal, obstacle_list):
+    # 1. Biztonságos sebességpárok lekérése
+    safe_list = safepairs(robotconfig, state, obstacle_list)
+    
+    # Ha nincs biztonságos út (ÜRES A LISTA -> DEADLOCK)
+    if not safe_list:
+        # Visszaadunk egy speciális jelzést (None), hogy a főciklus tudja: Recovery kell
+        return None, []
+
+    best_score = -float('inf')
+    best_pair = None
+    
+    dist_to_goal = math.hypot(goal.x - state.x, goal.y - state.y)
+    v_max_robot = robotconfig.w_kerek_max * robotconfig.r_kerek
+    
+    # 2. Adaptív predikció: közelebb rövidebb időre nézünk előre a precizitásért
+    adaptive_predict_time = robotconfig.predict_time
+    if dist_to_goal < 1.0:
+        adaptive_predict_time = max(0.5, dist_to_goal * 2.0)
+
+    alfa = robotconfig.Alfa    # Célra tartás (pl. 2.0)
+    beta = robotconfig.Beta    # Akadálykerülés (pl. 1.0)
+    gamma = robotconfig.Gamma          # Sebességszabályozás súlya (magasabb, hogy hallgasson a lassításra)
+
+    for v, w, w_L, w_R in safe_list:  
+        # Gyors szimuláció a jövőbeli állapot becsléséhez
+        temp_robot = robotstate(x=state.x, y=state.y, irany=state.irany, w_L=state.w_L, w_R=state.w_R)
+        for _ in np.arange(0, adaptive_predict_time, robotconfig.dt):
+            update(temp_robot, robotconfig, w_L, w_R, robotconfig.dt)
+        
+        # --- PONTOZÁSI LOGIKA ---
+
+        # A: Heading score (Irányhiba normalizálva 0 és 1 közé)
+        angle_to_goal = math.atan2(goal.y - temp_robot.y, goal.x - temp_robot.x)
+        error_angle = math.atan2(math.sin(angle_to_goal - temp_robot.irany), 
+                                 math.cos(angle_to_goal - temp_robot.irany))
+        score_heading = (math.pi - abs(error_angle)) / math.pi
+        
+        # B: Dist score (Akadályoktól való távolság)
+        score_dist = get_dist_on_trajectory(state, robotconfig, w_L, w_R, obstacle_list)
+        
+        # C: Velocity score (Folytonos lassulási görbe)
+        if dist_to_goal > 0.8:
+            # Messze: egyszerűen jutalmazzuk a sebességet (0.0 - 1.0)
+            score_vel = v / v_max_robot
+        else:
+            # Közel: v_target követése. v_target = távolság (pl. 0.5m-nél 0.5m/s az ideális)
+            # A pontszám 1.0 ha tökéletesen tartja a lassulást, és csökken ha eltér tőle.
+            v_target = max(0.0, dist_to_goal) 
+            score_vel = 1.0 - (abs(v_target - v) / v_max_robot)
+
+        # Végső pontszám kiszámítása
+        score = (alfa * score_heading + 
+                 beta * score_dist + 
+                 gamma * score_vel)
+
+        if score > best_score:
+            best_score = score
+            best_pair = [v, w, w_L, w_R]
+
+    return best_pair, safe_list
+
+"""
+szimulációs rész
+"""
+def plot_all_trajectories(state, config, all_pairs, best_pair, goal, obstacles):
+    # Ha sweep módban vagyunk, ne csináljon semmit
+    if not plt.get_fignums(): 
+        return
+    
+    plt.clf()
+    ax = plt.gca()
+    
+    # Beállítjuk a keretet, hogy ne mozogjon a robot után
+    ax.set_xlim(-1.0, 8.5) 
+    ax.set_ylim(-1.0, 6.5)
+    ax.set_aspect('equal', adjustable='box')
+    ax.grid(True, linestyle='--', alpha=0.5)
+
+    # 1. Cél és Akadályok rajzolása
+    ax.plot(goal.x, goal.y, "gx", markersize=12, mew=3, label="Cél")
+    for obs in obstacles:
+        ax.add_patch(plt.Circle((obs.x, obs.y), obs.radius, color="red", alpha=0.3))
+    
+    # 2. Összes lehetséges pálya végigpörgetése
+    for v, w, w_L, w_R in all_pairs:
+        # PONTOS ELLENŐRZÉS: Ez-e a kiválasztott legjobb páros?
+        is_best = False
+        if best_pair is not None:
+            if math.isclose(w_L, best_pair[2], abs_tol=1e-3) and \
+               math.isclose(w_R, best_pair[3], abs_tol=1e-3):
+                is_best = True
+
+        is_safe = AdmissableVelocity(config, w_L, w_R, state, obstacles)
+        dist_to_coll = get_dist_on_trajectory(state, config, w_L, w_R, obstacles)
+        
+        # --- SZÍNMEGHATÁROZÁS ---
+        if dist_to_coll < (abs(v) * config.predict_time) or not is_safe:
+            path_color = "red"    # Ütközésveszély = Piros
+        elif is_best:
+            path_color = "lime"   # Választott legjobb = Élénkzöld
+        elif v > 0:
+            path_color = "gray"   # Többi biztonságos előre = Szürke (halvány)
+        else:
+            path_color = "blue"   # Hátramenet = Kék (ha v < 0)
+
+        # Megjelenítési beállítások: a legjobb út legyen legfelül és legvastagabb
+        z_ord = 10 if is_best else 1
+        alpha_val = 1.0 if is_best else 0.15
+        lw_val = 3.5 if is_best else 0.8
+
+        # --- JÓSOLT SZAKASZ (Trajectory rollout) ---
+        ghost = robotstate(x=state.x, y=state.y, irany=state.irany, w_L=state.w_L, w_R=state.w_R)
+        path_x, path_y = [ghost.x], [ghost.y]
+
+        # Predikciós szimuláció
+        for _ in np.arange(0, config.predict_time, config.dt):
+            update(ghost, config, w_L, w_R, config.dt)
+            path_x.append(ghost.x)
+            path_y.append(ghost.y)
+        
+        ax.plot(path_x, path_y, color=path_color, alpha=alpha_val, linewidth=lw_val, zorder=z_ord)
+
+        # --- FÉKEZÉSI SZAKASZ (A vonalak végén lévő ív) ---
+        t_stop = abs(v) / config.a_max if abs(v) > 0 else 0
+        brake_robot = robotstate(x=ghost.x, y=ghost.y, irany=ghost.irany, w_L=w_L, w_R=w_R)
+        brake_x, brake_y = [brake_robot.x], [brake_robot.y]
+        
+        for t in np.arange(0, t_stop, config.dt):
+            factor = max(0, 1.0 - (t / t_stop)) if t_stop > 0 else 0
+            update(brake_robot, config, w_L * factor, w_R * factor, config.dt)
+            brake_x.append(brake_robot.x)
+            brake_y.append(brake_robot.y)
+            
+        # A fékezési szakasz mindig piros marad
+        ax.plot(brake_x, brake_y, color="red", alpha=alpha_val * 0.7, linewidth=lw_val * 0.7, zorder=z_ord)
+
+    # 3. A Robot és az aktuális megtett út nyomvonala (trail) rajzolása
+    ax.add_patch(plt.Circle((state.x, state.y), config.rob_radius, color="blue", fill=False, lw=2))
+    plt.arrow(state.x, state.y, config.rob_radius * math.cos(state.irany),
+              config.rob_radius * math.sin(state.irany), head_width=0.05, fc='b', ec='b')
+
+    plt.title(f"DWA Szimuláció - v: {state.v:.2f} m/s")
+    plt.draw()
+    plt.pause(0.01)
+    
+
+def start_original_simulation():
+    conf = robotconfig()
+    state = robotstate(x=0, y=0, irany=0, w_L=0, w_R=0)
+    goal = Goal(x=7.0, y=5.0)
+    
+    plt.ion()
+    plt.figure(figsize=(10, 8))
+
+    # Állapotjelző a deadlockhoz
+    is_recovering = False
+
+    for step in range(1200): # Kicsit több lépés, mert a forgás idő
+        for obs in obstacle_list:
+            obs.move(conf.dt)
+
+        best, all_pairs = optimisation(conf, state, goal, obstacle_list)
+        
+        # --- DEADLOCK KEZELÉS ---
+        if best is None:
+            is_recovering = True
+            # Forgás egy helyben: ellentétes irányú keréksebességek
+            # A w_kerek_max felével forgunk, hogy biztonságos legyen
+            recovery_w_L = -conf.w_kerek_max * 0.3
+            recovery_w_R = conf.w_kerek_max * 0.3
+            
+            update(state, conf, recovery_w_L, recovery_w_R, conf.dt)
+            print(f"Lépés {step}: DEADLOCK! Helyben forgás...")
+        else:
+            is_recovering = False
+            update(state, conf, best[2], best[3], conf.dt)
+
+        # Megjelenítés
+        if step % 3 == 0:
+            # Ha recovery van, üres listát adunk a rajzolónak
+            plot_all_trajectories(state, conf, all_pairs if best else [], best, goal, obstacle_list)
+        
+        if math.hypot(state.x - goal.x, state.y - goal.y) < goal.tolerance:
+            print("Célba ért!")
+            break
+
+    plt.ioff()
+    plt.show()
+    
+##################xTÁBLÁZATOS############################
+
+def run_single_test(a, b, g):
+    """
+    Részletes szimulációs futás adathalászathoz.
+    """
+    conf = robotconfig()
+    conf.Alfa = a
+    conf.Beta = b
+    conf.Gamma = g
+    
+    state = robotstate(x=0, y=0, irany=0, w_L=0, w_R=0)
+    goal = Goal(x=7.0, y=5.0)
+    
+    # Frissített akadálylista a standard teszthez
+    current_obs_list = [
+        
+        Obstacle(1.5, 1.0, radius=0.4), Obstacle(2.5, 1.2, radius=0.4),
+        Obstacle(3.5, 0.8, radius=0.4), Obstacle(2.0, 4.0, radius=0.4),
+        Obstacle(3.0, 4.2, radius=0.4), Obstacle(4.0, 3.8, radius=0.4),
+        Obstacle(5.0, 2.5, radius=0.6),
+        Obstacle(2.5, -1.0, radius=0.3, vx=0.0, vy=0.3),
+        Obstacle(5.0, 6.0, radius=0.25, vx=0.0, vy=-0.5),
+        Obstacle(3.5, 2.8, radius=0.2, vx=0.6, vy=0.0)
+        
+    ]
+
+    min_dist = float('inf')
+    collision = False
+    total_v = 0.0
+    step_count = 0
+    max_steps = 600 
+
+    for step in range(max_steps):
+        for obs in current_obs_list: obs.move(conf.dt)
+
+        for obs in current_obs_list:
+            d = math.hypot(state.x - obs.x, state.y - obs.y) - (conf.rob_radius + obs.radius)
+            if d < min_dist: min_dist = d
+            if d <= 0:
+                collision = True
+                break
+        if collision: break
+
+        best, _ = optimisation(conf, state, goal, current_obs_list)
+        
+        if best:
+            update(state, conf, best[2], best[3], conf.dt)
+        else:
+            update(state, conf, 0, 0, conf.dt)
+            
+        total_v += state.v
+        step_count = step
+        
+        if math.hypot(state.x - goal.x, state.y - goal.y) < goal.tolerance:
+            avg_v = total_v / (step_count + 1)
+            return [a, b, g, "SIKER", False, round(min_dist, 3), step_count, round(avg_v, 3)]
+
+    avg_v = total_v / (step_count + 1) if step_count > 0 else 0
+    eredmeny = "ÜTKÖZÉS" if collision else "TIMEOUT"
+    return [a, b, g, eredmeny, collision, round(min_dist, 3), step_count, round(avg_v, 3)]
+
+def start_sweep():
+    """
+    Paraméter sweep 0-tól 10-ig minden egész értékre.
+    Összesen 11 * 11 * 11 = 1331 futtatás.
+    """
+    import numpy as np
+    sweep_results = []
+    
+    # Tartomány definiálása (0, 1, 2 ... 10)
+    vals = np.arange(0, 11, 1) 
+    total_runs = len(vals)**3
+    
+    print(f"--- RÉSZLETES SWEEP INDÍTÁSA ---")
+    print(f"Tartomány: 0-10 | Kombinációk: {total_runs}")
+    print("Ez eltarthat egy ideig, kérlek várj...")
+    
+    start_time = time.time()
+    count = 0
+
+    for a in vals:
+        for b in vals:
+            for g in vals:
+                res = run_single_test(a, b, g)
+                sweep_results.append(res)
+                count += 1
+                
+                # Haladási napló minden 50. futás után
+                if count % 50 == 0:
+                    percent = round((count / total_runs) * 100, 1)
+                    print(f"Haladás: {percent}% ({count}/{total_runs})")
+
+    # Táblázat összeállítása
+    columns = ["Alpha", "Beta", "Gamma", "Eredmény", "Ütközés", "Min_Távolság", "Lépésszám", "Átlag_Sebesség"]
+    df = pd.DataFrame(sweep_results, columns=columns)
+    
+    # Fájl mentése (letölthető CSV)
+    filename = "dwa_sweep_eredmenyek_10.csv"
+    df.to_csv(filename, index=False)
+    
+    total_duration = round((time.time() - start_time) / 60, 2)
+    print(f"\n--- SWEEP KÉSZ ---")
+    print(f"Futási idő: {total_duration} perc")
+    print(f"Fájl elmentve: {filename}")
+    
+    # Megmutatjuk a legjobb 10 sikeres futamot sebesség szerint rendezve
+    print("\nLegjobb 10 konfiguráció (Sikeres, leggyorsabb szerint):")
+    success_df = df[df["Eredmény"] == "SIKER"].sort_values(by="Lépésszám", ascending=True)
+    print(success_df.head(10).to_string(index=False))
+
+
+# --- INNEN TUDSZ VÁLTANI ---
+if __name__ == "__main__":
+    # 1. SWEEP MÓD (táblázat):
+    #start_sweep()
+
+    # 2. EREDETI MÓD (grafika) - Ha ezt akarod, vedd ki a '#' jelet alóla:
+    start_original_simulation()

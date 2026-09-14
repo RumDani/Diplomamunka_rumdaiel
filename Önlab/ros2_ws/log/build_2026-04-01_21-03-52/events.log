@@ -1,0 +1,89 @@
+[0.000000] (-) TimerEvent: {}
+[0.000540] (dwa_planner) JobQueued: {'identifier': 'dwa_planner', 'dependencies': OrderedDict()}
+[0.002922] (dwa_planner) JobStarted: {'identifier': 'dwa_planner'}
+[0.099550] (-) TimerEvent: {}
+[0.200232] (-) TimerEvent: {}
+[0.301043] (-) TimerEvent: {}
+[0.401645] (-) TimerEvent: {}
+[0.502332] (-) TimerEvent: {}
+[0.602962] (-) TimerEvent: {}
+[0.703751] (-) TimerEvent: {}
+[0.804600] (-) TimerEvent: {}
+[0.905413] (-) TimerEvent: {}
+[1.007251] (-) TimerEvent: {}
+[1.107846] (-) TimerEvent: {}
+[1.208494] (-) TimerEvent: {}
+[1.309258] (-) TimerEvent: {}
+[1.409947] (-) TimerEvent: {}
+[1.510548] (-) TimerEvent: {}
+[1.611125] (-) TimerEvent: {}
+[1.711726] (-) TimerEvent: {}
+[1.812287] (-) TimerEvent: {}
+[1.912870] (-) TimerEvent: {}
+[2.013627] (-) TimerEvent: {}
+[2.114233] (-) TimerEvent: {}
+[2.214765] (-) TimerEvent: {}
+[2.315357] (-) TimerEvent: {}
+[2.415938] (-) TimerEvent: {}
+[2.516603] (-) TimerEvent: {}
+[2.617247] (-) TimerEvent: {}
+[2.717924] (-) TimerEvent: {}
+[2.818685] (-) TimerEvent: {}
+[2.919420] (-) TimerEvent: {}
+[3.019989] (-) TimerEvent: {}
+[3.120612] (-) TimerEvent: {}
+[3.221269] (-) TimerEvent: {}
+[3.321858] (-) TimerEvent: {}
+[3.422471] (-) TimerEvent: {}
+[3.523161] (-) TimerEvent: {}
+[3.587212] (dwa_planner) Command: {'cmd': ['/usr/bin/python3', '-W', 'ignore:setup.py install is deprecated', '-W', 'ignore:easy_install command is deprecated', 'setup.py', 'develop', '--editable', '--build-directory', '/home/rumdaniel/ros2_ws/build/dwa_planner/build', '--no-deps', 'symlink_data'], 'cwd': '/home/rumdaniel/ros2_ws/build/dwa_planner', 'env': {'PYTHON_BASIC_REPL': '1', 'LESSOPEN': '| /usr/bin/lesspipe %s', 'GZ_SIM_RESOURCE_PATH': '/opt/ros/jazzy/share', 'USER': 'rumdaniel', 'GZ_CONFIG_PATH': '/opt/ros/jazzy/opt/gz_sim_vendor/share/gz:/opt/ros/jazzy/opt/sdformat_vendor/share/gz:/opt/ros/jazzy/opt/gz_gui_vendor/share/gz:/opt/ros/jazzy/opt/gz_transport_vendor/share/gz:/opt/ros/jazzy/opt/gz_rendering_vendor/share/gz:/opt/ros/jazzy/opt/gz_plugin_vendor/share/gz:/opt/ros/jazzy/opt/gz_fuel_tools_vendor/share/gz:/opt/ros/jazzy/opt/gz_msgs_vendor/share/gz:/opt/ros/jazzy/opt/gz_common_vendor/share/gz', 'GIT_ASKPASS': '/home/rumdaniel/.vscode-server/bin/cfbea10c5ffb233ea9177d34726e6056e89913dc/extensions/git/dist/askpass.sh', 'SHLVL': '2', 'LD_LIBRARY_PATH': '/opt/ros/jazzy/opt/gz_sim_vendor/lib:/opt/ros/jazzy/opt/gz_sensors_vendor/lib:/opt/ros/jazzy/opt/gz_physics_vendor/lib:/opt/ros/jazzy/opt/sdformat_vendor/lib:/opt/ros/jazzy/opt/rviz_ogre_vendor/lib:/opt/ros/jazzy/lib/x86_64-linux-gnu:/opt/ros/jazzy/opt/gz_gui_vendor/lib:/opt/ros/jazzy/opt/gz_transport_vendor/lib:/opt/ros/jazzy/opt/gz_rendering_vendor/lib:/opt/ros/jazzy/opt/gz_plugin_vendor/lib:/opt/ros/jazzy/opt/gz_fuel_tools_vendor/lib:/opt/ros/jazzy/opt/gz_msgs_vendor/lib:/opt/ros/jazzy/opt/gz_common_vendor/lib:/opt/ros/jazzy/opt/gz_math_vendor/lib:/opt/ros/jazzy/opt/gz_utils_vendor/lib:/opt/ros/jazzy/opt/gz_tools_vendor/lib:/opt/ros/jazzy/opt/gz_ogre_next_vendor/lib:/opt/ros/jazzy/opt/gz_dartsim_vendor/lib:/opt/ros/jazzy/opt/gz_cmake_vendor/lib:/opt/ros/jazzy/lib', 'MOTD_SHOWN': 'update-motd', 'HOME': '/home/rumdaniel', 'OLDPWD': '/home/rumdaniel/ros2_ws', 'TERM_PROGRAM_VERSION': '1.113.0', 'VSCODE_IPC_HOOK_CLI': '/run/user/1000/vscode-ipc-0a394ef8-7a53-4ac6-983b-108e80a6ac50.sock', 'ROS_PYTHON_VERSION': '3', 'VSCODE_GIT_ASKPASS_MAIN': '/home/rumdaniel/.vscode-server/bin/cfbea10c5ffb233ea9177d34726e6056e89913dc/extensions/git/dist/askpass-main.js', 'VSCODE_GIT_ASKPASS_NODE': '/home/rumdaniel/.vscode-server/bin/cfbea10c5ffb233ea9177d34726e6056e89913dc/node', 'PYDEVD_DISABLE_FILE_VALIDATION': '1', 'BUNDLED_DEBUGPY_PATH': '/home/rumdaniel/.vscode-server/extensions/ms-python.debugpy-2025.18.0-linux-x64/bundled/libs/debugpy', 'VSCODE_PYTHON_AUTOACTIVATE_GUARD': '1', 'DBUS_SESSION_BUS_ADDRESS': 'unix:path=/run/user/1000/bus', 'COLORTERM': 'truecolor', 'WSL_DISTRO_NAME': 'Ubuntu', 'WAYLAND_DISPLAY': 'wayland-0', 'COLCON_PREFIX_PATH': '/home/rumdaniel/ros2_ws/install', 'ROS_DISTRO': 'jazzy', 'LOGNAME': 'rumdaniel', 'NAME': 'Code', 'WSL_INTEROP': '/run/WSL/1322_interop', 'PULSE_SERVER': 'unix:/mnt/wslg/PulseServer', '_': '/usr/bin/colcon', 'ROS_VERSION': '2', 'TERM': 'xterm-256color', 'PATH': '/home/rumdaniel/.vscode-server/data/User/globalStorage/github.copilot-chat/debugCommand:/home/rumdaniel/.vscode-server/data/User/globalStorage/github.copilot-chat/copilotCli:/home/rumdaniel/.vscode-server/bin/cfbea10c5ffb233ea9177d34726e6056e89913dc/bin/remote-cli:/opt/ros/jazzy/opt/gz_msgs_vendor/bin:/opt/ros/jazzy/opt/gz_tools_vendor/bin:/opt/ros/jazzy/opt/gz_ogre_next_vendor/bin:/opt/ros/jazzy/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/usr/lib/wsl/lib:/mnt/c/Program Files (x86)/Beckhoff/TwinCAT/Common64/:/mnt/c/Program Files (x86)/Beckhoff/TwinCAT/Common32/:/mnt/c/Users/Rum Dániel/AppData/Local/Programs/Python/Python312/Scripts:/mnt/c/WINDOWS/system32:/mnt/c/WINDOWS:/mnt/c/WINDOWS/System32/Wbem:/mnt/c/WINDOWS/System32/WindowsPowerShell/v1.0/:/mnt/c/WINDOWS/System32/OpenSSH/:/mnt/c/Users/Rum Dániel/AppData/Local/Programs/Python/Python312/Scripts/:/mnt/c/Users/Rum Dániel/AppData/Local/Programs/Python/Python312/:/mnt/c/Users/Rum Dániel/AppData/Local/Programs/Python/Launcher/:/mnt/c/Users/Rum Dániel/AppData/Local/Microsoft/WindowsApps:/mnt/c/Users/Rum Dániel/AppData/Local/Programs/Microsoft VS Code/bin:/mnt/c/Program Files/dotnet/:/mnt/c/Program Files (x86)/GitExtensions/:/mnt/c/Program Files/Git/cmd:/mnt/c/Program Files/MATLAB/R2024b/bin:/mnt/c/Program Files (x86)/Windows Kits/10/Windows Performance Toolkit/:/mnt/c/Users/Rum Dániel/AppData/Local/Muse Hub/lib:/mnt/c/ProgramData/Beckhoff/TcPkg/:/mnt/c/Users/Rum Dániel/AppData/Local/Muse Hub/lib:/mnt/c/Users/Rum Dániel/.dotnet/tools:/snap/bin:/home/rumdaniel/.vscode-server/extensions/ms-python.debugpy-2025.18.0-linux-x64/bundled/scripts/noConfigScripts', 'XDG_RUNTIME_DIR': '/run/user/1000/', 'DISPLAY': ':0', 'VSCODE_DEBUGPY_ADAPTER_ENDPOINTS': '/home/rumdaniel/.vscode-server/extensions/ms-python.debugpy-2025.18.0-linux-x64/.noConfigDebugAdapterEndpoints/endpoint-75bafa87a305b64f.txt', 'LANG': 'en_US.UTF-8', 'PYTHONSTARTUP': '/home/rumdaniel/.vscode-server/data/User/workspaceStorage/81133248d057a5baebad584943e8a1d8/ms-python.python/pythonrc.py', 'LS_COLORS': 'rs=0:di=01;34:ln=01;36:mh=00:pi=40;33:so=01;35:do=01;35:bd=40;33;01:cd=40;33;01:or=40;31;01:mi=00:su=37;41:sg=30;43:ca=00:tw=30;42:ow=34;42:st=37;44:ex=01;32:*.tar=01;31:*.tgz=01;31:*.arc=01;31:*.arj=01;31:*.taz=01;31:*.lha=01;31:*.lz4=01;31:*.lzh=01;31:*.lzma=01;31:*.tlz=01;31:*.txz=01;31:*.tzo=01;31:*.t7z=01;31:*.zip=01;31:*.z=01;31:*.dz=01;31:*.gz=01;31:*.lrz=01;31:*.lz=01;31:*.lzo=01;31:*.xz=01;31:*.zst=01;31:*.tzst=01;31:*.bz2=01;31:*.bz=01;31:*.tbz=01;31:*.tbz2=01;31:*.tz=01;31:*.deb=01;31:*.rpm=01;31:*.jar=01;31:*.war=01;31:*.ear=01;31:*.sar=01;31:*.rar=01;31:*.alz=01;31:*.ace=01;31:*.zoo=01;31:*.cpio=01;31:*.7z=01;31:*.rz=01;31:*.cab=01;31:*.wim=01;31:*.swm=01;31:*.dwm=01;31:*.esd=01;31:*.avif=01;35:*.jpg=01;35:*.jpeg=01;35:*.mjpg=01;35:*.mjpeg=01;35:*.gif=01;35:*.bmp=01;35:*.pbm=01;35:*.pgm=01;35:*.ppm=01;35:*.tga=01;35:*.xbm=01;35:*.xpm=01;35:*.tif=01;35:*.tiff=01;35:*.png=01;35:*.svg=01;35:*.svgz=01;35:*.mng=01;35:*.pcx=01;35:*.mov=01;35:*.mpg=01;35:*.mpeg=01;35:*.m2v=01;35:*.mkv=01;35:*.webm=01;35:*.webp=01;35:*.ogm=01;35:*.mp4=01;35:*.m4v=01;35:*.mp4v=01;35:*.vob=01;35:*.qt=01;35:*.nuv=01;35:*.wmv=01;35:*.asf=01;35:*.rm=01;35:*.rmvb=01;35:*.flc=01;35:*.avi=01;35:*.fli=01;35:*.flv=01;35:*.gl=01;35:*.dl=01;35:*.xcf=01;35:*.xwd=01;35:*.yuv=01;35:*.cgm=01;35:*.emf=01;35:*.ogv=01;35:*.ogx=01;35:*.aac=00;36:*.au=00;36:*.flac=00;36:*.m4a=00;36:*.mid=00;36:*.midi=00;36:*.mka=00;36:*.mp3=00;36:*.mpc=00;36:*.ogg=00;36:*.ra=00;36:*.wav=00;36:*.oga=00;36:*.opus=00;36:*.spx=00;36:*.xspf=00;36:*~=00;90:*#=00;90:*.bak=00;90:*.crdownload=00;90:*.dpkg-dist=00;90:*.dpkg-new=00;90:*.dpkg-old=00;90:*.dpkg-tmp=00;90:*.old=00;90:*.orig=00;90:*.part=00;90:*.rej=00;90:*.rpmnew=00;90:*.rpmorig=00;90:*.rpmsave=00;90:*.swp=00;90:*.tmp=00;90:*.ucf-dist=00;90:*.ucf-new=00;90:*.ucf-old=00;90:', 'VSCODE_GIT_IPC_HANDLE': '/run/user/1000/vscode-git-b48a900e46.sock', 'TERM_PROGRAM': 'vscode', 'AMENT_PREFIX_PATH': '/home/rumdaniel/ros2_ws/install/dwa_planner:/opt/ros/jazzy', 'SHELL': '/bin/bash', 'LESSCLOSE': '/usr/bin/lesspipe %s %s', 'ROS_AUTOMATIC_DISCOVERY_RANGE': 'SUBNET', 'VSCODE_GIT_ASKPASS_EXTRA_ARGS': '', 'PWD': '/home/rumdaniel/ros2_ws/build/dwa_planner', 'TURTLEBOT3_MODEL': 'waffle', 'XDG_DATA_DIRS': '/usr/local/share:/usr/share:/var/lib/snapd/desktop', 'PYTHONPATH': '/home/rumdaniel/ros2_ws/build/dwa_planner/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/home/rumdaniel/ros2_ws/install/dwa_planner/lib/python3.12/site-packages:/home/rumdaniel/ros2_ws/install/dwa_planner/lib/python3.12/site-packages:/opt/ros/jazzy/lib/python3.12/site-packages', 'COLCON': '1', 'WSL2_GUI_APPS_ENABLED': '1', 'HOSTTYPE': 'x86_64', 'CMAKE_PREFIX_PATH': '/opt/ros/jazzy/opt/gz_sim_vendor:/opt/ros/jazzy/opt/gz_sensors_vendor:/opt/ros/jazzy/opt/gz_physics_vendor:/opt/ros/jazzy/opt/sdformat_vendor:/opt/ros/jazzy/opt/gz_gui_vendor:/opt/ros/jazzy/opt/gz_transport_vendor:/opt/ros/jazzy/opt/gz_rendering_vendor:/opt/ros/jazzy/opt/gz_plugin_vendor:/opt/ros/jazzy/opt/gz_fuel_tools_vendor:/opt/ros/jazzy/opt/gz_msgs_vendor:/opt/ros/jazzy/opt/gz_common_vendor:/opt/ros/jazzy/opt/gz_math_vendor:/opt/ros/jazzy/opt/gz_utils_vendor:/opt/ros/jazzy/opt/gz_tools_vendor:/opt/ros/jazzy/opt/gz_ogre_next_vendor:/opt/ros/jazzy/opt/gz_dartsim_vendor:/opt/ros/jazzy/opt/gz_cmake_vendor', 'WSLENV': 'ELECTRON_RUN_AS_NODE/w:'}, 'shell': False}
+[3.623727] (-) TimerEvent: {}
+[3.724325] (-) TimerEvent: {}
+[3.824943] (-) TimerEvent: {}
+[3.925680] (-) TimerEvent: {}
+[4.026267] (-) TimerEvent: {}
+[4.126842] (-) TimerEvent: {}
+[4.227537] (-) TimerEvent: {}
+[4.328152] (-) TimerEvent: {}
+[4.429061] (-) TimerEvent: {}
+[4.529967] (-) TimerEvent: {}
+[4.630938] (-) TimerEvent: {}
+[4.731631] (-) TimerEvent: {}
+[4.832191] (-) TimerEvent: {}
+[4.932906] (-) TimerEvent: {}
+[4.935973] (dwa_planner) StdoutLine: {'line': b'running develop\n'}
+[5.033194] (-) TimerEvent: {}
+[5.133980] (-) TimerEvent: {}
+[5.234792] (-) TimerEvent: {}
+[5.335558] (-) TimerEvent: {}
+[5.436270] (-) TimerEvent: {}
+[5.536940] (-) TimerEvent: {}
+[5.637754] (-) TimerEvent: {}
+[5.738863] (-) TimerEvent: {}
+[5.839518] (-) TimerEvent: {}
+[5.857011] (dwa_planner) StdoutLine: {'line': b'running egg_info\n'}
+[5.857977] (dwa_planner) StdoutLine: {'line': b'creating dwa_planner.egg-info\n'}
+[5.939838] (-) TimerEvent: {}
+[5.944739] (dwa_planner) StdoutLine: {'line': b'writing dwa_planner.egg-info/PKG-INFO\n'}
+[5.946229] (dwa_planner) StdoutLine: {'line': b'writing dependency_links to dwa_planner.egg-info/dependency_links.txt\n'}
+[5.947561] (dwa_planner) StdoutLine: {'line': b'writing entry points to dwa_planner.egg-info/entry_points.txt\n'}
+[5.948129] (dwa_planner) StdoutLine: {'line': b'writing requirements to dwa_planner.egg-info/requires.txt\n'}
+[5.948567] (dwa_planner) StdoutLine: {'line': b'writing top-level names to dwa_planner.egg-info/top_level.txt\n'}
+[5.948969] (dwa_planner) StdoutLine: {'line': b"writing manifest file 'dwa_planner.egg-info/SOURCES.txt'\n"}
+[6.040018] (-) TimerEvent: {}
+[6.096557] (dwa_planner) StdoutLine: {'line': b"reading manifest file 'dwa_planner.egg-info/SOURCES.txt'\n"}
+[6.098700] (dwa_planner) StdoutLine: {'line': b"writing manifest file 'dwa_planner.egg-info/SOURCES.txt'\n"}
+[6.140259] (-) TimerEvent: {}
+[6.169878] (dwa_planner) StdoutLine: {'line': b'running build_ext\n'}
+[6.171218] (dwa_planner) StdoutLine: {'line': b'Creating /home/rumdaniel/ros2_ws/install/dwa_planner/lib/python3.12/site-packages/dwa-planner.egg-link (link to .)\n'}
+[6.173521] (dwa_planner) StdoutLine: {'line': b'Installing dwa_node script to /home/rumdaniel/ros2_ws/install/dwa_planner/lib/dwa_planner\n'}
+[6.175041] (dwa_planner) StdoutLine: {'line': b'\n'}
+[6.176045] (dwa_planner) StdoutLine: {'line': b'Installed /home/rumdaniel/ros2_ws/build/dwa_planner\n'}
+[6.176557] (dwa_planner) StdoutLine: {'line': b'running symlink_data\n'}
+[6.177064] (dwa_planner) StdoutLine: {'line': b'symbolically linking /home/rumdaniel/ros2_ws/build/dwa_planner/package.xml -> /home/rumdaniel/ros2_ws/install/dwa_planner/share/dwa_planner\n'}
+[6.177736] (dwa_planner) StdoutLine: {'line': b'creating /home/rumdaniel/ros2_ws/install/dwa_planner/share/dwa_planner/launch\n'}
+[6.178074] (dwa_planner) StdoutLine: {'line': b'symbolically linking /home/rumdaniel/ros2_ws/build/dwa_planner/launch/dwa_launch.py -> /home/rumdaniel/ros2_ws/install/dwa_planner/share/dwa_planner/launch\n'}
+[6.240559] (-) TimerEvent: {}
+[6.275329] (dwa_planner) CommandEnded: {'returncode': 0}
+[6.325189] (dwa_planner) JobEnded: {'identifier': 'dwa_planner', 'rc': 0}
+[6.328803] (-) EventReactorShutdown: {}
