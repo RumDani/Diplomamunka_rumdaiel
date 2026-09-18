@@ -1,0 +1,178 @@
+digraph AStarCurrentCode {
+    graph [
+        label="A* jelenlegi kodjanak fuggvenyhivasai"
+        labelloc=t
+        labeljust=c
+        fontsize=22
+        fontname="Arial Bold"
+        rankdir=TB
+        splines=ortho
+        nodesep=0.35
+        ranksep=0.55
+        pad=0.25
+        bgcolor="white"
+    ]
+
+    node [
+        shape=box
+        style="rounded,filled"
+        fontname="Arial"
+        fontsize=11
+        margin="0.16,0.10"
+        color="#475569"
+        penwidth=1.5
+    ]
+
+    edge [
+        fontname="Arial"
+        fontsize=9
+        color="#64748b"
+        penwidth=1.2
+        arrowsize=0.7
+    ]
+
+    subgraph cluster_files {
+        label="Megvalositott fajlok"
+        fontname="Arial Bold"
+        fontsize=14
+        color="#166534"
+        style="rounded"
+        bgcolor="#f0fdf4"
+
+        grid_file [label="grid_map.py\nGridMap osztaly\n2D racsterkep", fillcolor="#dcfce7", color="#15803d"]
+        astar_file [label="astar_baseline.py\nklasszikus A*", fillcolor="#dcfce7", color="#15803d"]
+        simulation_file [label="astar_simulation.py\nmatplotlib szimulacio", fillcolor="#dcfce7", color="#15803d"]
+    }
+
+    start [label="astar_search(...)\nbemenet: grid_map, start, goal, diagonal\nreturn_details=True a szimulaciohoz", shape=parallelogram, fillcolor="#dbeafe", color="#2563eb"]
+
+    subgraph cluster_runtime {
+        label="astar_search() teljes futasi folyamata"
+        fontname="Arial Bold"
+        fontsize=14
+        color="#2563eb"
+        style="rounded"
+        bgcolor="#eff6ff"
+
+        inside [label="grid_map.is_inside(...)\nstart es cel a terkepen belul?", fillcolor="#dbeafe", color="#2563eb"]
+        free [label="grid_map.is_free(...)\nstart es cel szabad?", fillcolor="#dbeafe", color="#2563eb"]
+        invalid [label="Hiba\nValueError", shape=parallelogram, fillcolor="#fee2e2", color="#dc2626"]
+    initialize [label="2. Kereses elokeszitese\nopen_nodes = []\ncame_from = {}\ng_costs[start] = 0", fillcolor="#dbeafe", color="#2563eb"]
+    first_heuristic [label="_heuristic(start, goal, diagonal)\nkezdo f_cost kiszamitasa", fillcolor="#dbeafe", color="#2563eb"]
+    add_start [label="Kezdo cella bekerul\naz open_nodes listaba", fillcolor="#dbeafe", color="#2563eb"]
+
+        has_nodes [label="Van meg elem\naz open_nodes listaban?", shape=diamond, fillcolor="#dbeafe", color="#2563eb"]
+        choose [label="Legkisebb prioritasi elem\nbest_node = min(open_nodes)\nopen_nodes.remove(best_node)", fillcolor="#dbeafe", color="#2563eb"]
+        read_best [label="Az elem adatainak kiolvasasa\nf_cost | g_cost | current_position", fillcolor="#dbeafe", color="#2563eb"]
+        old_entry [label="Dragabb regi bejegyzes?\ncurrent_g_cost > g_costs[current_position]", shape=diamond, fillcolor="#dbeafe", color="#2563eb"]
+        goal_check [label="A current_position\na celcella?", shape=diamond, fillcolor="#dbeafe", color="#2563eb"]
+        neighbors [label="grid_map.get_neighbors(...)\ncsak szabad szomszedok", fillcolor="#dbeafe", color="#2563eb"]
+        movement [label="_movement_cost(current, neighbor)\negyenes vagy atlos lepes", fillcolor="#dbeafe", color="#2563eb"]
+        new_g [label="new_g_cost =\ncurrent_g_cost + movement_cost", fillcolor="#dbeafe", color="#2563eb"]
+        better [label="Jobb az uj ut?\nnew_g_cost < regi koltseg", shape=diamond, fillcolor="#dbeafe", color="#2563eb"]
+        update [label="Adatok frissitese\ncame_from[neighbor] = current_position\ng_costs[neighbor] = new_g_cost", fillcolor="#dbeafe", color="#2563eb"]
+        neighbor_heuristic [label="_heuristic(neighbor, goal, diagonal)\nf_cost = new_g_cost + h_cost", fillcolor="#dbeafe", color="#2563eb"]
+        add_neighbor [label="A* hozzaadja a szomszedot\naz open_nodes listahoz", fillcolor="#dbeafe", color="#2563eb"]
+        no_path [label="return None\nnincs elerheto ut", shape=parallelogram, fillcolor="#fee2e2", color="#dc2626"]
+    reconstruct [label="_reconstruct_path(came_from, current_position)\ncelbol visszafele koveti az elozo cellakat", fillcolor="#dcfce7", color="#15803d"]
+    result [label="A* eredmeny\npath + expanded_nodes", shape=parallelogram, fillcolor="#dcfce7", color="#15803d"]
+    }
+
+    subgraph cluster_simulation {
+        label="astar_simulation.py jelenlegi hivasai"
+        fontname="Arial Bold"
+        fontsize=13
+        color="#7c3aed"
+        style="rounded"
+        bgcolor="#faf5ff"
+
+        simulation_start [label="run_simulation()\nszimulacio inditasa", fillcolor="#ede9fe", color="#7c3aed"]
+        demo_map [label="create_demo_map()\nismert statikus terkep\nstart es cel", fillcolor="#ede9fe", color="#7c3aed"]
+        planning_data [label="expanded_nodes\nA* altal vizsgalt cellak", fillcolor="#ede9fe", color="#7c3aed"]
+        trajectory [label="create_robot_trajectory()\nA* cellautvonal ->\nvilagkoordinatas robotpontok", fillcolor="#ede9fe", color="#7c3aed"]
+        plot [label="plot_simulation()\n1. tervezes animacio\n2. robot animacio", fillcolor="#ede9fe", color="#7c3aed"]
+        draw [label="draw_map()\nakadalyok, start, cel, tengelyek", fillcolor="#ede9fe", color="#7c3aed"]
+        animation [label="robot pont + nyom\nFuncAnimation frissitese", shape=parallelogram, fillcolor="#ede9fe", color="#7c3aed"]
+
+        simulation_start -> demo_map
+        demo_map -> grid_inflate [label="robot_radius"]
+        grid_inflate -> start [label="kitagitott GridMap, start, goal"]
+        result -> planning_data [label="expanded_nodes"]
+        result -> trajectory [label="path"]
+        planning_data -> plot [label="vizsgalt cellak"]
+        trajectory -> plot [label="trajectory"]
+        plot -> draw
+        plot -> animation
+    }
+
+    grid_file -> start [label="GridMap objektum"]
+    astar_file -> start [label="belepesi fuggveny"]
+    simulation_file -> simulation_start [label="szimulacio belepesi pont"]
+
+    start -> inside
+    inside -> free [label="ervenyes"]
+    inside -> invalid [label="nem ervenyes"]
+    free -> initialize [label="szabad"]
+    free -> invalid [label="foglalt"]
+    initialize -> first_heuristic
+    first_heuristic -> add_start
+    add_start -> has_nodes
+
+    has_nodes -> choose [label="igen"]
+    has_nodes -> no_path [label="nem"]
+    choose -> read_best
+    read_best -> old_entry
+    old_entry -> has_nodes [label="igen: kihagy"]
+    old_entry -> goal_check [label="nem"]
+    goal_check -> reconstruct [label="igen"]
+    reconstruct -> result
+    goal_check -> neighbors [label="nem"]
+    neighbors -> movement
+    movement -> new_g
+    new_g -> better
+    better -> has_nodes [label="nem: nem frissit"]
+    better -> update [label="igen"]
+    update -> neighbor_heuristic
+    neighbor_heuristic -> add_neighbor
+    add_neighbor -> has_nodes
+
+    subgraph cluster_grid_calls {
+        label="A GridMap aktualis, A* altal hasznalt metodusai"
+        fontname="Arial Bold"
+        fontsize=13
+        color="#15803d"
+        style="rounded,dashed"
+        bgcolor="#f7fff8"
+
+        grid_inside [label="is_inside(row, column)\nindex hatar ellenorzese", fillcolor="#dcfce7", color="#15803d"]
+        grid_free [label="is_free(row, column)\ncell erteke 0?", fillcolor="#dcfce7", color="#15803d"]
+        grid_neighbors [label="get_neighbors(row, column, diagonal)\nszabad szomszedok visszaadasa", fillcolor="#dcfce7", color="#15803d"]
+        grid_inflate [label="inflate_obstacles(radius)\nrobotbiztonsagi sav", fillcolor="#dcfce7", color="#15803d"]
+        directions [label="1. Alapiranyok\nfel, le, balra, jobbra", fillcolor="#dcfce7", color="#15803d"]
+        diagonal_check [label="2. diagonal igaz?\n+4 atlos irany", shape=diamond, fillcolor="#dcfce7", color="#15803d"]
+        candidate_loop [label="3. Iranyok egyenkenti\nvegigvizsgalasa", fillcolor="#dcfce7", color="#15803d"]
+        corner_check [label="Atlos sarokvagas?\nket oldalso cella szabad?", shape=diamond, fillcolor="#dcfce7", color="#15803d"]
+        append_neighbor [label="4. Ha szabad:\nneighbors.append(...) ", fillcolor="#dcfce7", color="#15803d"]
+        return_neighbors [label="5. return neighbors\nA* ezt kapja vissza", shape=parallelogram, fillcolor="#dcfce7", color="#15803d"]
+    }
+
+    inside -> grid_inside [style=dashed, color="#15803d"]
+    free -> grid_free [style=dashed, color="#15803d"]
+    neighbors -> grid_neighbors [style=dashed, color="#15803d"]
+    grid_free -> grid_inside [style=dashed, label="belul van-e?", color="#15803d"]
+    grid_neighbors -> directions [color="#15803d"]
+    directions -> diagonal_check [color="#15803d"]
+    diagonal_check -> candidate_loop [label="nem", color="#15803d"]
+    diagonal_check -> candidate_loop [label="igen", color="#15803d"]
+    candidate_loop -> grid_free [label="minden iranyra", color="#15803d"]
+    grid_free -> corner_check [label="igen: atlos", color="#15803d"]
+    grid_free -> append_neighbor [label="igen: egyenes", color="#15803d"]
+    corner_check -> append_neighbor [label="nem veszelyes", color="#15803d"]
+    corner_check -> candidate_loop [label="veszelyes: kihagy", color="#15803d"]
+    grid_free -> candidate_loop [label="nem: kihagy", color="#15803d"]
+    append_neighbor -> candidate_loop [label="kovetkezo irany", color="#15803d"]
+    candidate_loop -> return_neighbors [label="minden irany kesz", color="#15803d"]
+    return_neighbors -> movement [style=dashed, label="szabad szomszedok vissza az A*-nak", color="#15803d"]
+
+    labelloc="t"
+}

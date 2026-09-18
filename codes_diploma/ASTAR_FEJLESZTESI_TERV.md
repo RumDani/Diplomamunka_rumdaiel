@@ -11,6 +11,7 @@ A fejlesztés fő sorrendje:
 ```text
 Rácsos térkép
     -> klasszikus A*
+    -> ismert statikus térképes matplotlib-szimuláció
     -> továbbfejlesztett A* változatok
     -> útvonal-simítás
     -> mérési és összehasonlítási rendszer
@@ -119,6 +120,7 @@ codes_diploma/
         __init__.py
         grid_map.py
         astar_baseline.py
+        astar_simulation.py
         astar_variants.py
         path_smoothing.py
         scenarios.py
@@ -129,6 +131,7 @@ codes_diploma/
         tests/
             test_grid_map.py
             test_astar_baseline.py
+            test_astar_simulation.py
             test_path_smoothing.py
         results/
             raw/
@@ -142,6 +145,7 @@ A fájlok feladata:
 |---|---|
 | `grid_map.py` | Rácstérkép, cellák, akadályok és robot-infláció |
 | `astar_baseline.py` | Klasszikus A* |
+| `astar_simulation.py` | Ismert statikus térképes matplotlib-szimuláció |
 | `astar_variants.py` | EA*, EBA*, EBHA*, EBHSA* változatok |
 | `path_smoothing.py` | Kollineáris szűrés és inflection bypass |
 | `scenarios.py` | Tesztpályák előállítása |
@@ -181,6 +185,12 @@ $$
 
 ## Fázis 2: Klasszikus A*
 
+### Jelenlegi állapot
+
+Az első referenciaimplementáció elkészült az `astar_project/astar_baseline.py` fájlban. Az `astar_search` 4-szomszédos keresést Manhattan-heurisztikával, valamint opcionális 8-szomszédos keresést diagonális költséggel támogat. A működést célzott `unittest` tesztek ellenőrzik: egyenes út, akadálykerülés, elérhetetlen cél, átlós mozgás és érvénytelen kezdőcella.
+
+Ez még a klasszikus referenciafázis része; továbbfejlesztett heurisztika, irányszűrés és útvonal-simítás csak ennek stabil ellenőrzése után következhet.
+
 A referenciaalgoritmus értékelőfüggvénye:
 
 $$
@@ -219,6 +229,43 @@ A prioritási sorhoz min-heap használata javasolt.
 - Akadály esetén kerülőutat keres.
 - Elérhetetlen cél esetén szabályosan jelez.
 - A visszafejtett útvonal szomszédos cellákból áll.
+
+## Fázis 2.5: Ismert statikus térképes matplotlib-szimuláció
+
+### Cél
+
+A klasszikus A* után egy egyszerű, vizuálisan ellenőrizhető szimuláció következik. A szimuláció ismert, statikus rácstérképet használ: az akadályok már a tervezés előtt benne vannak a `GridMap` objektumban.
+
+### Megvalósított fájl
+
+Az `astar_project/astar_simulation.py`:
+
+- létrehoz egy demo rácstérképet statikus akadályokkal;
+- meghívja a klasszikus `astar_search` függvényt;
+- a robotot egyszerű, `0,08 m` sugarú körként jeleníti meg;
+- a robot sugarával kitágított akadálytérképen tervezi az A* útvonalat;
+- az A* cellaútvonalát világkoordinátás cellaközéppontokká alakítja;
+- átlós A* keresést használ, ezért az akadálymentes részeken nem csak derékszögben tud haladni;
+- megőrzi és animálja az A* által kibővített cellák sorrendjét;
+- a szomszédos cellaközéppontok között egyszerű robottrajektóriát készít;
+- matplotlibben kirajzolja a térképet, akadályokat, A* útvonalat és a robot nyomát;
+- animálja a robot pontját a tervezett útvonalon.
+
+Ez még nem DWA és nem teljes fizikai robotmodell. A robot itt egyszerű kör alakú testként mozog a már ismert globális útvonalon. A megjelenítés először a tervezési folyamatot, utána a robot mozgását mutatja. Ez szándékos alapállapot: először azt ellenőrizzük, hogy a térkép, az akadályinfláció, az A* útvonal, a vizsgált cellák és a vizuális mozgás egymással helyesen kapcsolódik-e.
+
+### Futtatás
+
+```text
+python -m codes_diploma.astar_project.astar_simulation
+```
+
+### Ellenőrzés
+
+- A demo térképen létezik út a start és a cél között.
+- Az útvonal első cellája a start, utolsó cellája a cél.
+- Az útvonal csak szabad cellákból áll.
+- A robottrajektória a start világkoordinátájáról indul és a cél világkoordinátáján végződik.
+- A matplotlib ábra ablak létrehozható akkor is, ha a teszt nem jelenít meg ablakot.
 
 ---
 

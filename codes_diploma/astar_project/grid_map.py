@@ -96,6 +96,33 @@ class GridMap:
             radius = getattr(obstacle, "radius", 0.0)
             self.add_obstacle_world(obstacle.x, obstacle.y, radius)
 
+    def inflate_obstacles(self, radius):
+        """Biztonsagi tavolsaggal kitagitja az akadalycellakat."""
+        if radius < 0:
+            raise ValueError("A biztonsagi sugar nem lehet negativ.")
+        if radius == 0:
+            return
+
+        obstacle_cells = [
+            (row, column)
+            for row in range(self.height)
+            for column in range(self.width)
+            if self.grid[row][column] == 1
+        ]
+        cell_radius = math.ceil(radius / self.resolution)
+
+        for obstacle_row, obstacle_column in obstacle_cells:
+            for row in range(
+                obstacle_row - cell_radius,
+                obstacle_row + cell_radius + 1,
+            ):
+                for column in range(
+                    obstacle_column - cell_radius,
+                    obstacle_column + cell_radius + 1,
+                ):
+                    if self.is_inside(row, column):
+                        self.grid[row][column] = 1
+
     def get_neighbors(self, row, column, diagonal=False):
         """Visszaadja a szabad szomszedos cellakat."""
         directions = [(1, 0), (-1, 0), (0, 1), (0, -1)]
@@ -108,6 +135,12 @@ class GridMap:
             new_row = row + row_change
             new_column = column + column_change
             if self.is_free(new_row, new_column):
+                is_diagonal = row_change != 0 and column_change != 0
+                if is_diagonal:
+                    if not self.is_free(row, new_column):
+                        continue
+                    if not self.is_free(new_row, column):
+                        continue
                 neighbors.append((new_row, new_column))
 
         return neighbors
