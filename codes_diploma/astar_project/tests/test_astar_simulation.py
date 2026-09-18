@@ -49,6 +49,41 @@ class TestAstarSimulation(unittest.TestCase):
         self.assertIsNotNone(robot_animation)
         figure.clf()
 
+    def test_next_button_advances_the_current_search_cell(self):
+        grid_map, start, goal = create_demo_map()
+        result = astar_search(
+            grid_map,
+            start,
+            goal,
+            diagonal=True,
+            return_details=True,
+        )
+        trajectory = create_robot_trajectory(grid_map, result["path"])
+
+        figure, _ = plot_simulation(
+            grid_map,
+            result["path"],
+            trajectory,
+            start,
+            goal,
+            expanded_nodes=result["expanded_nodes"],
+            search_steps=result["search_steps"],
+            show=False,
+        )
+
+        map_axes = figure.axes[1]
+        current_search = next(
+            artist
+            for artist in map_axes.collections
+            if artist.get_label() == "C: aktualis cella"
+        )
+        first_position = tuple(current_search.get_offsets()[0])
+        figure._astar_next_frame()
+        second_position = tuple(current_search.get_offsets()[0])
+
+        self.assertNotEqual(first_position, second_position)
+        figure.clf()
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -133,6 +133,17 @@ def astar_search(grid_map, start, goal, diagonal=False, return_details=False):
 			for entry in open_nodes
 			if entry[1] <= g_costs.get(entry[2], math.inf)
 		]
+		priority_queue = []
+		for priority, cost, position in sorted(valid_open_nodes):
+			priority_queue.append(
+				{
+					"position": position,
+					"g": cost,
+					"h": priority - cost,
+					"f": priority,
+				}
+			)
+		search_steps[-1]["priority_queue"] = priority_queue
 		if valid_open_nodes:
 			search_steps[-1]["next_position"] = min(valid_open_nodes)[2]
 		else:

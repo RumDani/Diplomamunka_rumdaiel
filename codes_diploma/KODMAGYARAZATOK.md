@@ -297,6 +297,10 @@ A `came_from` nem a teljes útvonalat tárolja minden lépésnél, hanem szülő
                 {"position": (0, 1), "g": 1.0, "h": 3.0, "f": 4.0},
                 {"position": (1, 0), "g": 1.0, "h": 3.0, "f": 4.0},
             ],
+            "priority_queue": [
+                {"position": (0, 1), "g": 1.0, "h": 3.0, "f": 4.0},
+                {"position": (1, 0), "g": 1.0, "h": 3.0, "f": 4.0},
+            ],
         },
     ],
 }
@@ -316,6 +320,13 @@ prioritást, akkor ez lesz a következő `C`, később pedig `X`; `(1, 0)` nem t
 el, csak várakozó jelöltként marad a prioritási sorban. Ezért az animációban
 az `N` karikák mutatják a helyi döntési lehetőségeket, az `X` pontok pedig a
 tényleges feldolgozási sorrendet.
+
+A `priority_queue` ugyanezen lépés után a még várakozó, érvényes jelölteket
+tárolja `f` szerint rendezve. A szimuláció bal oldali panelje ezt a listát
+mutatja. A `>>` jelölés mindig a lista első elemét jelenti, vagyis azt a
+cellát, amelyet az A* a következő körben kiválasztana. A lista minden kézi
+`Következő` lépésnél frissül, ezért a térkép és a prioritási sorrend együtt
+magyarázza az útvonal kialakulását.
 
 A szimuláció a súlyokat is kiírja az `N` jelölések mellett:
 
@@ -515,23 +526,24 @@ figure, robot_animation = plot_simulation(
 
 Ez kapcsolja össze a térképet, az útvonalat és a robotot:
 
-1. létrehozza a matplotlib ábrát;
+1. kétpaneles matplotlib ábrát hoz létre: bal oldalon a prioritási sort, jobb oldalon a térképet;
 2. kirajzolja a statikus akadályokat és a teljes cellarácsot;
 3. halvány világoskék pontokkal megmutatja az A* által már vizsgált (`X`) cellákat;
-4. türkiz karikákkal és `N` betűvel megmutatja az aktuális cella szomszédjelöltjeit;
-5. az `N` jelöléseknél kiírja a jelölt `g`, `h` és `f` súlyát;
-6. vékony türkiz vonalakkal összeköti az aktuális cellát a szomszédjelöltekkel;
-7. lila vonallal összeköti a vizsgálati sorrend cellaközéppontjait;
+4. a bal oldali listában `g`, `h`, `f` értékekkel és `>>` jelöléssel mutatja a következő prioritási cellát;
+5. türkiz karikákkal és `N` betűvel megmutatja az aktuális cella szomszédjelöltjeit;
+6. az `N` jelöléseknél kiírja a jelölt `g`, `h` és `f` súlyát;
+7. vékony türkiz vonalakkal összeköti az aktuális cellát a szomszédjelöltekkel;
 8. narancssárga ponttal és `C` betűvel kiemeli az A* éppen vizsgált celláját;
-9. a végső útvonalat kék vonallal és `O` betűvel csak a tervezési szakasz végén jeleníti meg;
-10. rövid szünetet tart, hogy a tervezés eredménye megfigyelhető legyen;
-11. ezután narancssárga körként mozgatja a robotot, és rajzolja a robot nyomát;
+9. a végső útvonalat kék vonallal és `O` betűvel a tervezési szakasz után jeleníti meg;
+10. a `Következő` gombbal vagy a jobb nyíllal egyetlen lépést halad;
+11. az `Újrakezdés` gomb visszaállítja az első lépést;
 12. a cél elérésekor kiírja, hogy `A* utvonal kesz - cel elerve`.
 
-A szimuláció automatikusan fut, `650 ms` képkockánként. Így a keresési lépések
-egymás után maguktól megjelennek. A régi `X` cellák csak halvány pontként
-maradnak a térképen, a részletes súlyok pedig csak az aktuális `N` szomszédoknál
-láthatók, hogy az ábra ne legyen túlzsúfolt.
+A szimuláció kézi léptetésű. A `Következő` gomb vagy a jobb nyíl egyetlen
+keresési képkockát továbbít, az `Újrakezdés` pedig visszaállítja az első
+lépést. A régi `X` cellák csak halvány pontként maradnak a térképen, a
+részletes súlyok pedig csak az aktuális `N` szomszédoknál láthatók, hogy az
+ábra ne legyen túlzsúfolt.
 
 A betűk jelentése a képen:
 

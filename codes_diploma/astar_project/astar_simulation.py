@@ -5,6 +5,7 @@ import math
 import matplotlib.animation as animation
 import matplotlib.pyplot as plt
 from matplotlib.patches import Circle, Rectangle
+from matplotlib.widgets import Button
 
 from .astar_baseline import astar_search
 from .grid_map import GridMap
@@ -111,13 +112,35 @@ def plot_simulation(
     show=True,
 ):
     """Megjeleniti az A* tervezest, majd a robot mozgasat."""
-    figure, axes = plt.subplots(figsize=(12, 7))
+    figure = plt.figure(figsize=(14, 7))
+    grid = figure.add_gridspec(1, 2, width_ratios=(1.05, 2.5))
+    priority_axes = figure.add_subplot(grid[0, 0])
+    axes = figure.add_subplot(grid[0, 1])
+    figure.subplots_adjust(left=0.04, right=0.98, bottom=0.14, wspace=0.08)
     draw_map(axes, grid_map, start, goal)
 
     if expanded_nodes is None:
         expanded_nodes = []
     if search_steps is None:
         search_steps = []
+
+    priority_axes.set_title("Prioritási sor", fontsize=12, pad=10)
+    priority_axes.set_xticks([])
+    priority_axes.set_yticks([])
+    priority_axes.set_xlim(0, 1)
+    priority_axes.set_ylim(0, 1)
+    priority_axes.set_facecolor("#f4f7f9")
+    priority_text = priority_axes.text(
+        0.04,
+        0.96,
+        "",
+        transform=priority_axes.transAxes,
+        family="monospace",
+        fontsize=8,
+        color="#263238",
+        va="top",
+        linespacing=1.45,
+    )
 
     expanded_world = [
         grid_map.grid_to_world(row, column)
@@ -296,6 +319,40 @@ def plot_simulation(
         current_label.set_position(position)
         current_label.set_visible(visible)
 
+    def set_priority_panel(frame):
+        if frame < planning_frames and frame < len(search_steps):
+            step = search_steps[frame]
+            priority_rows = step.get("priority_queue", [])
+            lines = [
+                f"Lépés: {frame + 1}/{planning_frames}",
+                f"Aktuális C: {step['current']}",
+                "",
+                "Sorrend: legkisebb f elöl",
+                "pozíció       g     h     f",
+                "--------------------------------",
+            ]
+            for index, row in enumerate(priority_rows[:16], start=1):
+                marker = ">>" if index == 1 else "  "
+                lines.append(
+                    f"{marker}{index:2d}. {str(row['position']):9s} "
+                    f"{row['g']:5.1f} {row['h']:5.1f} {row['f']:5.1f}"
+                )
+            if not priority_rows:
+                lines.append("(üres prioritási sor)")
+            priority_text.set_text("\n".join(lines))
+        elif frame < movement_start:
+            priority_text.set_text(
+                "A* tervezés kész\n\n"
+                "A kék O vonal a\n"
+                "visszaépített útvonal."
+            )
+        else:
+            priority_text.set_text(
+                "Robotmozgás\n\n"
+                "A robot most az O\n"
+                "útvonalat követi."
+            )
+
     def set_neighbors(step_index):
         if step_index >= len(search_steps):
             neighbors = []
@@ -365,6 +422,7 @@ def plot_simulation(
             set_label_visibility(expanded_labels, 0)
             set_label_visibility(path_labels, 0)
             set_neighbors(frame)
+            set_priority_panel(frame)
             current_search.set_offsets([expanded_world[frame]])
             current_step = search_steps[frame]
             current_label.set_text(
@@ -387,6 +445,7 @@ def plot_simulation(
             set_label_visibility(expanded_labels, 0)
             set_label_visibility(path_labels, len(path_labels))
             set_neighbors(len(search_steps))
+            set_priority_panel(frame)
             decision_text.set_text("A* kesz: az O jelolesu utvonal a visszaepitett legjobb ut.")
             current_search.set_offsets([[math.nan, math.nan]])
             set_current_label((math.nan, math.nan), False)
@@ -404,6 +463,7 @@ def plot_simulation(
             set_label_visibility(expanded_labels, 0)
             set_label_visibility(path_labels, len(path_labels))
             set_neighbors(len(search_steps))
+            set_priority_panel(frame)
             decision_text.set_text("A* kesz: az O jelolesu utvonalon mozog a robot.")
             current_search.set_offsets([[math.nan, math.nan]])
             set_current_label((math.nan, math.nan), False)
@@ -435,6 +495,7 @@ def plot_simulation(
             status,
             current_label,
             decision_text,
+            priority_text,
             *neighbor_labels,
             *expanded_labels,
             *path_labels,
@@ -446,8 +507,44 @@ def plot_simulation(
         frames=total_frames,
         interval=planning_interval,
         repeat=False,
-        blit=True,
+        blit=False,
     )
+
+    figure.canvas.mpl_disconnect(robot_animation._first_draw_id)
+    robot_animation.event_source.stop()
+    figure._astar_animation = robot_animation
+    manual_frame = 0
+    update(manual_frame)
+
+    next_button_axes = figure.add_axes((0.68, 0.035, 0.13, 0.06))
+    reset_button_axes = figure.add_axes((0.83, 0.035, 0.13, 0.06))
+    next_button = Button(next_button_axes, "Következő")
+    reset_button = Button(reset_button_axes, "Újrakezdés")
+
+    def next_frame(_event=None):
+        nonlocal manual_frame
+        manual_frame = min(manual_frame + 1, total_frames - 1)
+        update(manual_frame)
+        figure.canvas.draw()
+
+    def reset_simulation(_event=None):
+        nonlocal manual_frame
+        manual_frame = 0
+        update(manual_frame)
+        figure.canvas.draw()
+
+    next_button.on_clicked(next_frame)
+    reset_button.on_clicked(reset_simulation)
+    figure._astar_controls = (next_button, reset_button)
+    figure._astar_next_frame = next_frame
+    figure._astar_reset = reset_simulation
+
+    figure.canvas.mpl_connect(
+        "key_press_event",
+        lambda event: next_frame() if event.key in ("right", " ") else None,
+    )
+    figure.canvas.draw()
+    robot_animation._draw_was_started = True
 
     if show:
         plt.show()

@@ -57,6 +57,8 @@ class TestAstarSearch(unittest.TestCase):
 		self.assertEqual(result["search_steps"][0]["neighbor_scores"][0]["h"], 1.0)
 		self.assertEqual(result["search_steps"][0]["neighbor_scores"][0]["f"], 2.0)
 		self.assertEqual(result["search_steps"][0]["next_position"], (0, 1))
+		self.assertEqual(result["search_steps"][0]["priority_queue"][0]["position"], (0, 1))
+		self.assertEqual(result["search_steps"][0]["priority_queue"][0]["f"], 2.0)
 
 	def test_rejects_blocked_start_or_goal(self):
 		grid_map = GridMap(width=2, height=2)
