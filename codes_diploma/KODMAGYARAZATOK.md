@@ -286,10 +286,48 @@ A `came_from` nem a teljes útvonalat tárolja minden lépésnél, hanem szülő
 {
     "path": [(0, 0), (1, 1), (2, 2)],
     "expanded_nodes": [(0, 0), (0, 1), (1, 1)],
+    "search_steps": [
+        {
+            "current": (0, 0),
+            "current_g": 0.0,
+            "current_h": 4.0,
+            "current_f": 4.0,
+            "neighbors": [(0, 1), (1, 0)],
+            "neighbor_scores": [
+                {"position": (0, 1), "g": 1.0, "h": 3.0, "f": 4.0},
+                {"position": (1, 0), "g": 1.0, "h": 3.0, "f": 4.0},
+            ],
+        },
+    ],
 }
 ```
 
 Az `expanded_nodes` a tervezés megfigyeléséhez kell. A cellák sorrendben kerülnek bele, amikor az A* ténylegesen kiválasztja és feldolgozza őket. A matplotlib szimuláció ezeket világoskék pontokként vagy cellaközéppontokként jeleníti meg.
+
+Az új `search_steps` minden feldolgozott aktuális cellához eltárolja a
+`GridMap.get_neighbors()` által visszaadott szomszédokat. Ez fontos különbség:
+az A* egy aktuális cella összes engedélyezett szomszédját megvizsgálja, de nem
+mindegyikből lesz következő `X` cella. A szomszédok költségét összehasonlítja,
+majd a prioritási sorból a legjobb `f = g + h` értékű cellát választja ki.
+
+Például a `(0, 0)` cellából a szabad szomszédok lehetnek `(0, 1)` és `(1, 0)`.
+Mindkettő `N` jelölést kap a szimulációban. Ha `(0, 1)` kapja a kedvezőbb
+prioritást, akkor ez lesz a következő `C`, később pedig `X`; `(1, 0)` nem tűnik
+el, csak várakozó jelöltként marad a prioritási sorban. Ezért az animációban
+az `N` karikák mutatják a helyi döntési lehetőségeket, az `X` pontok pedig a
+tényleges feldolgozási sorrendet.
+
+A szimuláció a súlyokat is kiírja az `N` jelölések mellett:
+
+- `g`: a starttól a jelöltig vezető eddigi költség;
+- `h`: a jelölttől a célig becsült költség;
+- `f`: `g + h`, vagyis az A* által összehasonlított teljes becslés.
+
+Például egy vízszintes lépésnél, ha a jelöltig `g=1,0`, a célig becsült
+távolság pedig `h=3,0`, akkor `f=4,0`. Két azonos `f` értékű jelölt közül a
+program a tuple-sorrend és a pillanatnyi prioritási lista alapján választ; ez
+nem azt jelenti, hogy valamelyik cellát kihagyta, hanem azt, hogy az egyik
+jelölt előbb kerül feldolgozásra.
 
 ## 5. A heurisztika
 
@@ -479,13 +517,33 @@ Ez kapcsolja össze a térképet, az útvonalat és a robotot:
 
 1. létrehozza a matplotlib ábrát;
 2. kirajzolja a statikus akadályokat és a teljes cellarácsot;
-3. világoskék cellaközéppontokkal megmutatja az A* által vizsgált cellákat;
-4. kékkel kirajzolja a végső A* útvonalat;
-5. a tervezési animáció után narancssárgával rajzolja a robot nyomát;
-6. narancssárga ponttal mutatja a robot aktuális helyét;
-7. a cél elérésekor kiírja, hogy `A* utvonal kesz - cel elerve`.
+3. halvány világoskék pontokkal megmutatja az A* által már vizsgált (`X`) cellákat;
+4. türkiz karikákkal és `N` betűvel megmutatja az aktuális cella szomszédjelöltjeit;
+5. az `N` jelöléseknél kiírja a jelölt `g`, `h` és `f` súlyát;
+6. vékony türkiz vonalakkal összeköti az aktuális cellát a szomszédjelöltekkel;
+7. lila vonallal összeköti a vizsgálati sorrend cellaközéppontjait;
+8. narancssárga ponttal és `C` betűvel kiemeli az A* éppen vizsgált celláját;
+9. a végső útvonalat kék vonallal és `O` betűvel csak a tervezési szakasz végén jeleníti meg;
+10. rövid szünetet tart, hogy a tervezés eredménye megfigyelhető legyen;
+11. ezután narancssárga körként mozgatja a robotot, és rajzolja a robot nyomát;
+12. a cél elérésekor kiírja, hogy `A* utvonal kesz - cel elerve`.
 
-A `show=False` használható teszteléskor, így az ábra létrejön, de nem nyílik meg grafikus ablak.
+A szimuláció automatikusan fut, `650 ms` képkockánként. Így a keresési lépések
+egymás után maguktól megjelennek. A régi `X` cellák csak halvány pontként
+maradnak a térképen, a részletes súlyok pedig csak az aktuális `N` szomszédoknál
+láthatók, hogy az ábra ne legyen túlzsúfolt.
+
+A betűk jelentése a képen:
+
+- `X`: az A* ezt a cellát már kivette a prioritási sorból és megvizsgálta; a képen ez szándékosan pontként jelenik meg, hogy ne legyen minden régi cellán külön felirat;
+- `C`: az animáció adott pillanatában ezt a cellát dolgozza fel az A*;
+- `N`: az aktuális cellából elérhető szomszédjelölt;
+- `O`: ez a cella a végső, visszaépített útvonal része.
+
+Ezért az `X` cellákat összekötő vonal nem a robot útvonala. Ez a keresés sorrendjét mutatja,
+amely kanyaroghat és sok olyan cellát is érinthet, amely végül nem kerül bele az `O` útvonalba.
+
+A `show=False` használható teszteléskor, így az ábra létrejön, de nem nyílik meg grafikus ablak. A szimuláció szándékosan lassú, hogy külön megfigyelhető legyen az A* keresése és a robot későbbi mozgása.
 
 ## 7. `run_simulation`
 
@@ -514,7 +572,10 @@ python -m codes_diploma.astar_project.astar_simulation
 Mutatja:
 
 - az ismert statikus rácstérképet;
+- az A* által vizsgált cellák állapotát (`X`), sorrendjét és aktuális celláját (`C`);
+- az aktuális cella tényleges szomszédjelöltjeit (`N`);
 - az akadálykerülő A* globális útvonalat;
+- a végső útvonal celláit (`O`);
 - a rács- és világkoordináták kapcsolatát;
 - a robot mozgását az útvonalon;
 - az útvonalat és a robot nyomát.

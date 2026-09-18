@@ -47,7 +47,8 @@ def astar_search(grid_map, start, goal, diagonal=False, return_details=False):
 	A pozíciók rácskoordináták, formájuk ``(row, column)``. Ha nincs
 	elérhető út, a függvény ``None`` értéket ad vissza. A
 	``return_details=True`` mód a keresés közben kibővített cellákat is
-	visszaadja a szimuláció és a szemléltetés számára.
+	visszaadja a szimuláció és a szemléltetés számára, valamint a kiválasztott
+	cellákhoz tartozó szomszédjelölteket.
 	"""
 	if not grid_map.is_inside(*start) or not grid_map.is_inside(*goal):
 		raise ValueError("A start és a cél a térképen belül legyen.")
@@ -61,6 +62,7 @@ def astar_search(grid_map, start, goal, diagonal=False, return_details=False):
 	came_from = {}
 	g_costs = {start: 0.0}
 	expanded_nodes = []
+	search_steps = []
 
 	while open_nodes:
 		best_node = min(open_nodes)
@@ -80,10 +82,40 @@ def astar_search(grid_map, start, goal, diagonal=False, return_details=False):
 				return {
 					"path": path,
 					"expanded_nodes": expanded_nodes,
+					"search_steps": search_steps,
 				}
 			return path
 
-		for neighbor in grid_map.get_neighbors(current_position[0], current_position[1], diagonal):
+		neighbors = grid_map.get_neighbors(
+			current_position[0], current_position[1], diagonal
+		)
+		neighbor_scores = []
+		for neighbor in neighbors:
+			movement_cost = _movement_cost(current_position, neighbor)
+			candidate_g_cost = current_g_cost + movement_cost
+			candidate_h_cost = _heuristic(neighbor, goal, diagonal)
+			neighbor_scores.append(
+				{
+					"position": neighbor,
+					"g": candidate_g_cost,
+					"h": candidate_h_cost,
+					"f": candidate_g_cost + candidate_h_cost,
+					"accepted": candidate_g_cost < g_costs.get(neighbor, math.inf),
+				}
+			)
+		search_steps.append(
+			{
+				"current": current_position,
+				"neighbors": neighbors,
+				"current_g": current_g_cost,
+				"current_h": _heuristic(current_position, goal, diagonal),
+				"current_f": current_g_cost
+				+ _heuristic(current_position, goal, diagonal),
+				"neighbor_scores": neighbor_scores,
+			}
+		)
+
+		for neighbor in neighbors:
 			movement_cost = _movement_cost(current_position, neighbor)
 			new_g_cost = current_g_cost + movement_cost
 
@@ -96,10 +128,21 @@ def astar_search(grid_map, start, goal, diagonal=False, return_details=False):
 			f_cost = new_g_cost + h_cost
 			open_nodes.append((f_cost, new_g_cost, neighbor))
 
+		valid_open_nodes = [
+			entry
+			for entry in open_nodes
+			if entry[1] <= g_costs.get(entry[2], math.inf)
+		]
+		if valid_open_nodes:
+			search_steps[-1]["next_position"] = min(valid_open_nodes)[2]
+		else:
+			search_steps[-1]["next_position"] = None
+
 	if return_details:
 		return {
 			"path": None,
 			"expanded_nodes": expanded_nodes,
+			"search_steps": search_steps,
 		}
 
 	return None

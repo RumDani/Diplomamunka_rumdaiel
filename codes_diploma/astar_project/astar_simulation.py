@@ -104,15 +104,20 @@ def plot_simulation(
     start,
     goal,
     expanded_nodes=None,
+    search_steps=None,
     robot_radius=0.08,
+    planning_interval=650,
+    movement_interval=140,
     show=True,
 ):
     """Megjeleniti az A* tervezest, majd a robot mozgasat."""
-    figure, axes = plt.subplots(figsize=(10, 6))
+    figure, axes = plt.subplots(figsize=(12, 7))
     draw_map(axes, grid_map, start, goal)
 
     if expanded_nodes is None:
         expanded_nodes = []
+    if search_steps is None:
+        search_steps = []
 
     expanded_world = [
         grid_map.grid_to_world(row, column)
@@ -121,25 +126,118 @@ def plot_simulation(
     explored = axes.scatter(
         [],
         [],
-        s=28,
+        s=32,
         color="#90caf9",
-        alpha=0.75,
-        label="A* vizsgalt cellak",
+        alpha=0.45,
+        label="X: vizsgalt cella",
+        zorder=2,
+    )
+    exploration_trace, = axes.plot(
+        [],
+        [],
+        color="#5c6bc0",
+        linewidth=0.9,
+        alpha=0.3,
+        label="Vizsgalati sorrend",
+        zorder=1,
+    )
+    current_search = axes.scatter(
+        [],
+        [],
+        s=90,
+        color="#ff9800",
+        edgecolors="#e65100",
+        label="C: aktualis cella",
+        zorder=5,
+    )
+    neighbor_candidates = axes.scatter(
+        [],
+        [],
+        s=55,
+        facecolors="none",
+        edgecolors="#00897b",
+        linewidths=1.2,
+        label="N: vizsgalt szomszedjeloltek",
+        zorder=4,
+    )
+    neighbor_links, = axes.plot(
+        [],
+        [],
+        color="#26a69a",
+        linewidth=0.8,
+        alpha=0.7,
         zorder=2,
     )
 
     path_world = [grid_map.grid_to_world(row, column) for row, column in path]
     path_x = [position[0] for position in path_world]
     path_y = [position[1] for position in path_world]
-    axes.plot(
+    path_line, = axes.plot(
         path_x,
         path_y,
         "--",
         color="#1976d2",
         linewidth=1.5,
-        label="A* utvonal",
+        label="O: vegso utvonal",
         zorder=3,
     )
+    path_line.set_visible(False)
+
+    expanded_labels = [
+        axes.text(
+            x,
+            y,
+            "X",
+            color="#283593",
+            fontsize=6,
+            ha="center",
+            va="center",
+            visible=False,
+            zorder=4,
+        )
+        for x, y in expanded_world
+    ]
+    path_labels = [
+        axes.text(
+            x,
+            y,
+            "O",
+            color="#0d47a1",
+            fontsize=7,
+            fontweight="bold",
+            ha="center",
+            va="center",
+            visible=False,
+            zorder=4,
+        )
+        for x, y in path_world
+    ]
+    current_label = axes.text(
+        math.nan,
+        math.nan,
+        "C",
+        color="#bf360c",
+        fontsize=8,
+        fontweight="bold",
+        ha="center",
+        va="center",
+        visible=False,
+        zorder=7,
+    )
+    neighbor_labels = [
+        axes.text(
+            math.nan,
+            math.nan,
+            "",
+            color="#00695c",
+            fontsize=6,
+            ha="center",
+            va="center",
+            visible=False,
+            zorder=5,
+        )
+        for _ in range(8)
+    ]
 
     trail, = axes.plot([], [], color="#f57c00", linewidth=2, label="Robot nyoma")
     robot = Circle(
@@ -153,6 +251,26 @@ def plot_simulation(
     )
     axes.add_patch(robot)
     status = axes.text(0.02, 0.98, "Indulas", transform=axes.transAxes, va="top")
+    decision_text = axes.text(
+        0.02,
+        0.86,
+        "",
+        transform=axes.transAxes,
+        fontsize=8,
+        color="#004d40",
+        va="top",
+        bbox={"facecolor": "white", "alpha": 0.8, "edgecolor": "none"},
+    )
+    axes.text(
+        0.02,
+        0.92,
+        "X = vizsgalt | C = aktualis | N = szomszed | O = vegso utvonal",
+        transform=axes.transAxes,
+        fontsize=8,
+        color="#263238",
+        va="top",
+        bbox={"facecolor": "white", "alpha": 0.75, "edgecolor": "none"},
+    )
     axes.legend(loc="upper right")
     axes.set_title("A* tervezes es robotmozgas ismert, statikus terkepen")
 
@@ -160,7 +278,9 @@ def plot_simulation(
     trajectory_y = [position[1] for position in trajectory]
 
     planning_frames = len(expanded_world)
-    total_frames = planning_frames + len(trajectory)
+    planning_pause_frames = 8
+    movement_start = planning_frames + planning_pause_frames
+    total_frames = movement_start + len(trajectory)
 
     def set_explored_points(points):
         if points:
@@ -168,18 +288,126 @@ def plot_simulation(
         else:
             explored.set_offsets([[math.nan, math.nan]])
 
+    def set_label_visibility(labels, count):
+        for index, label in enumerate(labels):
+            label.set_visible(index < count)
+
+    def set_current_label(position, visible):
+        current_label.set_position(position)
+        current_label.set_visible(visible)
+
+    def set_neighbors(step_index):
+        if step_index >= len(search_steps):
+            neighbors = []
+        else:
+            step = search_steps[step_index]
+            neighbors = step["neighbors"]
+            neighbor_scores = step.get("neighbor_scores", [])
+
+        neighbor_world = [
+            grid_map.grid_to_world(row, column)
+            for row, column in neighbors
+        ]
+        if neighbor_world:
+            neighbor_candidates.set_offsets(neighbor_world)
+            current_position = search_steps[step_index]["current"]
+            current_world = grid_map.grid_to_world(*current_position)
+            link_x = []
+            link_y = []
+            for neighbor_x, neighbor_y in neighbor_world:
+                link_x.extend([current_world[0], neighbor_x, math.nan])
+                link_y.extend([current_world[1], neighbor_y, math.nan])
+            neighbor_links.set_data(link_x, link_y)
+        else:
+            neighbor_candidates.set_offsets([[math.nan, math.nan]])
+            neighbor_links.set_data([], [])
+
+        for index, label in enumerate(neighbor_labels):
+            if index < len(neighbor_world):
+                label.set_position(neighbor_world[index])
+                score = neighbor_scores[index] if index < len(neighbor_scores) else {}
+                label.set_text(
+                    "N\n"
+                    f"g={score.get('g', 0):.1f} "
+                    f"h={score.get('h', 0):.1f}\n"
+                    f"f={score.get('f', 0):.1f}"
+                )
+                label.set_visible(True)
+            else:
+                label.set_visible(False)
+
+        if step_index < len(search_steps):
+            step = search_steps[step_index]
+            score_text = ", ".join(
+                f"{score['position']} f={score['f']:.1f}"
+                for score in step.get("neighbor_scores", [])
+            )
+            next_position = step.get("next_position")
+            decision_text.set_text(
+                f"C={step['current']}  "
+                f"g={step.get('current_g', 0):.1f} "
+                f"h={step.get('current_h', 0):.1f} "
+                f"f={step.get('current_f', 0):.1f}\n"
+                f"Jeloltek f-szerint: {score_text}\n"
+                f"Kovetkezo prioritasi cella: {next_position}"
+            )
+        else:
+            decision_text.set_text("")
+
     def update(frame):
         if frame < planning_frames:
             visible_nodes = expanded_world[: frame + 1]
             set_explored_points(visible_nodes)
+            exploration_trace.set_data(
+                [point[0] for point in visible_nodes],
+                [point[1] for point in visible_nodes],
+            )
+            set_label_visibility(expanded_labels, 0)
+            set_label_visibility(path_labels, 0)
+            set_neighbors(frame)
+            current_search.set_offsets([expanded_world[frame]])
+            current_step = search_steps[frame]
+            current_label.set_text(
+                "C\n"
+                f"f={current_step.get('current_f', 0):.1f}"
+            )
+            set_current_label(expanded_world[frame], True)
+            path_line.set_visible(False)
             robot.center = (math.nan, math.nan)
             trail.set_data([], [])
             status.set_text(
                 f"A* tervezes: {frame + 1}/{planning_frames} cella vizsgalva"
             )
-        else:
-            simulation_frame = frame - planning_frames
+        elif frame < movement_start:
             set_explored_points(expanded_world)
+            exploration_trace.set_data(
+                [point[0] for point in expanded_world],
+                [point[1] for point in expanded_world],
+            )
+            set_label_visibility(expanded_labels, 0)
+            set_label_visibility(path_labels, len(path_labels))
+            set_neighbors(len(search_steps))
+            decision_text.set_text("A* kesz: az O jelolesu utvonal a visszaepitett legjobb ut.")
+            current_search.set_offsets([[math.nan, math.nan]])
+            set_current_label((math.nan, math.nan), False)
+            path_line.set_visible(True)
+            robot.center = (math.nan, math.nan)
+            trail.set_data([], [])
+            status.set_text("A* tervezes kesz - utvonal indul")
+        else:
+            simulation_frame = frame - movement_start
+            set_explored_points(expanded_world)
+            exploration_trace.set_data(
+                [point[0] for point in expanded_world],
+                [point[1] for point in expanded_world],
+            )
+            set_label_visibility(expanded_labels, 0)
+            set_label_visibility(path_labels, len(path_labels))
+            set_neighbors(len(search_steps))
+            decision_text.set_text("A* kesz: az O jelolesu utvonalon mozog a robot.")
+            current_search.set_offsets([[math.nan, math.nan]])
+            set_current_label((math.nan, math.nan), False)
+            path_line.set_visible(True)
             robot.center = (
                 trajectory_x[simulation_frame],
                 trajectory_y[simulation_frame],
@@ -195,13 +423,28 @@ def plot_simulation(
                     "Robot mozgas: "
                     f"{simulation_frame + 1}/{len(trajectory)}"
                 )
-        return explored, robot, trail, status
+        return (
+            explored,
+            exploration_trace,
+            current_search,
+            neighbor_candidates,
+            neighbor_links,
+            path_line,
+            robot,
+            trail,
+            status,
+            current_label,
+            decision_text,
+            *neighbor_labels,
+            *expanded_labels,
+            *path_labels,
+        )
 
     robot_animation = animation.FuncAnimation(
         figure,
         update,
         frames=total_frames,
-        interval=80,
+        interval=planning_interval,
         repeat=False,
         blit=True,
     )
@@ -235,6 +478,7 @@ def run_simulation(show=True):
         start,
         goal,
         expanded_nodes=search_result["expanded_nodes"],
+        search_steps=search_result["search_steps"],
         show=show,
     )
 

@@ -41,6 +41,23 @@ class TestAstarSearch(unittest.TestCase):
 
 		self.assertEqual(path, [(0, 0), (1, 1), (2, 2)])
 
+	def test_detailed_result_contains_neighbors_for_each_search_step(self):
+		grid_map = GridMap(width=3, height=1)
+
+		result = astar_search(
+			grid_map,
+			(0, 0),
+			(0, 2),
+			return_details=True,
+		)
+
+		self.assertEqual(result["search_steps"][0]["current"], (0, 0))
+		self.assertEqual(result["search_steps"][0]["neighbors"], [(0, 1)])
+		self.assertEqual(result["search_steps"][0]["neighbor_scores"][0]["g"], 1.0)
+		self.assertEqual(result["search_steps"][0]["neighbor_scores"][0]["h"], 1.0)
+		self.assertEqual(result["search_steps"][0]["neighbor_scores"][0]["f"], 2.0)
+		self.assertEqual(result["search_steps"][0]["next_position"], (0, 1))
+
 	def test_rejects_blocked_start_or_goal(self):
 		grid_map = GridMap(width=2, height=2)
 		grid_map.add_obstacle(0, 0)
