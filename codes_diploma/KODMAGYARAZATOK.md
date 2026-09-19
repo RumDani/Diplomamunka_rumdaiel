@@ -350,13 +350,15 @@ $$
 
 Ez azt számolja meg, hány vízszintes és függőleges lépés kellene akadályok nélkül.
 
-Átlós keresésnél a heurisztika az átlós lépéseket `sqrt(2)` költséggel veszi figyelembe:
+Átlós keresésnél az alapimplementáció egyszerű Euklideszi heurisztikát használ:
 
-```text
-h = átlós lépések * sqrt(2) + egyenes lépések
-```
+$$
+h(n) = \sqrt{(row_n-row_g)^2 + (column_n-column_g)^2}
+$$
 
-Ez illeszkedik ahhoz, hogy az átlós cellalépés tényleges költsége is `sqrt(2)`.
+Ez légvonalbeli becslést ad az aktuális cellától a célig. Nem számol az akadályokkal,
+ezért az akadályok miatt ténylegesen szükséges út nem lehet rövidebb ennél.
+Az átlós mozgás tényleges költsége ettől függetlenül `sqrt(2)` marad.
 
 ## 6. A mozgási költség
 
@@ -524,20 +526,17 @@ figure, robot_animation = plot_simulation(
 )
 ```
 
-Ez kapcsolja össze a térképet, az útvonalat és a robotot:
+Ez egy szándékosan rövid, kétpaneles megjelenítő, amely a DWA-szimuláció egyszerű működéséhez hasonlóan egyetlen fő animációs ciklusban frissíti az ábrát:
 
-1. kétpaneles matplotlib ábrát hoz létre: bal oldalon a prioritási sort, jobb oldalon a térképet;
-2. kirajzolja a statikus akadályokat és a teljes cellarácsot;
-3. halvány világoskék pontokkal megmutatja az A* által már vizsgált (`X`) cellákat;
-4. a bal oldali listában `g`, `h`, `f` értékekkel és `>>` jelöléssel mutatja a következő prioritási cellát;
-5. türkiz karikákkal és `N` betűvel megmutatja az aktuális cella szomszédjelöltjeit;
-6. az `N` jelöléseknél kiírja a jelölt `g`, `h` és `f` súlyát;
-7. vékony türkiz vonalakkal összeköti az aktuális cellát a szomszédjelöltekkel;
-8. narancssárga ponttal és `C` betűvel kiemeli az A* éppen vizsgált celláját;
-9. a végső útvonalat kék vonallal és `O` betűvel a tervezési szakasz után jeleníti meg;
-10. a `Következő` gombbal vagy a jobb nyíllal egyetlen lépést halad;
-11. az `Újrakezdés` gomb visszaállítja az első lépést;
-12. a cél elérésekor kiírja, hogy `A* utvonal kesz - cel elerve`.
+1. a bal oldalon az aktuális prioritási sort mutatja `g`, `h`, `f` értékekkel;
+2. ugyanitt kiírja a prioritási függvényt: $f(n)=g(n)+h(n)$, ahol `g(n)` az eddigi út költsége, `h(n)` a célhoz tartozó becslés, `f(n)` pedig a teljes prioritási érték;
+3. átlós keresésnél a könnyebben értelmezhető Euklideszi heurisztikát használja: `h(n) = sqrt(dr^2 + dc^2)`, ahol `dr` és `dc` az aktuális cella és a cél sor-, illetve oszlopkülönbsége;
+4. ugyanitt láthatók a lépésköltségek: egyenes lépés `1,0`, átlós lépés `sqrt(2)`, valamint a fontos demo-paraméterek;
+4. a jobb oldalon kirajzolja az akadályokat, a vizsgált cellákat és az aktuális `C` cellát;
+5. a tervezés végén megjeleníti a visszaépített kék útvonalat;
+6. a robot egyszerű, köztes pontokból álló trajektórián követi ezt az útvonalat;
+7. a `Következő` gombbal vagy a jobb nyíllal egyetlen lépést halad;
+8. az `Újrakezdés` gomb visszaállítja az első lépést.
 
 A szimuláció kézi léptetésű. A `Következő` gomb vagy a jobb nyíl egyetlen
 keresési képkockát továbbít, az `Újrakezdés` pedig visszaállítja az első
@@ -545,17 +544,13 @@ lépést. A régi `X` cellák csak halvány pontként maradnak a térképen, a
 részletes súlyok pedig csak az aktuális `N` szomszédoknál láthatók, hogy az
 ábra ne legyen túlzsúfolt.
 
-A betűk jelentése a képen:
+Jelölések:
 
-- `X`: az A* ezt a cellát már kivette a prioritási sorból és megvizsgálta; a képen ez szándékosan pontként jelenik meg, hogy ne legyen minden régi cellán külön felirat;
 - `C`: az animáció adott pillanatában ezt a cellát dolgozza fel az A*;
-- `N`: az aktuális cellából elérhető szomszédjelölt;
-- `O`: ez a cella a végső, visszaépített útvonal része.
+- a halvány pontok: az A* által már vizsgált cellák;
+- a kék szaggatott vonal: a végső, visszaépített útvonal.
 
-Ezért az `X` cellákat összekötő vonal nem a robot útvonala. Ez a keresés sorrendjét mutatja,
-amely kanyaroghat és sok olyan cellát is érinthet, amely végül nem kerül bele az `O` útvonalba.
-
-A `show=False` használható teszteléskor, így az ábra létrejön, de nem nyílik meg grafikus ablak. A szimuláció szándékosan lassú, hogy külön megfigyelhető legyen az A* keresése és a robot későbbi mozgása.
+A `show=False` használható teszteléskor, így az ábra létrejön, de nem nyílik meg grafikus ablak. A szimuláció kézi léptetésű, ezért a keresés és a robotmozgás egyaránt könnyen követhető. A megjelenítő nem modellez sebességet, gyorsulást vagy valódi robotkinematikát; a célja az A* működésének szemléltetése.
 
 ## 7. `run_simulation`
 

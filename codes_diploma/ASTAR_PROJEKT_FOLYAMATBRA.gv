@@ -90,7 +90,7 @@ digraph AStarCurrentCode {
         demo_map [label="create_demo_map()\nismert statikus terkep\nstart es cel", fillcolor="#ede9fe", color="#7c3aed"]
         planning_data [label="expanded_nodes\nA* altal vizsgalt cellak", fillcolor="#ede9fe", color="#7c3aed"]
         trajectory [label="create_robot_trajectory()\nA* cellautvonal ->\nvilagkoordinatas robotpontok", fillcolor="#ede9fe", color="#7c3aed"]
-        plot [label="plot_simulation()\n1. tervezes animacio\n2. robot animacio", fillcolor="#ede9fe", color="#7c3aed"]
+        plot [label="plot_simulation()\negy egyszeru frissitesi ciklus\nprioritasi sor + robotmozgas", fillcolor="#ede9fe", color="#7c3aed"]
         draw [label="draw_map()\nakadalyok, start, cel, tengelyek", fillcolor="#ede9fe", color="#7c3aed"]
         animation [label="robot pont + nyom\nFuncAnimation frissitese", shape=parallelogram, fillcolor="#ede9fe", color="#7c3aed"]
 

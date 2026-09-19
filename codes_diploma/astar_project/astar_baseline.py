@@ -11,9 +11,7 @@ def _heuristic(position, goal, diagonal):
 	column_distance = abs(goal_column - column)
 
 	if diagonal:
-		diagonal_steps = min(row_distance, column_distance)
-		straight_steps = max(row_distance, column_distance) - diagonal_steps
-		return diagonal_steps * math.sqrt(2) + straight_steps
+		return math.hypot(row_distance, column_distance)
 
 	return row_distance + column_distance
 
