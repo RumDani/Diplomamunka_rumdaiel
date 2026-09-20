@@ -129,7 +129,7 @@ def plot_simulation(
     figure, (priority_ax, map_ax) = plt.subplots(
         1, 2, figsize=(13, 6), gridspec_kw={"width_ratios": (1.35, 2.4)}
     )
-    figure.subplots_adjust(bottom=0.14, wspace=0.12)
+    figure.subplots_adjust(bottom=0.14, right=0.82, wspace=0.12)
 
     priority_ax.set_title("Prioritasi sor")
     priority_ax.set_axis_off()
@@ -195,7 +195,7 @@ def plot_simulation(
     map_ax.add_patch(robot)
     trail, = map_ax.plot([], [], color="#f57c00", linewidth=2, label="Robot nyoma")
     status = map_ax.text(0.02, 0.98, "Indulas", transform=map_ax.transAxes, va="top")
-    map_ax.legend(loc="upper right")
+    map_ax.legend(loc="upper left", bbox_to_anchor=(1.02, 1), borderaxespad=0)
 
     trajectory_x = [point[0] for point in trajectory]
     trajectory_y = [point[1] for point in trajectory]
