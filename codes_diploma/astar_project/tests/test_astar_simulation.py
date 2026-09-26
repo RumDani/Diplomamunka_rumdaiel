@@ -4,6 +4,7 @@ import unittest
 
 from codes_diploma.astar_project.astar_baseline import astar_search
 from codes_diploma.astar_project.astar_simulation import (
+    _parse_position,
     create_demo_map,
     create_robot_trajectory,
     plot_simulation,
@@ -11,6 +12,9 @@ from codes_diploma.astar_project.astar_simulation import (
 
 
 class TestAstarSimulation(unittest.TestCase):
+    def test_position_input_is_read_as_row_and_column(self):
+        self.assertEqual(_parse_position(" 2, 17 "), (2, 17))
+
     def test_demo_map_has_a_valid_static_path(self):
         grid_map, start, goal = create_demo_map()
 

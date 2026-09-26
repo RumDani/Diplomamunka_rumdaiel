@@ -1,6 +1,8 @@
 """Egyszeru matplotlib szimulacio az A* utvonal bemutatasahoz."""
 
 import math
+import tkinter as tk
+from tkinter import messagebox, ttk
 
 import matplotlib.animation as animation
 import matplotlib.pyplot as plt
@@ -8,28 +10,167 @@ from matplotlib.patches import Circle, Rectangle
 from matplotlib.widgets import Button
 
 from .astar_baseline import astar_search
+from .astar_variants import get_heuristic
 from .grid_map import GridMap
+from .path_smoothing import bezier_curve_points, smooth_path
 
 
-def create_demo_map():
+def create_demo_map(
+    width=30,
+    height=20,
+    resolution=0.2,
+    robot_radius=0.08,
+    start=(2, 2),
+    goal=(17, 27),
+):
     """Letrehoz egy ismert, statikus akadalyokat tartalmazo terkepet."""
-    grid_map = GridMap(width=30, height=20, resolution=0.2)
-    vertical_wall = [(row, 10) for row in range(2, 18) if row not in range(7, 13)]
+    grid_map = GridMap(width=width, height=height, resolution=resolution)
+    vertical_column = min(10, width - 2)
+    horizontal_row = min(12, height - 2)
+    vertical_wall = [
+        (row, vertical_column)
+        for row in range(2, max(2, height - 2))
+        if row not in range(7, 13)
+    ]
     horizontal_wall = [
-        (12, column) for column in range(12, 28) if column not in range(19, 25)
+        (horizontal_row, column)
+        for column in range(12, max(12, width - 2))
+        if column not in range(19, 25)
     ]
     for row, column in vertical_wall + horizontal_wall:
-        grid_map.add_obstacle(row, column)
-    grid_map.inflate_obstacles(0.08)
-    return grid_map, (2, 2), (17, 27)
+        if grid_map.is_inside(row, column) and (row, column) not in (start, goal):
+            grid_map.add_obstacle(row, column)
+    grid_map.inflate_obstacles(robot_radius)
+    return grid_map, start, goal
 
 
-def create_robot_trajectory(grid_map, path, steps_per_cell=8):
+def _parse_position(value):
+    """Egy 'sor,oszlop' szoveget racskoordinatava alakit."""
+    row, column = (int(part.strip()) for part in value.split(","))
+    return row, column
+
+
+def _read_settings(fields, diagonal, heuristic):
+    """Beolvassa es ellenorzi a beallitasi ablak ertekeit."""
+    get_value = lambda field: field.get() if hasattr(field, "get") else field.text
+    heuristic_name = heuristic.get() if hasattr(heuristic, "get") else heuristic.value_selected
+    diagonal_value = diagonal.get() if hasattr(diagonal, "get") else diagonal.get_status()[0]
+    settings = {
+        "width": int(get_value(fields["width"])),
+        "height": int(get_value(fields["height"])),
+        "resolution": float(get_value(fields["resolution"])),
+        "robot_radius": float(get_value(fields["robot_radius"])),
+        "start": _parse_position(get_value(fields["start"])),
+        "goal": _parse_position(get_value(fields["goal"])),
+        "diagonal": diagonal_value,
+        "smooth_path": fields["smooth_path"].get(),
+        "auto_play": fields["auto_play"].get(),
+        "heuristic": get_heuristic(heuristic_name),
+    }
+    if settings["width"] < 3 or settings["height"] < 3:
+        raise ValueError("A terkep legalabb 3 x 3 meretu legyen.")
+    if settings["resolution"] <= 0 or settings["robot_radius"] < 0:
+        raise ValueError("A felbontas pozitiv, a robotmeret nem negativ legyen.")
+    return settings
+
+
+def _create_settings_window(on_apply):
+    """Letrehozza az A* bemeneti ertekeinek egyszeru feluletet."""
+    window = tk.Tk()
+    window.title("A* beallitasok")
+    window.resizable(False, False)
+    main = ttk.Frame(window, padding=20)
+    main.grid()
+    ttk.Label(main, text="A* szimulacio", font=("Segoe UI", 16, "bold")).grid(
+        row=0, column=0, columnspan=2, sticky="w", pady=(0, 16)
+    )
+
+    values = {
+        "width": ("Szelesseg", "30"),
+        "height": ("Magassag", "20"),
+        "resolution": ("Felbontas [m]", "0.2"),
+        "robot_radius": ("Robot sugar [m]", "0.08"),
+        "start": ("Start (sor,oszlop)", "2,2"),
+        "goal": ("Cel (sor,oszlop)", "17,27"),
+    }
+    fields = {}
+    for index, (name, (label, value)) in enumerate(values.items()):
+        row = index + 1
+        ttk.Label(main, text=label).grid(row=row, column=0, sticky="w", padx=(0, 20), pady=5)
+        field = ttk.Entry(main, width=24)
+        field.insert(0, value)
+        field.grid(row=row, column=1, sticky="ew", pady=5)
+        fields[name] = field
+
+    diagonal = tk.BooleanVar(value=True)
+    ttk.Checkbutton(main, text="Atlos mozgas engedelyezese", variable=diagonal).grid(
+        row=7, column=0, columnspan=2, sticky="w", pady=(12, 5)
+    )
+    ttk.Label(main, text="Heurisztika").grid(row=8, column=0, sticky="w", pady=5)
+    heuristic = ttk.Combobox(
+        main,
+        values=["manhattan", "euclidean", "chebyshev", "octile"],
+        state="readonly",
+        width=21,
+    )
+    heuristic.set("euclidean")
+    heuristic.grid(row=8, column=1, sticky="ew", pady=5)
+
+    smooth_path_value = tk.BooleanVar(value=False)
+    ttk.Checkbutton(
+        main,
+        text="Utvonal simitasa",
+        variable=smooth_path_value,
+    ).grid(row=9, column=0, columnspan=2, sticky="w", pady=5)
+    fields["smooth_path"] = smooth_path_value
+    auto_play_value = tk.BooleanVar(value=True)
+    tk.Checkbutton(
+        main,
+        text="Automatikus lejátszás",
+        variable=auto_play_value,
+    ).grid(row=10, column=0, columnspan=2, sticky="w", pady=5)
+    fields["auto_play"] = auto_play_value
+
+    def apply_settings():
+        try:
+            settings = _read_settings(fields, diagonal, heuristic)
+            on_apply(settings)
+            window.destroy()
+            plt.show()
+        except (TypeError, ValueError, RuntimeError) as error:
+            messagebox.showerror("Hibas beallitas", str(error), parent=window)
+
+    ttk.Button(main, text="Szimulacio inditasa", command=apply_settings).grid(
+        row=11, column=0, columnspan=2, sticky="ew", pady=(16, 0)
+    )
+    return window
+
+
+def _safe_curve(grid_map, curve, diagonal):
+    cells = [grid_map.world_to_grid(x, y) for x, y in curve]
+    return all(
+        grid_map.is_free(*cell)
+        for cell in cells
+    ) and all(
+        current_next == current
+        or current_next in grid_map.get_neighbors(*current, diagonal)
+        for current, current_next in zip(cells, cells[1:])
+    )
+
+
+def create_robot_trajectory(
+    grid_map, path, steps_per_cell=4, smooth=False, diagonal=False
+):
     """Az A* cellautvonalabol koztes pontokat keszit az animaciohoz."""
     if not path:
         return []
 
     world_path = [grid_map.grid_to_world(row, column) for row, column in path]
+    if smooth:
+        curve = bezier_curve_points(world_path, samples_per_segment=20)
+        if _safe_curve(grid_map, curve, diagonal):
+            return curve
+
     trajectory = [world_path[0]]
     for start, end in zip(world_path, world_path[1:]):
         for step in range(1, steps_per_cell + 1):
@@ -117,13 +258,14 @@ def plot_simulation(
     goal,
     expanded_nodes=None,
     search_steps=None,
+    original_path=None,
     robot_radius=0.08,
-    planning_interval=650,
-    movement_interval=140,
+    planning_interval=250,
+    movement_interval=60,
+    auto_play=False,
     show=True,
 ):
-    """Egyszeru, kezzel leptetheto A* es robotmozgasi abra."""
-    del movement_interval
+    """A* es robotmozgasi abra kezi vagy automatikus lejatszassal."""
     expanded_nodes = expanded_nodes or []
     search_steps = search_steps or []
     figure, (priority_ax, map_ax) = plt.subplots(
@@ -174,13 +316,36 @@ def plot_simulation(
         linespacing=1.25,
     )
     draw_map(map_ax, grid_map, start, goal)
-    map_ax.set_title("A* utvonal")
+    map_ax.set_title("A* utvonal es Bezier-simitas")
 
     expanded_world = [grid_map.grid_to_world(*cell) for cell in expanded_nodes]
     path_world = [grid_map.grid_to_world(*cell) for cell in path]
-    path_x, path_y = zip(*path_world)
+    original_world = [
+        grid_map.grid_to_world(*cell) for cell in (original_path or path)
+    ]
+    display_path = trajectory if path != (original_path or path) else path_world
+    path_x, path_y = zip(*display_path)
+    original_x, original_y = zip(*original_world)
+    original_line, = map_ax.plot(
+        original_x,
+        original_y,
+        ":",
+        color="#9e9e9e",
+        linewidth=2,
+        label="Eredeti A* utvonal",
+        visible=False,
+        zorder=2,
+    )
     path_line, = map_ax.plot(
-        path_x, path_y, "--", color="#1976d2", label="A* utvonal", visible=False
+        path_x,
+        path_y,
+        ":",
+        color="#ef8a8a",
+        linewidth=2.0,
+        alpha=0.7,
+        label="Bezier-simitott utvonal",
+        visible=False,
+        zorder=3,
     )
     explored = map_ax.scatter(
         [], [], s=28, color="#90caf9", alpha=0.6, label="Vizsgalt cellak"
@@ -213,10 +378,12 @@ def plot_simulation(
             robot.center = (math.nan, math.nan)
             trail.set_data([], [])
         elif frame == movement_start - 1:
+            robot_animation.event_source.interval = movement_interval
             explored.set_offsets(expanded_world or [[math.nan, math.nan]])
             current_search.set_offsets([[math.nan, math.nan]])
             priority_text.set_text(_priority_text(search_steps, len(search_steps)))
             status.set_text("A* kesz - robotmozgas indul")
+            original_line.set_visible(True)
             path_line.set_visible(True)
             robot.center = (math.nan, math.nan)
             trail.set_data([], [])
@@ -225,6 +392,7 @@ def plot_simulation(
             explored.set_offsets(expanded_world or [[math.nan, math.nan]])
             current_search.set_offsets([[math.nan, math.nan]])
             priority_text.set_text(_priority_text(search_steps, len(search_steps)))
+            original_line.set_visible(True)
             path_line.set_visible(True)
             robot.center = (trajectory_x[movement_frame], trajectory_y[movement_frame])
             trail.set_data(trajectory_x[: movement_frame + 1], trajectory_y[: movement_frame + 1])
@@ -232,14 +400,26 @@ def plot_simulation(
                 "Cel elerve" if movement_frame == len(trajectory) - 1
                 else f"Robotmozgas: {movement_frame + 1}/{len(trajectory)}"
             )
-        return explored, current_search, path_line, robot, trail, status, priority_text
+        return (
+            explored,
+            current_search,
+            original_line,
+            path_line,
+            robot,
+            trail,
+            status,
+            priority_text,
+        )
 
     robot_animation = animation.FuncAnimation(
         figure, update, frames=total_frames, interval=planning_interval, repeat=False
     )
     figure.canvas.mpl_disconnect(robot_animation._first_draw_id)
-    robot_animation.event_source.stop()
-    update(0)
+    if auto_play:
+        robot_animation.event_source.add_callback(robot_animation._step)
+    else:
+        robot_animation.event_source.stop()
+        update(0)
 
     next_button = Button(figure.add_axes((0.68, 0.035, 0.13, 0.06)), "Kovetkezo")
     reset_button = Button(figure.add_axes((0.83, 0.035, 0.13, 0.06)), "Ujrakezdes")
@@ -268,28 +448,70 @@ def plot_simulation(
         lambda event: next_frame() if event.key in ("right", " ") else None,
     )
     figure.canvas.draw()
+    if auto_play:
+        robot_animation.event_source.start()
     if show:
         plt.show()
     return figure, robot_animation
 
 
-def run_simulation(show=True):
-    """A teljes A* demo futtatasa."""
-    grid_map, start, goal = create_demo_map()
-    result = astar_search(grid_map, start, goal, diagonal=True, return_details=True)
+def _run_simulation(settings, show=True):
+    """A megadott beallitasokkal lefuttatja a szimulaciot."""
+    grid_map, start, goal = create_demo_map(
+        width=settings["width"],
+        height=settings["height"],
+        resolution=settings["resolution"],
+        robot_radius=settings["robot_radius"],
+        start=settings["start"],
+        goal=settings["goal"],
+    )
+    result = astar_search(
+        grid_map,
+        start,
+        goal,
+        diagonal=settings["diagonal"],
+        heuristic=settings["heuristic"],
+        return_details=True,
+    )
     if result["path"] is None:
         raise RuntimeError("A demo terkepen nincs elerheto utvonal.")
-    trajectory = create_robot_trajectory(grid_map, result["path"])
+    original_path = result["path"]
+    path = original_path
+    if settings["smooth_path"]:
+        path = smooth_path(grid_map, path, settings["diagonal"])
+    trajectory = create_robot_trajectory(
+        grid_map,
+        path,
+        smooth=path != original_path,
+        diagonal=settings["diagonal"],
+    )
     return plot_simulation(
         grid_map,
-        result["path"],
+        path,
         trajectory,
         start,
         goal,
         expanded_nodes=result["expanded_nodes"],
         search_steps=result["search_steps"],
+        original_path=original_path,
+        auto_play=settings["auto_play"],
         show=show,
     )
+
+
+def run_simulation(show=True):
+    """Beallitasi ablakot nyit, majd elinditja az A* szimulaciot."""
+    simulation_figure = [None]
+
+    def apply_settings(settings):
+        if simulation_figure[0] is not None:
+            plt.close(simulation_figure[0])
+        simulation_figure[0], _ = _run_simulation(settings, show=False)
+
+    settings_figure = _create_settings_window(apply_settings)
+    if show:
+        settings_figure.mainloop()
+    return settings_figure
 
 
 if __name__ == "__main__":

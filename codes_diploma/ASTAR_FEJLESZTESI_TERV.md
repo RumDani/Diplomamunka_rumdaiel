@@ -147,7 +147,7 @@ A fájlok feladata:
 | `astar_baseline.py` | Klasszikus A* |
 | `astar_simulation.py` | Ismert statikus térképes matplotlib-szimuláció |
 | `astar_variants.py` | EA*, EBA*, EBHA*, EBHSA* változatok |
-| `path_smoothing.py` | Kollineáris szűrés és inflection bypass |
+| `path_smoothing.py` | Másodfokú Bézier-simítás rácsos akadályellenőrzéssel |
 | `scenarios.py` | Tesztpályák előállítása |
 | `metrics.py` | Útvonal- és teljesítménymutatók |
 | `experiments.py` | Ismételt futtatások és paramétersöprések |

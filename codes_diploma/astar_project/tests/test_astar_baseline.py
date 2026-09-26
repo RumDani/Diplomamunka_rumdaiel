@@ -1,12 +1,39 @@
 """A klasszikus A* alapviselkedésének tesztjei."""
 
+import math
 import unittest
 
 from codes_diploma.astar_project.astar_baseline import astar_search
+from codes_diploma.astar_project.astar_variants import (
+	chebyshev,
+	euclidean,
+	get_heuristic,
+	manhattan,
+	octile,
+)
 from codes_diploma.astar_project.grid_map import GridMap
 
 
 class TestAstarSearch(unittest.TestCase):
+	def test_heuristics_can_be_selected(self):
+		self.assertEqual(manhattan((0, 0), (2, 3)), 5)
+		self.assertAlmostEqual(euclidean((0, 0), (2, 3)), math.sqrt(13))
+		self.assertEqual(chebyshev((0, 0), (2, 3)), 3)
+		self.assertAlmostEqual(octile((0, 0), (2, 3)), 3 + 2 * (math.sqrt(2) - 1))
+		self.assertIs(get_heuristic("octile"), octile)
+
+	def test_custom_heuristic_can_be_passed(self):
+		grid_map = GridMap(width=4, height=1)
+
+		path = astar_search(
+			grid_map,
+			(0, 0),
+			(0, 3),
+			heuristic=lambda position, goal: 0,
+		)
+
+		self.assertEqual(path, [(0, 0), (0, 1), (0, 2), (0, 3)])
+
 	def test_finds_straight_path(self):
 		grid_map = GridMap(width=4, height=1)
 

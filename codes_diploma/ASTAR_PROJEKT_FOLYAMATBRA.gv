@@ -45,6 +45,7 @@ digraph AStarCurrentCode {
     }
 
     start [label="astar_search(...)\nbemenet: grid_map, start, goal, diagonal\nreturn_details=True a szimulaciohoz", shape=parallelogram, fillcolor="#dbeafe", color="#2563eb"]
+    settings [label="Beallitasi ablak\nmeretek, resolution, start, cel\natlos mozgas, heurisztika\nautomatikus lejatszas", fillcolor="#ede9fe", color="#7c3aed"]
 
     subgraph cluster_runtime {
         label="astar_search() teljes futasi folyamata"
@@ -58,7 +59,7 @@ digraph AStarCurrentCode {
         free [label="grid_map.is_free(...)\nstart es cel szabad?", fillcolor="#dbeafe", color="#2563eb"]
         invalid [label="Hiba\nValueError", shape=parallelogram, fillcolor="#fee2e2", color="#dc2626"]
     initialize [label="2. Kereses elokeszitese\nopen_nodes = []\ncame_from = {}\ng_costs[start] = 0", fillcolor="#dbeafe", color="#2563eb"]
-    first_heuristic [label="_heuristic(start, goal, diagonal)\nkezdo f_cost kiszamitasa", fillcolor="#dbeafe", color="#2563eb"]
+    first_heuristic [label="_heuristic vagy sajat heuristic(start, goal)\nkezdo f_cost kiszamitasa", fillcolor="#dbeafe", color="#2563eb"]
     add_start [label="Kezdo cella bekerul\naz open_nodes listaba", fillcolor="#dbeafe", color="#2563eb"]
 
         has_nodes [label="Van meg elem\naz open_nodes listaban?", shape=diamond, fillcolor="#dbeafe", color="#2563eb"]
@@ -71,7 +72,7 @@ digraph AStarCurrentCode {
         new_g [label="new_g_cost =\ncurrent_g_cost + movement_cost", fillcolor="#dbeafe", color="#2563eb"]
         better [label="Jobb az uj ut?\nnew_g_cost < regi koltseg", shape=diamond, fillcolor="#dbeafe", color="#2563eb"]
         update [label="Adatok frissitese\ncame_from[neighbor] = current_position\ng_costs[neighbor] = new_g_cost", fillcolor="#dbeafe", color="#2563eb"]
-        neighbor_heuristic [label="_heuristic(neighbor, goal, diagonal)\nf_cost = new_g_cost + h_cost", fillcolor="#dbeafe", color="#2563eb"]
+        neighbor_heuristic [label="_heuristic vagy sajat heuristic(neighbor, goal)\nf_cost = new_g_cost + h_cost", fillcolor="#dbeafe", color="#2563eb"]
         add_neighbor [label="A* hozzaadja a szomszedot\naz open_nodes listahoz", fillcolor="#dbeafe", color="#2563eb"]
         no_path [label="return None\nnincs elerheto ut", shape=parallelogram, fillcolor="#fee2e2", color="#dc2626"]
     reconstruct [label="_reconstruct_path(came_from, current_position)\ncelbol visszafele koveti az elozo cellakat", fillcolor="#dcfce7", color="#15803d"]
@@ -90,6 +91,7 @@ digraph AStarCurrentCode {
         demo_map [label="create_demo_map()\nismert statikus terkep\nstart es cel", fillcolor="#ede9fe", color="#7c3aed"]
         planning_data [label="expanded_nodes\nA* altal vizsgalt cellak", fillcolor="#ede9fe", color="#7c3aed"]
         trajectory [label="create_robot_trajectory()\nA* cellautvonal ->\nvilagkoordinatas robotpontok", fillcolor="#ede9fe", color="#7c3aed"]
+        smoothing [label="smooth_path()\nredundans node-szures\nmasodfoku Bezier\nakadalyellenorzessel", fillcolor="#ede9fe", color="#7c3aed"]
         plot [label="plot_simulation()\negy egyszeru frissitesi ciklus\nprioritasi sor + robotmozgas", fillcolor="#ede9fe", color="#7c3aed"]
         draw [label="draw_map()\nakadalyok, start, cel, tengelyek", fillcolor="#ede9fe", color="#7c3aed"]
         animation [label="robot pont + nyom\nFuncAnimation frissitese", shape=parallelogram, fillcolor="#ede9fe", color="#7c3aed"]
@@ -98,7 +100,9 @@ digraph AStarCurrentCode {
         demo_map -> grid_inflate [label="robot_radius"]
         grid_inflate -> start [label="kitagitott GridMap, start, goal"]
         result -> planning_data [label="expanded_nodes"]
-        result -> trajectory [label="path"]
+        result -> smoothing [label="path, ha bekapcsolva"]
+        result -> trajectory [label="path, ha kikapcsolva"]
+        smoothing -> trajectory [label="simított path"]
         planning_data -> plot [label="vizsgalt cellak"]
         trajectory -> plot [label="trajectory"]
         plot -> draw
@@ -108,6 +112,8 @@ digraph AStarCurrentCode {
     grid_file -> start [label="GridMap objektum"]
     astar_file -> start [label="belepesi fuggveny"]
     simulation_file -> simulation_start [label="szimulacio belepesi pont"]
+    simulation_start -> settings [label="UI bemenetek"]
+    settings -> start [label="Alkalmaz"]
 
     start -> inside
     inside -> free [label="ervenyes"]
