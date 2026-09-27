@@ -9,6 +9,7 @@ from codes_diploma.astar_project.astar_simulation import (
     create_robot_trajectory,
     plot_simulation,
 )
+from codes_diploma.astar_project.path_smoothing import bezier_curve_points
 
 
 class TestAstarSimulation(unittest.TestCase):
@@ -24,6 +25,16 @@ class TestAstarSimulation(unittest.TestCase):
         self.assertEqual(path[0], start)
         self.assertEqual(path[-1], goal)
         self.assertTrue(all(grid_map.is_free(row, column) for row, column in path))
+
+    def test_demo_path_creates_continuous_smoothing_points(self):
+        grid_map, start, goal = create_demo_map()
+        path = astar_search(grid_map, start, goal, diagonal=True)
+
+        curve = bezier_curve_points(path)
+
+        self.assertEqual(curve[0], path[0])
+        self.assertEqual(curve[-1], path[-1])
+        self.assertNotEqual(curve, path)
 
     def test_robot_trajectory_starts_and_ends_at_path_points(self):
         grid_map, start, goal = create_demo_map()
@@ -51,6 +62,31 @@ class TestAstarSimulation(unittest.TestCase):
 
         self.assertIsNotNone(figure)
         self.assertIsNotNone(robot_animation)
+        figure.clf()
+
+    def test_plot_uses_smoothed_trajectory_when_enabled(self):
+        grid_map = create_demo_map(width=5, height=5)[0]
+        path = [(0, 0), (0, 2), (2, 2)]
+        trajectory = create_robot_trajectory(
+            grid_map, path, smooth=True, diagonal=True
+        )
+
+        figure, _ = plot_simulation(
+            grid_map,
+            path,
+            trajectory,
+            path[0],
+            path[-1],
+            show=False,
+            smoothed=True,
+        )
+
+        smoothed_line = next(
+            line
+            for line in figure.axes[1].lines
+            if line.get_label() == "Bezier-simitott utvonal"
+        )
+        self.assertEqual(list(zip(*smoothed_line.get_data())), trajectory)
         figure.clf()
 
     def test_next_button_advances_the_current_search_cell(self):

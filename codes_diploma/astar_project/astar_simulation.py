@@ -116,7 +116,7 @@ def _create_settings_window(on_apply):
     heuristic.set("euclidean")
     heuristic.grid(row=8, column=1, sticky="ew", pady=5)
 
-    smooth_path_value = tk.BooleanVar(value=False)
+    smooth_path_value = tk.BooleanVar(value=True)
     ttk.Checkbutton(
         main,
         text="Utvonal simitasa",
@@ -264,6 +264,7 @@ def plot_simulation(
     movement_interval=60,
     auto_play=False,
     show=True,
+    smoothed=False,
 ):
     """A* es robotmozgasi abra kezi vagy automatikus lejatszassal."""
     expanded_nodes = expanded_nodes or []
@@ -323,7 +324,7 @@ def plot_simulation(
     original_world = [
         grid_map.grid_to_world(*cell) for cell in (original_path or path)
     ]
-    display_path = trajectory if path != (original_path or path) else path_world
+    display_path = trajectory if smoothed else path_world
     path_x, path_y = zip(*display_path)
     original_x, original_y = zip(*original_world)
     original_line, = map_ax.plot(
@@ -482,7 +483,7 @@ def _run_simulation(settings, show=True):
     trajectory = create_robot_trajectory(
         grid_map,
         path,
-        smooth=path != original_path,
+        smooth=settings["smooth_path"],
         diagonal=settings["diagonal"],
     )
     return plot_simulation(
@@ -496,6 +497,7 @@ def _run_simulation(settings, show=True):
         original_path=original_path,
         auto_play=settings["auto_play"],
         show=show,
+        smoothed=settings["smooth_path"],
     )
 
 

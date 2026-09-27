@@ -6,6 +6,11 @@ Ez a dokumentum a diplomamunka kódjának részletes, magyar nyelvű magyarázat
 
 Ha a kód működése, paraméterei, adatszerkezete vagy algoritmusa megváltozik, a hozzá tartozó magyarázatot is ellenőrizni és szükség esetén frissíteni kell. A magyarázatnak mindig a jelenlegi kódot kell leírnia.
 
+A dokumentáció lezárása előtt a jelenlegi kódot, a közvetlen teszteket, az érintett
+magyarázati fejezeteket és a Graphviz-folyamatábrát együtt kell ellenőrizni. Az
+ellenőrzésnek ki kell terjednie a függvénynevekre, paraméterekre, visszatérési
+értékekre, képletekre, hívási sorrendre és a tényleges megjelenítésre is.
+
 Az A*-fejlesztés aktuális függvényhívási és modulkapcsolati Graphviz-ábrája az [ASTAR_PROJEKT_FOLYAMATBRA.gv](ASTAR_PROJEKT_FOLYAMATBRA.gv) fájlban található. Hívási sorrend vagy fontos adatkapcsolat változásakor azt is frissíteni kell.
 
 ---
@@ -223,7 +228,9 @@ A `resolution` itt nem változtatja meg a keresés cellaszintű logikáját. A m
 ## 2. Az `astar_search` függvény
 
 ```python
-astar_search(grid_map, start, goal, diagonal=False, return_details=False)
+astar_search(
+    grid_map, start, goal, diagonal=False, return_details=False, heuristic=None
+)
 ```
 
 Paraméterek:
@@ -233,6 +240,7 @@ Paraméterek:
 - `goal`: célcella `(row, column)` formában.
 - `diagonal`: ha `False`, csak a négy főirány használható; ha `True`, az átlós irányok is engedélyezettek.
 - `return_details`: ha `False`, csak az útvonalat adja vissza; ha `True`, az útvonal mellett a tervezés közben kibővített cellákat is visszaadja.
+- `heuristic`: opcionális, `(position, goal)` paraméterű saját heurisztika. Ha nincs megadva, a `diagonal` értéke alapján Manhattan- vagy Euklideszi-becslés fut.
 
 A visszatérési érték egy cellákból álló lista, például:
 
@@ -258,7 +266,7 @@ A prioritási sor mindig azt a nyitott cellát veszi előre, amelynek a legkiseb
 
 ## 4. A prioritási sor és az adatszerkezetek
 
-Az egyszerűbb tanulási változat egy sima `open_nodes` listát használ. A lista elemei:
+Az egyszerűbb tanulási változat egy sima `open_list` listát használ. A lista elemei:
 
 ```python
 (f_cost, g_cost, position)
@@ -267,8 +275,8 @@ Az egyszerűbb tanulási változat egy sima `open_nodes` listát használ. A lis
 Az első érték az `f_cost`, ez alapján keressük meg a következő cellát. A `g_cost` az eddig megtett út költsége, a `position` pedig a cella koordinátája. A kiválasztás így történik:
 
 ```python
-best_node = min(open_nodes)
-open_nodes.remove(best_node)
+best_node = min(open_list)
+open_list.remove(best_node)
 ```
 
 Ez könnyebben érthető, mint egy külön prioritási sor használata: végignézzük a listát, kiválasztjuk a legkisebb tuple-t, majd eltávolítjuk.
@@ -311,24 +319,23 @@ Az `expanded_nodes` a tervezés megfigyeléséhez kell. A cellák sorrendben ker
 Az új `search_steps` minden feldolgozott aktuális cellához eltárolja a
 `GridMap.get_neighbors()` által visszaadott szomszédokat. Ez fontos különbség:
 az A* egy aktuális cella összes engedélyezett szomszédját megvizsgálja, de nem
-mindegyikből lesz következő `X` cella. A szomszédok költségét összehasonlítja,
-majd a prioritási sorból a legjobb `f = g + h` értékű cellát választja ki.
+mindegyikből lesz következő feldolgozott cella. A szomszédok költségét
+összehasonlítja, majd a prioritási sorból a legjobb `f = g + h` értékű cellát
+választja ki.
 
 Például a `(0, 0)` cellából a szabad szomszédok lehetnek `(0, 1)` és `(1, 0)`.
-Mindkettő `N` jelölést kap a szimulációban. Ha `(0, 1)` kapja a kedvezőbb
-prioritást, akkor ez lesz a következő `C`, később pedig `X`; `(1, 0)` nem tűnik
-el, csak várakozó jelöltként marad a prioritási sorban. Ezért az animációban
-az `N` karikák mutatják a helyi döntési lehetőségeket, az `X` pontok pedig a
-tényleges feldolgozási sorrendet.
+Mindkettő megjelenik a `neighbor_scores` adatai között. Ha `(0, 1)` kapja a
+kedvezőbb prioritást, akkor ez lesz a következő feldolgozott cella, míg
+`(1, 0)` várakozó jelöltként maradhat a `priority_queue` adataiban.
 
 A `priority_queue` ugyanezen lépés után a még várakozó, érvényes jelölteket
 tárolja `f` szerint rendezve. A szimuláció bal oldali panelje ezt a listát
-mutatja. A `>>` jelölés mindig a lista első elemét jelenti, vagyis azt a
-cellát, amelyet az A* a következő körben kiválasztana. A lista minden kézi
-`Következő` lépésnél frissül, ezért a térkép és a prioritási sorrend együtt
-magyarázza az útvonal kialakulását.
+mutatja. A lista első eleme az a cella, amelyet az A* a következő körben
+kiválasztana. A lista minden kézi `Kovetkezo` lépésnél frissül, ezért a térkép
+és a prioritási sorrend együtt magyarázza az útvonal kialakulását.
 
-A szimuláció a súlyokat is kiírja az `N` jelölések mellett:
+A szimuláció a prioritási panelen kiírja a `neighbor_scores` és a
+`priority_queue` alapján megjelenített súlyokat:
 
 - `g`: a starttól a jelöltig vezető eddigi költség;
 - `h`: a jelölttől a célig becsült költség;
@@ -379,16 +386,15 @@ indítja el a szimulációt. Itt módosítható a térkép szélessége és maga
 `resolution`, a robot sugara, a start- és célcella, az átlós mozgás, valamint a
 heurisztika. Az automatikus lejátszás alapértelmezés szerint be van kapcsolva,
 így a tervezés és a robot mozgása kattintás nélkül végigfut; kikapcsolva a
-`Következő` gombbal lehet léptetni.
+`Kovetkezo` gombbal lehet léptetni.
 A start és a cél formátuma `sor,oszlop`, például `2,17`.
 
-Az `Utvonal simitasa` kapcsoló bekapcsolásakor az A* útvonalát a
-`path_smoothing.py` dolgozza fel. A jelenlegi megoldás ezt másodfokú
-Bézier-görbével végzi. Először törli a kollineáris, redundáns csomópontokat,
-majd a megmaradt pontok közé a
-$B(t)=(1-t)^2P_0+2t(1-t)P_1+t^2P_2$ képletű görbét illeszti.
-A rácsra kerekített görbepontokat és az átmeneteket ütközés szempontjából
-ellenőrzi; ha a görbe nem biztonságos, az eredeti A* útvonal marad meg.
+Az `Utvonal simitasa` kapcsoló alapértelmezés szerint be van kapcsolva. Bekapcsolt
+állapotban az A* útvonalát a
+`path_smoothing.py` dolgozza fel. A jelenlegi megoldás megkeresi a közel
+derékszögű kanyarokat, a valódi kanyarokhoz másodfokú Bézier-görbét készít,
+majd a mintapontokat kerekítve ütközés és szomszédság szempontjából ellenőrzi.
+Ha a görbe nem biztonságos, az eredeti A* útvonal marad meg.
 
 ## 7. A mozgási költség
 
@@ -407,7 +413,7 @@ Ha `resolution=0.1`, akkor ezek a cellalépések fizikailag 0,1 méteres, illetv
 4. Egyébként lekérjük a szabad szomszédokat a `GridMap.get_neighbors` segítségével.
 5. Minden szomszédra kiszámoljuk az új `g` költséget.
 6. Ha ez jobb, mint a korábban ismert költség, frissítjük a szülőt és a prioritást.
-7. Ha az `open_nodes` lista kiürül cél elérése nélkül, nincs út.
+7. Ha az `open_list` lista kiürül cél elérése nélkül, nincs út.
 
 Az elavult lista-bejegyzéseket ez a feltétel hagyja figyelmen kívül:
 
@@ -416,7 +422,7 @@ if current_g > g_costs[current]:
     continue
 ```
 
-Erre azért van szükség, mert egy cellához később jobb út is érkezhet, miközben a régi bejegyzés még bent marad a listában. Ez a megoldás tanulási célból egyszerűbb, de nagy térképen lassabb lehet, mert a `min(open_nodes)` minden körben végignézi a listát.
+Erre azért van szükség, mert egy cellához később jobb út is érkezhet, miközben a régi bejegyzés még bent marad a listában. Ez a megoldás tanulási célból egyszerűbb, de nagy térképen lassabb lehet, mert a `min(open_list)` minden körben végignézi a listát.
 
 ## 8. Konkrét számolási példa
 
@@ -462,6 +468,8 @@ A `tests/test_astar_baseline.py` teszteli:
 - akadály megkerülését;
 - elérhetetlen cél esetén a `None` eredményt;
 - az átlós mozgást;
+- a beépített és egyedi heurisztikák kiválasztását;
+- a részletes `search_steps` és `priority_queue` adatok létrejöttét;
 - foglalt kezdőcella elutasítását.
 
 A tesztek a Python beépített `unittest` modulját használják, ezért külön tesztkeretrendszer nélkül is futtathatók:
@@ -561,18 +569,17 @@ Ez egy szándékosan rövid, kétpaneles megjelenítő, amely a DWA-szimuláció
 1. a bal oldalon az aktuális prioritási sort mutatja `g`, `h`, `f` értékekkel;
 2. ugyanitt kiírja a prioritási függvényt: $f(n)=g(n)+h(n)$, ahol `g(n)` az eddigi út költsége, `h(n)` a célhoz tartozó becslés, `f(n)` pedig a teljes prioritási érték;
 3. átlós keresésnél a könnyebben értelmezhető Euklideszi heurisztikát használja: `h(n) = sqrt(dr^2 + dc^2)`, ahol `dr` és `dc` az aktuális cella és a cél sor-, illetve oszlopkülönbsége;
-4. ugyanitt láthatók a lépésköltségek: egyenes lépés `1,0`, átlós lépés `sqrt(2)`, valamint a fontos demo-paraméterek;
-4. a jobb oldalon kirajzolja az akadályokat, a vizsgált cellákat és az aktuális `C` cellát;
-5. a tervezés végén megjeleníti a visszaépített kék útvonalat;
-6. a robot egyszerű, köztes pontokból álló trajektórián követi ezt az útvonalat;
-7. a `Következő` gombbal vagy a jobb nyíllal egyetlen lépést halad;
-8. az `Újrakezdés` gomb visszaállítja az első lépést.
+4. ugyanitt láthatók a lépésköltségek: egyenes lépés `1,0`, átlós lépés `sqrt(2)`, valamint a demo-paraméterek;
+5. a jobb oldalon kirajzolja az akadályokat, a vizsgált cellákat, az aktuális keresési cellát, a startot és a célt;
+6. a tervezés végén megjeleníti az eredeti és szükség esetén a Bézier-simított útvonalat;
+7. a robot a kiválasztott trajektóriát és annak nyomát animálja;
+8. az automatikus lejátszás mellett a `Kovetkezo` és `Ujrakezdes` gomb, illetve a jobb nyíl kézi vezérlést ad.
 
-A szimuláció kézi léptetésű. A `Következő` gomb vagy a jobb nyíl egyetlen
-keresési képkockát továbbít, az `Újrakezdés` pedig visszaállítja az első
-lépést. A régi `X` cellák csak halvány pontként maradnak a térképen, a
-részletes súlyok pedig csak az aktuális `N` szomszédoknál láthatók, hogy az
-ábra ne legyen túlzsúfolt.
+A prioritási panel a tényleges `priority_queue` tartalmát mutatja, legfeljebb
+nyolc várakozó elemmel. A térképen a halvány pontok a feldolgozott
+`expanded_nodes` cellák, a narancssárga jelölő az aktuális keresési cella, a
+robot pedig csak a tervezési szakasz után jelenik meg. A kód nem használ külön
+`X`, `N` vagy `O` szöveges cellajelöléseket.
 
 Jelölések:
 
@@ -591,12 +598,19 @@ run_simulation()
 Ez a szimuláció belépési pontja:
 
 ```text
-create_demo_map
-    -> astar_search(diagonal=True, return_details=True)
+beállítási ablak
+    -> create_demo_map
+    -> astar_search(diagonal=..., heuristic=..., return_details=True)
     -> expanded_nodes megjelenitese
+    -> smooth_path (ha engedélyezett)
     -> create_robot_trajectory
     -> plot_simulation
 ```
+
+A tényleges belépési sorrendben a `run_simulation()` először a Tkinter
+beállítási ablakot nyitja meg. Az alkalmazott értékekből a `_run_simulation()`
+létrehozza a demo térképet, kiválasztja a heurisztikát, lefuttatja az A*-ot,
+opcionálisan simít, majd létrehozza a trajektóriát és az animációt.
 
 A fájl közvetlen futtatása:
 
@@ -609,10 +623,10 @@ python -m codes_diploma.astar_project.astar_simulation
 Mutatja:
 
 - az ismert statikus rácstérképet;
-- az A* által vizsgált cellák állapotát (`X`), sorrendjét és aktuális celláját (`C`);
-- az aktuális cella tényleges szomszédjelöltjeit (`N`);
+- az A* által vizsgált cellákat (`expanded_nodes`) és az aktuális keresési cellát;
+- az aktuális prioritási sor részletes adatait (`g`, `h`, `f`);
 - az akadálykerülő A* globális útvonalat;
-- a végső útvonal celláit (`O`);
+- az eredeti és a ténylegesen használt útvonalat, ha a simítás engedélyezett;
 - a rács- és világkoordináták kapcsolatát;
 - a robot mozgását az útvonalon;
 - az útvonalat és a robot nyomát.
@@ -642,97 +656,28 @@ python -m unittest codes_diploma.astar_project.tests.test_astar_simulation -v
 ## A jelenlegi kód
 
 ```python
-"""Rovid, akadalybiztos masodfoku Bezier-utvonalsimitas."""
-
-
-def _bezier_point(start, control, end, t):
-    weight = 1 - t
-    return (
-        weight ** 2 * start[0] + 2 * weight * t * control[0] + t ** 2 * end[0],
-        weight ** 2 * start[1] + 2 * weight * t * control[1] + t ** 2 * end[1],
-    )
+def _bezier_point(start_point, control_point, end_point, parameter):
+    """Egy pontot számol egy másodfokú Bézier-görbén."""
 
 
 def _remove_straight_points(path):
-    if len(path) < 3:
-        return list(path)
-
-    # Az egyenes szakaszok köztes cellái nem adnak új irányinformációt.
-    result = [path[0]]
-    for index in range(1, len(path) - 1):
-        first, middle, last = path[index - 1:index + 2]
-        row_a = middle[0] - first[0]
-        column_a = middle[1] - first[1]
-        row_b = last[0] - middle[0]
-        column_b = last[1] - middle[1]
-        if row_a * column_b != column_a * row_b:
-            result.append(path[index])
-    result.append(path[-1])
-    return result
-
-
-def _curve_points(start, control, end, steps, round_points):
-    # Ugyanaz a Bezier-ciklus szolgál a rácsos ellenőrzéshez és a megjelenítéshez.
-    points = []
-    for index in range(steps + 1):
-        t = index / steps
-        point = _bezier_point(start, control, end, t)
-        if round_points:
-            point = (round(point[0]), round(point[1]))
-        if not points or point != points[-1]:
-            points.append(point)
-    return points
+    """Eltávolítja az egyenes szakaszok köztes pontjait."""
 
 
 def bezier_curve_points(path, samples_per_segment=10):
-    if len(path) < 3:
-        return list(path)
-
-    curve = [path[0]]
-    for index in range(1, len(path) - 1):
-        points = _curve_points(
-            path[index - 1], path[index], path[index + 1],
-            samples_per_segment, False
-        )
-        curve.extend(points[1:])
-    curve.append(path[-1])
-    return curve
+    """Folytonos pontokat készít a valódi kanyarok körül."""
 
 
-def _valid_path(grid_map, path, diagonal):
-    """Ellenorzi a Bezierbol kapott racsutvonalat."""
-    # Először a cellákat, utána a cellák közötti lépéseket ellenőrizzük.
-    for cell in path:
-        if not grid_map.is_free(*cell):
-            return False
-
-    for current, next_cell in zip(path, path[1:]):
-        neighbors = grid_map.get_neighbors(*current, diagonal)
-        if next_cell not in neighbors:
-            return False
-    return True
+def _is_path_safe(grid_map, path, diagonal=False):
+    """Kerekített cellákon ellenőrzi az akadályt és a szomszédságot."""
 
 
-def smooth_path(grid_map, path, diagonal=False):
-    """Bezier-gorbebol keszit simabb, tovabbra is biztonsagos utat."""
-    if len(path) < 3:
-        return list(path)
+def smooth_path_bezier(grid_map, path, samples_per_curve=8, diagonal=False):
+    """Biztonságos másodfokú Bézier-simítást készít."""
 
-    # Sikertelen ellenőrzésnél az eredeti A* útvonal marad.
-    path = _remove_straight_points(path)
-    result = [path[0]]
-    for index in range(1, len(path) - 1):
-        row_span = abs(path[index + 1][0] - path[index - 1][0])
-        column_span = abs(path[index + 1][1] - path[index - 1][1])
-        steps = max(2, 2 * max(row_span, column_span))
-        curve = _curve_points(
-            path[index - 1], path[index], path[index + 1], steps, True
-        )
-        result.extend(point for point in curve[1:] if point != result[-1])
 
-    if result[-1] != path[-1]:
-        result.append(path[-1])
-    return result if _valid_path(grid_map, result, diagonal) else list(path)
+def smooth_path(grid_map, path, diagonal=False, samples_per_curve=8):
+    """Kompatibilis belépési pont a Bézier-simításhoz."""
 ```
 
 ## 1. A fájl célja
@@ -743,8 +688,10 @@ Utófeldolgozásként működik:
 
 ```text
 A* útvonal
-    -> kollineáris pontok törlése
-    -> másodfokú Bézier-pontok számítása
+    -> egyenes köztes pontok eltávolítása
+    -> három kontrollpont meghatározása minden kanyarnál
+    -> másodfokú Bézier-pontok mintavétele
+    -> ellenőrzéshez cellákra kerekítés
     -> rácsos akadály- és szomszédsági ellenőrzés
     -> elfogadott simított út vagy eredeti útvonal
 ```
@@ -761,13 +708,13 @@ Ez azt jelenti, hogy a robot két cellát vízszintesen halad, majd egy sort
 lefelé fordul. A rácskoordináta nem méterben megadott világkoordináta. Ha a
 `GridMap` `resolution` értéke `0.2`, akkor egy rácslépés `0.2 m`.
 
-## 3. A Bézier-matematika
+## 3. A másodfokú Bézier-matematika
 
-A tanulmányban használt másodfokú Bézier-görbe három ponttal dolgozik:
+Egy kanyarhoz három pontot használunk:
 
-- `P0`: kezdőpont;
-- `P1`: kontrollpont, amely a görbe hajlását irányítja;
-- `P2`: végpont.
+- `P0`: a kanyar kezdőpontja;
+- `P1`: az eredeti A* kanyarcellája, vagyis a kontrollpont;
+- `P2`: a kanyar végpontja.
 
 A képlet:
 
@@ -776,9 +723,8 @@ B(t)=(1-t)^2P_0+2(1-t)tP_1+t^2P_2,
 \qquad 0\leq t\leq 1.
 $$
 
-Az `t=0` értéknél a görbe `P0`-ból indul, `t=1` értéknél `P2`-be érkezik.
-A `P1` pont felé hajlik, de nem feltétlenül halad át rajta. Ez tompítja az
-A* által létrehozott derékszögű fordulókat.
+A `t` értéke `0` és `1` között változik. A görbe a `P0` pontból indul, a
+`P2` pontba érkezik, és a `P1` kontrollpont felé hajlik.
 
 ### Konkrét számolási példa
 
@@ -805,79 +751,60 @@ Az oszlopérték:
 = 1,5
 ```
 
-Tehát a folytonos görbe középső pontja `(0,5; 1,5)`. A rácsos biztonsági
-ellenőrzéshez ez egész cellára kerekedik, a megjelenítő viszont a tört értéket
-is megtartja, ezért a piros Bézier-vonal simábbnak látszik.
+A görbe mintapontja tehát `(0,5; 1,5)`. Ez folytonos koordináta, amelyet a
+megjelenítő megtart, a biztonsági ellenőrzés viszont egész rácscellára kerekít.
 
 ## 4. A fontos függvények
 
-### `_bezier_point(start, control, end, t)`
+### `_bezier_point(start_point, control_point, end_point, parameter)`
 
-Egyetlen pontot számol a fenti képlettel. A `row` és `column` koordinátát
-külön kezeli, ezért a függvény rácspontokhoz és folytonos megjelenítési
-pontokhoz is használható.
+A másodfokú Bézier-képletet alkalmazza egyetlen `t` értékre. A `weight` a
+`1 - t`, ezért a három pont súlya fokozatosan változik a görbe mentén.
 
 ### `_remove_straight_points(path)`
 
-A függvény a három egymást követő pontból képzett vektorok keresztszorzatát
-vizsgálja. Ha az érték `0`, a pontok egy egyenesre esnek, ezért a középső
-pont törölhető. Például:
-
-Ha három egymás utáni pont azonos irányban fekszik, a középső pont nem ad új
-információt, ezért törölhető:
-
-```text
-(0, 0) -> (0, 1) -> (0, 2)
-```
-
-Ebből ez marad:
-
-```text
-(0, 0) -> (0, 2)
-```
-
-Fordulónál az irány megváltozik, ezért a középső pont megmarad kontrollpontnak.
-
-### `_curve_points(start, control, end, steps, round_points)`
-
-Mintapontokat készít a Bézier-görbéből. A `steps` adja meg a minták számát,
-a `round_points` pedig eldönti, hogy rácscellákra kerekítsen-e. Így ugyanaz az
-egyszerű ciklus használható a biztonsági ellenőrzéshez és a sima rajzoláshoz.
-
-### `_valid_path(grid_map, path, diagonal)`
-
-Két dolgot ellenőriz:
-
-1. minden új pont szabad cellában van-e;
-2. minden két egymást követő pont valódi szomszéd-e a `GridMap` szabályai szerint.
-
-Ez védi ki azt az esetet, amikor a Bézier-görbe egy akadályba hajlik, vagy a
-kerekítés után két nem szomszédos cellát próbál összekötni.
-
-### `smooth_path(grid_map, path, diagonal=False)`
-
-Ez a modul fő függvénye. Rövid útvonalat változatlanul ad vissza. Hosszabb
-útvonalnál először törli az egyenes szakaszok redundáns pontjait, ezután minden
-három egymást követő pontból Bézier-szakaszt készít. A végén lefuttatja a
-`_valid_path` ellenőrzést.
-
-Ha az új útvonal nem biztonságos, az eredeti A* útvonalat adja vissza. Ez a
-legfontosabb biztonsági tartalék: a látványos simaság nem írhatja felül az
-akadálykerülő útvonalat.
+A három egymást követő pontból képzett irányvektorok kereszt-szorzatát vizsgálja.
+Ha az érték nulla, a pontok egy egyenesre esnek, ezért a középső pontot nem kell
+simítani. Így egyenes útvonalnál nem keletkezik felesleges görbe.
 
 ### `bezier_curve_points(path, samples_per_segment=10)`
 
-Ez a függvény folytonos, lebegőpontos Bézier-pontokat készít. A szimuláció
-csak az `_safe_curve` külön ellenőrzése után használja robotpályának, mert egy
-ellenőrzés nélküli görbe két cella között átvághatna egy akadályon. Az alapvető
-elfogadási döntést a rácsos `smooth_path` és `_valid_path` hozza meg.
+Először eltávolítja az egyenes szakaszok köztes pontjait, majd minden valódi
+kanyarhoz három pontot választ. A szomszédos élek felezőpontjai adják a `P0`
+és `P2` kezdő- és végpontot, az eredeti kanyarcellája pedig a `P1` kontrollpont.
+Az eredmény folytonos, lebegőpontos rácskoordinátákból áll.
+
+### `_is_path_safe(grid_map, path, diagonal=False)`
+
+Egész cellákra kerekíti a görbe pontjait, majd ellenőrzi, hogy minden cella
+szabad-e, és minden egymást követő cella a `GridMap` engedélyezett szomszédja-e.
+Így az akadályba lógó görbe és a tiltott átlós sarokvágás elutasításra kerül.
+
+### `smooth_path_bezier(grid_map, path, samples_per_curve=8, diagonal=False)`
+
+A rácstérképpel együtt meghívja a folytonos Bézier-simítást, majd biztonsági
+ellenőrzést végez. Ha a simítás veszélyes, az eredeti A* útvonalat adja vissza.
+
+### `smooth_path(grid_map, path, diagonal=False, samples_per_curve=8)`
+
+Kompatibilis belépési pont, amely a `smooth_path_bezier` függvényt hívja.
+Azért maradt meg, mert az `astar_simulation.py` és a korábbi hívók ezt a nevet
+használják.
+
+### `bezier_curve_points(path, samples_per_segment=10)`
+
+Ez a függvény folytonos, lebegőpontos Bézier-pontokat készít. A szimuláció ezt
+használja a robot trajektóriájához.
 
 ## 5. Kapcsolat a szimulációval
 
-Az `astar_simulation.py` simítás nélkül a `smooth_path()` által visszaadott,
-rácsosan ellenőrzött útvonal cellaközeit használja. Simításkor a Bézier-pontokat
-az `_safe_curve` ellenőrzi: ha minden minta szabad és engedélyezett cellába esik,
-a robot a görbét követi; ellenkező esetben visszatér a rácsos trajektóriához.
+Az `astar_simulation.py` simítás nélkül az eredeti A* cellautat használja.
+Simításkor a `smooth_path()` biztonsági ellenőrzéssel folytonos Bézier-pontokat
+ad vissza, amelyeket a `create_robot_trajectory()` világkoordinátára alakít.
+Ha a biztonsági ellenőrzés elutasítja a görbét, az eredeti A* útvonal marad.
+A `plot_simulation()` `smoothed=True` jelzője ilyenkor a Bézier-vonalat a
+folytonos robottrajektóriából rajzolja, ezért a megjelenített út nem esik vissza
+az eredeti rácsos vonalra akkor sem, ha a kerekített cellalista változatlan marad.
 A piros vonal mindig a ténylegesen használt, biztonságos trajektóriát mutatja.
 
 Az automatikus lejátszás alapértelmezett időzítése `250 ms` a tervezési
@@ -890,6 +817,7 @@ használ, hogy a görbe rácsos ellenőrzése ne ugorjon át cellákat.
 A `test_path_smoothing.py` ellenőrzi, hogy:
 
 - a Bézier-simítás eltérhet az eredeti törött úttól;
+- az egyenes útvonal változatlan marad;
 - akadály mellett az útvonal nem kerülhet tiltott cellába;
 - a kezdő- és végpont megmarad.
 

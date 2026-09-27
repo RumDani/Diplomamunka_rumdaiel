@@ -42,7 +42,32 @@ Ha a feladat eltér ettől a sorrendtől:
 2. Mondd ki röviden, mi a fájl feladata és mi változik.
 3. Végezd el a legkisebb szükséges kódmódosítást.
 4. Futtass célzott tesztet vagy más gyors ellenőrzést.
-5. Csak sikeres ellenőrzés után lépj tovább a következő fázisra.
+5. A lezárás előtt mindig végezz konzisztencia-auditot: vesd össze a jelenlegi kód tényleges függvényneveit, paramétereit, visszatérési értékeit, adatfolyamát, algoritmusát és megjelenítését a `codes_diploma/KODMAGYARAZATOK.md` érintett fejezeteivel és az `ASTAR_PROJEKT_FOLYAMATBRA.gv` ábrával.
+6. Keresd meg és javítsd az elavult, törölt vagy nem bizonyított állításokat; külön ellenőrizd a hívási sorrendet, a döntési ágakat, a képleteket, a konkrét számolási példákat és a tesztparancsokat.
+7. A frissített magyarázat és folyamatábra csak akkor tekinthető késznek, ha minden állítás visszavezethető a jelenlegi kódra vagy egy lefuttatott célzott tesztre. Ha egy eltérés nem javítható a jelenlegi munkamenetben, jelezd külön a lezárásban.
+8. Csak sikeres kód- és dokumentációs ellenőrzés után lépj tovább a következő fázisra.
+
+### Kötelező kód–magyarázat ellenőrzés
+
+Ezt az ellenőrzést minden részletes magyar kódmagyarázat, kódmódosítás és
+magyarázat-frissítés végén el kell végezni, akkor is, ha a kód nem változott.
+
+- A magyarázatban szereplő minden nyilvános és fontos belső függvénynév,
+	paraméter és visszatérési forma egyezzen a jelenlegi fájllal.
+- A leírt algoritmus, képlet, koordináta-átalakítás, alapértelmezett érték és
+	hibakezelés egyezzen a jelenlegi végrehajtással.
+- A magyarázatban szereplő összes matematikai képletet külön bontsd fel: nevezd
+	meg minden változó jelentését és mértékegységét, magyarázd el a műveletek
+	sorrendjét közérthetően, és adj hozzá legalább egy konkrét behelyettesítési
+	példát. Képlet nem maradhat csak leírva vagy megnevezve magyarázat nélkül.
+- A magyarázat ne tartalmazzon olyan felületi elemet, jelölést, gombot,
+	animációs állapotot vagy modult, amelyet a jelenlegi kód már nem használ.
+- A folyamatábra hívási sorrendjét és kapcsolatait is vesd össze a kóddal;
+	hívási sorrend, döntési ág vagy fontos adatkapcsolat eltérése esetén frissítsd.
+- Futtasd a legszűkebb érintett tesztet, majd ha több modul vagy dokumentum
+	érintett, a teljes releváns tesztcsomagot is.
+- A lezárásban röviden rögzítsd, mit ellenőriztél, milyen parancs futott le, és
+	maradt-e ismert eltérés vagy figyelmeztetés.
 
 ## Magyarázat tartalma
 

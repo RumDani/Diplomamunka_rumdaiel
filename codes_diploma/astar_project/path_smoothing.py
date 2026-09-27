@@ -1,127 +1,288 @@
-"""Rovid, akadalybiztos masodfoku Bezier-utvonalsimitas."""
+"""Egyszeru, akadalybiztos masodfoku Bezier-utvonalsimitas."""
 
 
-def _bezier_point(start, control, end, t):
-	weight = 1 - t
+def _bezier_point(start_point, control_point, end_point, parameter):    #bemenet start pont, kontrollpont, vegpont, parameter
+	"""Egy pontot szamol a harom kontrollponttal megadott gorben."""
+	weight = 1 - parameter  # 
 	return (
-		weight ** 2 * start[0] + 2 * weight * t * control[0] + t ** 2 * end[0],
-		weight ** 2 * start[1] + 2 * weight * t * control[1] + t ** 2 * end[1],
+		weight ** 2 * start_point[0]
+		+ 2 * weight * parameter * control_point[0]
+		+ parameter ** 2 * end_point[0],
+		weight ** 2 * start_point[1]
+		+ 2 * weight * parameter * control_point[1]
+		+ parameter ** 2 * end_point[1],
 	)
 
 
 def _remove_straight_points(path):
+	"""Az egyenes szakaszok koztes pontjait eltavolitja."""
 	if len(path) < 3:
 		return list(path)
 
-	# Az egyenes szakaszok köztes cellái nem adnak új irányinformációt.
-	result = [path[0]]
-	for index in range(1, len(path) - 1):
-		first, middle, last = path[index - 1:index + 2]
-		row_a = middle[0] - first[0]
-		column_a = middle[1] - first[1]
-		row_b = last[0] - middle[0]
-		column_b = last[1] - middle[1]
-		if row_a * column_b != column_a * row_b:
-			result.append(path[index])
-	result.append(path[-1])
-	return result
+	turning_points = [path[0]]
+	for point_index in range(1, len(path) - 1):
+		previous_point = path[point_index - 1]
+		current_point = path[point_index]
+		next_point = path[point_index + 1]
+		incoming_row = current_point[0] - previous_point[0]
+		incoming_column = current_point[1] - previous_point[1]
+		outgoing_row = next_point[0] - current_point[0]
+		outgoing_column = next_point[1] - current_point[1]
+
+		# A kereszt-szorzat nulla, ha a harom pont egy egyenesre esik.
+		if incoming_row * outgoing_column != incoming_column * outgoing_row:
+			turning_points.append(current_point)
+
+	turning_points.append(path[-1])
+	return turning_points
 
 
-def _curve_points(start, control, end, steps, round_points):
-	# Ugyanaz a Bezier-ciklus szolgál a rácsos ellenőrzéshez és a megjelenítéshez.
-	points = []
-	for index in range(steps + 1):
-		t = index / steps
-		point = _bezier_point(start, control, end, t)
-		if round_points:
-			point = (round(point[0]), round(point[1]))
-		if not points or point != points[-1]:
-			points.append(point)
-	return points
+def _curve_points(start_point, control_point, end_point, sample_count):
+	"""Mintapontokat keszit egy kanyarodasi Bezier-szakaszbol."""
+	if sample_count <= 0:
+		raise ValueError("A Bezier-mintak szama legyen pozitiv.")
+
+	return [
+		_bezier_point(
+			start_point,
+			control_point,
+			end_point,
+			sample_index / sample_count,
+		)
+		for sample_index in range(sample_count + 1)
+	]
 
 
 def bezier_curve_points(path, samples_per_segment=10):
-	if len(path) < 3:
+	"""Folytonos pontokat keszit az utvonal valodi kanyarai korul."""
+	turning_points = _remove_straight_points(path)
+	if len(turning_points) < 3:
 		return list(path)
 
-	curve = [path[0]]
-	for index in range(1, len(path) - 1):
-		previous = path[index - 1]
-		current = path[index]
-		next_point = path[index + 1]
-		start = path[0] if index == 1 else (
-			(previous[0] + current[0]) / 2,
-			(previous[1] + current[1]) / 2,
+	curve = [turning_points[0]]
+	for point_index in range(1, len(turning_points) - 1):
+		previous_point = turning_points[point_index - 1]
+		control_point = turning_points[point_index]
+		next_point = turning_points[point_index + 1]
+
+		# A gorbe a szomszedos elek felezopontjai kozott halad.
+		start_point = (
+			(previous_point[0] + control_point[0]) / 2,
+			(previous_point[1] + control_point[1]) / 2,
 		)
-		end = path[-1] if index == len(path) - 2 else (
-			(current[0] + next_point[0]) / 2,
-			(current[1] + next_point[1]) / 2,
+		end_point = (
+			(control_point[0] + next_point[0]) / 2,
+			(control_point[1] + next_point[1]) / 2,
 		)
-		points = _curve_points(
-			start, current, end,
-			samples_per_segment, False
+		if point_index == 1:
+			start_point = turning_points[0]
+		if point_index == len(turning_points) - 2:
+			end_point = turning_points[-1]
+
+		segment_points = _curve_points(
+			start_point,
+			control_point,
+			end_point,
+			samples_per_segment,
 		)
-		curve.extend(points[1:])
-	curve.append(path[-1])
+		curve.extend(segment_points[1:])
+
+	curve.append(turning_points[-1])
 	return curve
 
 
-def _valid_path(grid_map, path, diagonal):
-	"""Ellenorzi a Bezierbol kapott racsutvonalat."""
-	# Először a cellákat, utána a cellák közötti lépéseket ellenőrizzük.
-	for cell in path:
-		if not grid_map.is_free(*cell):
-			return False
+def _is_path_safe(grid_map, path, diagonal=False):
+	"""A folytonos gorbe kerekitett cellait es lepeskapcsolatait ellenorzi."""
+	rounded_cells = [
+		(round(point[0]), round(point[1]))
+		for point in path
+	]
+	if not all(grid_map.is_free(*cell) for cell in rounded_cells):
+		return False
 
-	for current, next_cell in zip(path, path[1:]):
-		neighbors = grid_map.get_neighbors(*current, diagonal)
-		if next_cell not in neighbors:
-			return False
-	return True
+	return all(
+		current_cell == next_cell
+		or next_cell in grid_map.get_neighbors(*current_cell, diagonal)
+		for current_cell, next_cell in zip(rounded_cells, rounded_cells[1:])
+	)
 
 
-def smooth_path(grid_map, path, diagonal=False):
-	"""Bezier-gorbebol keszit simabb, tovabbra is biztonsagos utat."""
+def smooth_path_bezier(grid_map, path, samples_per_curve=8, diagonal=False):
+	"""Simiti a kanyarokon, veszely eseten az eredeti utat adja vissza."""
 	if len(path) < 3:
 		return list(path)
 
-	# Sikertelen ellenőrzéskor a hívó mindig a változatlan A* útvonalat kapja.
-	path = _remove_straight_points(path)
-	result = [path[0]]
-	for index in range(1, len(path) - 1):
-		row_span = abs(path[index + 1][0] - path[index - 1][0])
-		column_span = abs(path[index + 1][1] - path[index - 1][1])
-		steps = max(2, 2 * max(row_span, column_span))
-		curve = _curve_points(
-			path[index - 1], path[index], path[index + 1], steps, True
-		)
-		result.extend(point for point in curve[1:] if point != result[-1])
+	turning_points = _remove_straight_points(path)
+	if len(turning_points) < 3:
+		return list(path)
 
-	if result[-1] != path[-1]:
-		result.append(path[-1])
-	return result if _valid_path(grid_map, result, diagonal) else list(path)
+	smoothed_path = bezier_curve_points(path, samples_per_curve)
+	if _is_path_safe(grid_map, smoothed_path, diagonal):
+		return smoothed_path
+	return list(path)
 
 
-# -----------------------------------------------------------------------------
-# A FÁJL RÖVID MAGYARÁZATA
-#
-# A modul egy A* útvonalat kap, amely (sor, oszlop) rácscellák listája.
-# Először a _remove_straight_points törli az egyenes szakaszok köztes pontjait.
-# Ezután a smooth_path minden megmaradt hárompontos szakaszra alkalmazza a
-# másodfokú Bezier-képletet:
-#
-#     B(t) = (1-t)^2 * P0 + 2 * (1-t) * t * P1 + t^2 * P2
-#
-# Itt P0 a kezdőpont, P1 a kontrollpont, P2 a végpont, t pedig 0 es 1 kozott
-# valtozik. Peldaul P0=(0,0), P1=(0,2), P2=(2,2), t=0.5 eseten B(t)=(0.5,1.5).
-#
-# A _curve_points ezeket a pontokat mintazza. A smooth_path a biztonsagi
-# ellenorzeshez egesz racspontokra kerekiti oket, majd a _valid_path ellenorzi,
-# hogy minden cella szabad-e, es minden lepes engedelyezett szomszedsagi lepes-e.
-# Ha barmelyik cella foglalt vagy a lepes ervenytelen, az eredeti A* utvonalat
-# adja vissza. Emiatt ez a modul nem engedelyezhet veszelyes simitott utat.
-#
-# A bezier_curve_points kulon, folytonos pontokat keszit. Robotmozgasra csak
-# kulon biztonsagi ellenorzessel hasznalhato, mert ellenorzes nelkul a gorbe
-# akadalyba hajolhat.
-# -----------------------------------------------------------------------------
+def smooth_path(grid_map, path, diagonal=False, samples_per_curve=8):
+	"""A projekt korabbi hivoinak megtartott belepesi pont."""
+	return smooth_path_bezier(
+		grid_map,
+		path,
+		samples_per_curve=samples_per_curve,
+		diagonal=diagonal,
+	)
+
+
+"""Vizsgáljuk meg a kódot **függvényről függvényre, sorról sorra**, részletesen kitérve az összes paraméterre, belső változóra és a mögöttes logikára.
+
+---
+
+### 1. `_bezier_point(start_point, control_point, end_point, parameter)`
+
+Ez a függvény felelős a másodfokú Bézier-görbe egyetlen koordinátájának kiszámításáért egy adott $t$ paraméterhelyen.
+
+* **Paraméterek:**
+* `start_point`: Egy `(x, y)` vagy `(row, column)` koordinátapár, amely a Bézier-szakasz kezdőpontját ($P_0$) jelenti.
+* `control_point`: Egy koordinátapár, amely a kontrollpontot ($P_1$, azaz maga a sarokpont) adja meg, ami felé a görbe "hajlik".
+* `end_point`: Egy koordinátapár, amely a Bézier-szakasz végpontját ($P_2$) jelenti.
+* `parameter`: Egy lebegőpontos szám ($t$), amely $0.0$ és $1.0$ között mozog ($0$ a szakasz eleje, $1$ a vége).
+
+
+* **Belső változók:**
+* `weight`: Kiszámítja a `1 - parameter` értéket (ez a $(1-t)$ tényező a képletben).
+
+
+* **Működés:**
+* Behelyettesíti az értékeket a másodfokú Bézier-képletbe külön az $x$ és $y$ koordinátára:
+$\text{koordináta} = (1-t)^2 \cdot P_{0} + 2(1-t)t \cdot P_{1} + t^2 \cdot P_{2}$.
+* Visszatér egy új, simított `(x, y)` ponttal (ami már lebegőpontos tizedesjegyeket is tartalmazhat).
+
+
+
+---
+
+### 2. `_remove_straight_points(path)`
+
+Az A* által adott útvonal sok felesleges, egymás melletti pontot tartalmaz egyenes szakaszokon. Ez a függvény kiszűri őket, hogy csak a sarkok maradjanak.
+
+* **Paraméterek:**
+* `path`: Az eredeti rácspontok listája (pl. `[(0,0), (0,1), (0,2), (1,3), ...]`).
+
+
+* **Belső változók:**
+* `turning_points`: Egy lista, amely kezdetben csak a kezdőpontot (`path[0]`) tartalmazza, ide gyűjtjük majd a sarkokat.
+* `point_index`: A ciklus futóindexe, amivel egyesével haladunk végig a belső pontokon.
+* `previous_point`, `current_point`, `next_point`: Egy hármas ablak ($m-1, m, m+1$) a szomszédos csomópontok vizsgálatához.
+* `incoming_row`, `incoming_column`: Az érkező vektor komponensei (`current` minus `previous`).
+* `outgoing_row`, `outgoing_column`: A távozó vektor komponensei (`next` minus `current`).
+
+
+* **Működés:**
+* Két vektoriális irányt hasonlít össze kereszt-szorzattal (`incoming_row * outgoing_column != incoming_column * outgoing_row`).
+* Ha a kereszt-szorzat nem nulla, az azt jelenti, hogy az irány megváltozott (vagyis a pont egy kanyar / sarok). Ekkor bekerül a `turning_points`-ba. Ha nulla, az azt jelenti, hogy a pont egy egyenes része, így a kód figyelmen kívül hagyja (kidobja).
+* Végül hozzáadja a célpontot (`path[-1]`) is, majd visszatér a sarkok listájával.
+
+
+
+---
+
+### 3. `_curve_points(start_point, control_point, end_point, sample_count)`
+
+Egy adott kanyar szakaszhoz tartozó összes mintapontot generálja le a Bézier-képlet ismételt meghívásával.
+
+* **Paraméterek:**
+* `start_point`: A kanyar kezdőpontja.
+* `control_point`: A kanyar kontrollpontja (sarok).
+* `end_point`: A kanyar végpontja.
+* `sample_count`: Egész szám, amely megadja, hogy hány darab kis lépésre (mintára) bontsa fel a kanyar ívét.
+
+
+* **Belső változók:**
+* `sample_index`: A ciklusban $0$-tól `sample_count`-ig számoló index.
+
+
+* **Működés:**
+* Ellenőrzi, hogy a `sample_count` pozitív-e (ha nem, `ValueError`-t dob).
+* Egy listagenerátorral végigfut a lépéseken, kiszámolja a $t = \text{sample\_index} / \text{sample\_count}$ arányt, meghívja a `_bezier_point`-ot, és összegyűjti az ív pontjait egy listába.
+
+
+
+---
+
+### 4. `bezier_curve_points(path, samples_per_segment=10)`
+
+Ez szervezi össze a teljes útvonal simítását a sarkok és a kanyarok között.
+
+* **Paraméterek:**
+* `path`: Az eredeti A* útvonal.
+* `samples_per_segment`: Hány mintapontot készítsen egy-egy kanyarhoz (alapértelmezésben `10`).
+
+
+* **Belső változók:**
+* `turning_points`: A `_remove_straight_points(path)` által megtisztított sarkok listája.
+* `curve`: Az épülő, simított útvonalat tároló lista, amely a kezdőponttal indul.
+* `point_index`: A sarkokon végigiteráló index.
+* `previous_point`, `control_point`, `next_point`: A soron következő sarok és a szomszédai.
+* `start_point`, `end_point`: A Bézier-ív tényleges kezdő- és végpontja. *Megjegyzés:* Ezeket a kód a szomszédos élek **felezőpontjainál** veszi fel, kivéve a teljes út elejét és végét, ahol rögzítetten a valódi kezdő/végpontot használja.
+* `segment_points`: Az aktuális kanyarhoz generált pontok listája.
+
+
+* **Működés:**
+* Végigmegy a sarkokon, kiszámolja a felezőpontok alapján a Bézier-ívek határait, generálja a pontokat a `_curve_points`-szal, majd hozzáfűzi a `curve` listához (ügyelve arra, hogy a csatlakozási pontok ne duplázódjanak meg a `segment_points[1:]` szeleteléssel).
+
+
+
+---
+
+### 5. `_is_path_safe(grid_map, path, diagonal=False)`
+
+Ez a legfontosabb **biztonsági védőháló**, ami garantálja, hogy a robot ne ütközzön neki semminek a simítás miatt.
+
+* **Paraméterek:**
+* `grid_map`: A térkép objektum (amelyben az akadályok helye van tárolva).
+* `path`: A simított, lebegőpontos koordinátákat tartalmazó útvonal.
+* `diagonal`: Logikai érték (`True` / `False`), ami engedélyezi-e az átlós rácslépéseket.
+
+
+* **Belső változók:**
+* `rounded_cells`: Mivel a Bézier-görbe tizedesjegyeket ad (pl. `(1.23, 4.56)`), ez a lista **egész rácscellákra kerekíti** (`round()`) az összes pontot, hogy illeszkedjenek a diszkrét rácstérképre.
+* `current_cell`, `next_cell`: Az egymást követő cellák a `zip()` iterációban.
+
+
+* **Működés:**
+1. Ellenőrzi, hogy a kerekített útvonal **minden egyes cellája szabad-e** (`grid_map.is_free(*cell)`). Ha bárhol akadályba ütközne, azonnal `False`-lal visszatér.
+2. Ellenőrzi a lépéskapcsolatokat is: a `grid_map.get_neighbors(...)` segítségével megnézi, hogy az egymást követő pontok valóban szomszédos, szabályos lépések-e a rácson (így a robot nem tud "átugrani" egy falat vagy illegális ugrást tenni). Ha minden rendben, `True`-t ad vissza.
+
+
+
+---
+
+### 6. `smooth_path_bezier(grid_map, path, samples_per_curve=8, diagonal=False)`
+
+A fő vezérlőfüggvény, ami összehozza a generálást és a biztonsági ellenőrzést.
+
+* **Paraméterek:**
+* `grid_map`: A térkép objektum.
+* `path`: Az eredeti A* útvonal.
+* `samples_per_curve`: A kanyarok finomsága (alapértelmezett: `8` mintapont kanyaroonként).
+* `diagonal`: Átlós mozgás engedélyezése.
+
+
+* **Belső változók:**
+* `turning_points`: A kiszűrt sarkok listája.
+* `smoothed_path`: A `bezier_curve_points` által legyártott simított útvonal.
+
+
+* **Működés:**
+* Ha az útvonal túl rövid (< 3 pont), simítás nélkül visszaadja.
+* Lefuttatja a Bézier-simítást (`smoothed_path`).
+* Meghívja az `_is_path_safe`-et. **Ha a simított út biztonságos, akkor a simított utat adja vissza. Ha viszont a kanyar miatt a robot túl közel menne egy falhoz (vagyis nem biztonságos), akkor a kód eldobja az egészet, és az eredeti, garantáltan biztonságos A* útvonalat adja vissza.**
+
+
+
+---
+
+### 7. `smooth_path(grid_map, path, diagonal=False, samples_per_curve=8)`
+
+* **Paraméterek:** Ugyanazok, mint az előző függvénynél.
+* **Működés:** Ez egy **kompatibilitási burkolófüggvény (wrapper)**. Ha a projekted más moduljai korábban a `smooth_path` nevet hívták meg, ez a függvény változatlanul továbbítja az összes paramétert a `smooth_path_bezier`-nek, így nem kell átírnod a többi fájlodban a függvényhívásokat.
+    """
