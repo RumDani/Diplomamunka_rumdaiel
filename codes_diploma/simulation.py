@@ -59,8 +59,10 @@ def create_scene(width=30, height=20, resolution=0.2, start_cell=(2, 2), goal_ce
 	state = robotstate(x=start[0], y=start[1], irany=0.0)
 	static_obstacles = [Obstacle(*grid_map.grid_to_world(*cell), radius=0.12) for cell in static_cells]
 	dynamic_obstacles = [
-		Obstacle(2.5, 1.2, radius=0.18, vx=0.0, vy=0.18),
-		Obstacle(4.3, 2.8, radius=0.18, vx=-0.12, vy=0.0),
+		# Az elso akadaly alulrol keresztezi az A* + Bezier utat a kozepso szakaszon.
+		Obstacle(2.4, 0.4, radius=0.18, vx=0.0, vy=0.25),
+		# A masodik akadaly jobbrol balra halad a kesobbi vizszintes szakaszon.
+		Obstacle(6.8, 2.1, radius=0.18, vx=-0.25, vy=0.0),
 	]
 	return grid_map, start_cell, goal_cell, start, goal, state, static_obstacles, dynamic_obstacles
 
