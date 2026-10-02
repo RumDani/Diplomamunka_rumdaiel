@@ -41,6 +41,7 @@ class TestDwaA(unittest.TestCase):
 		result = planner.plan_local(robotstate(x=0.5, y=0.5))
 
 		self.assertEqual(len(path), 5)
+		self.assertIn(result["target"], planner.waypoints)
 		self.assertEqual(result["target"], planner.waypoints[planner.waypoint_index])
 		self.assertEqual(len(result["best_pair"]), 4)
 		self.assertTrue(all(
@@ -51,7 +52,7 @@ class TestDwaA(unittest.TestCase):
 	def test_waypoint_changes_only_after_reaching_active_point(self):
 		planner_class = load_planner_class()
 		grid_map = GridMap(width=5, height=1, resolution=1.0)
-		planner = planner_class(grid_map, config=robotconfig(), diagonal=False)
+		planner = planner_class(grid_map, config=robotconfig(), diagonal=False, waypoint_tolerance=0.1)
 		planner.plan_global((0.1, 0.1), (4.1, 0.1), smooth=False)
 
 		planner.plan_local(robotstate(x=0.5, y=0.5))

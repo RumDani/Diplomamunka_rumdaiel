@@ -11,7 +11,7 @@ from codes_diploma.robot import Goal, robotconfig
 class AStarDWAPlanner:
 	"""Az A* waypointot ad a DWA lokális tervezőjének."""
 
-	def __init__(self, grid_map, config=None, diagonal=True, waypoint_tolerance=0.2, waypoint_spacing=0.12):
+	def __init__(self, grid_map, config=None, diagonal=True, waypoint_tolerance=0.2, waypoint_spacing=0.2):
 		self.grid_map = grid_map
 		self.config = config or robotconfig()
 		self.diagonal = diagonal
@@ -30,27 +30,33 @@ class AStarDWAPlanner:
 		return max(0.05, min(self.waypoint_tolerance, goal_distance * 0.2))
 
 	@staticmethod
-	def _create_waypoints(path, spacing=0.12):
-		"""Ritka, sorrendben kovetheto pontokat keszit a simitott utbol."""
+	def _create_waypoints(path, spacing=0.2):
+		"""Egyenletes tavolsagu pontokat keszit a simitott ut teljes hosszan."""
 		if not path:
 			return []
 		waypoints = [path[0]]
-		accumulated_distance = 0.0
-		for previous, current in zip(path, path[1:]):
-			accumulated_distance += math.hypot(current[0] - previous[0], current[1] - previous[1])
-			if accumulated_distance < spacing:
+		remaining_distance = spacing
+		segment_start = path[0]
+		for segment_end in path[1:]:
+			segment_dx = segment_end[0] - segment_start[0]
+			segment_dy = segment_end[1] - segment_start[1]
+			segment_length = math.hypot(segment_dx, segment_dy)
+			if segment_length == 0:
 				continue
-			if len(waypoints) < 2:
-				waypoints.append(current)
-			else:
-				previous_waypoint = waypoints[-2]
-				last_waypoint = waypoints[-1]
-				incoming = (last_waypoint[0] - previous_waypoint[0], last_waypoint[1] - previous_waypoint[1])
-				outgoing = (current[0] - last_waypoint[0], current[1] - last_waypoint[1])
-				if incoming[0] * outgoing[0] + incoming[1] * outgoing[1] < 0:
-					continue
-				waypoints.append(current)
-			accumulated_distance = 0.0
+			while segment_length >= remaining_distance:
+				ratio = remaining_distance / segment_length
+				point = (
+					segment_start[0] + ratio * segment_dx,
+					segment_start[1] + ratio * segment_dy,
+				)
+				waypoints.append(point)
+				segment_start = point
+				segment_dx = segment_end[0] - segment_start[0]
+				segment_dy = segment_end[1] - segment_start[1]
+				segment_length = math.hypot(segment_dx, segment_dy)
+				remaining_distance = spacing
+			remaining_distance -= segment_length
+			segment_start = segment_end
 		if waypoints[-1] != path[-1]:
 			waypoints.append(path[-1])
 		return waypoints
@@ -110,6 +116,8 @@ class AStarDWAPlanner:
 		):
 			self.waypoint_index += 1
 
+		# Pure Pursuit look-ahead: az aktiv waypoint marad az allapotgep celja,
+		# a DWA viszont egy elorebb levo pontot kap a simitott utvonalrol.
 		target = self.waypoints[self.waypoint_index]
 		is_final_waypoint = self.waypoint_index == len(self.waypoints) - 1
 		slow_down_distance = 0.5 if is_final_waypoint else 0.35

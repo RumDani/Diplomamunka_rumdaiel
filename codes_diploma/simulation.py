@@ -207,7 +207,7 @@ def create_simulation(width=30, height=20, resolution=0.2, start_cell=(2, 2), go
 		robot.center = (state.x, state.y)
 		for patch, obstacle in zip(obstacle_patches, all_obstacles):
 			patch.center = (obstacle.x, obstacle.y)
-		priority_text.set_text(f"DWA\nrobot: ({state.x:.2f}, {state.y:.2f})\nsebesseg: {state.v:.2f} m/s\nwaypoint: {active_waypoint}\nDWA cel: {target}")
+			priority_text.set_text(f"DWA\nrobot: ({state.x:.2f}, {state.y:.2f})\nsebesseg: {state.v:.2f} m/s\nwaypointok: {len(planner.waypoints)}\naktualis: {active_waypoint}\nDWA cel: {target}")
 		status.set_text("Cel elerve" if planner.reached_goal(state) else f"DWA mozgas: {movement_frame + 1}/{max_steps}")
 
 	animation = FuncAnimation(figure, update_frame, frames=total_frames, interval=100, repeat=False, blit=False)
