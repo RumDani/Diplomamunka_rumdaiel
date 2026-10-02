@@ -1,18 +1,3 @@
-# Kódmagyarázatok
-
-Ez a dokumentum a diplomamunka kódjának részletes, magyar nyelvű magyarázatait gyűjti.
-
-## Frissítési szabály
-
-Ha a kód működése, paraméterei, adatszerkezete vagy algoritmusa megváltozik, a hozzá tartozó magyarázatot is ellenőrizni és szükség esetén frissíteni kell. A magyarázatnak mindig a jelenlegi kódot kell leírnia.
-
-A dokumentáció lezárása előtt a jelenlegi kódot, a közvetlen teszteket, az érintett
-magyarázati fejezeteket és a Graphviz-folyamatábrát együtt kell ellenőrizni. Az
-ellenőrzésnek ki kell terjednie a függvénynevekre, paraméterekre, visszatérési
-értékekre, képletekre, hívási sorrendre és a tényleges megjelenítésre is.
-
-Az A*-fejlesztés aktuális függvényhívási és modulkapcsolati Graphviz-ábrája az [ASTAR_PROJEKT_FOLYAMATBRA.gv](ASTAR_PROJEKT_FOLYAMATBRA.gv) fájlban található. Hívási sorrend vagy fontos adatkapcsolat változásakor azt is frissíteni kell.
-
 ---
 
 # `astar_project/grid_map.py`
@@ -829,3 +814,195 @@ python -m unittest codes_diploma.astar_project.tests.test_path_smoothing -v
 
 Szűk folyosóban vagy akadály sarkánál a görbe elutasítható. Ilyenkor a modul
 nem erőlteti a simítást, hanem az eredeti A* útvonalat tartja meg.
+
+---
+
+# A közös robotmag és az A*–DWA első integrációja
+
+## 1. A fájlok célja
+
+A `codes_diploma/robot.py` a robotmodellt, a `codes_diploma/DWA.py` a lokális DWA-t, a `codes_diploma/DWA+A.py` pedig az A* és a DWA kapcsolatát tartalmazza.
+
+## 2. Adatfolyam és fontos adatok
+
+Az A* bemenete `GridMap`, valamint a start- és célpont világkoordinátája. A `DWA+A.py` az `astar_search()` eredményét waypointlistává alakítja, majd a `robotstate` és `Obstacle` lista alapján meghívja az `optimisation()` függvényt. A kimenet az eredeti `[v, w, w_L, w_R]` forma.
+
+`robotstate` mezői: `x`, `y`, `v`, `w`, `irany`, `w_L` és `w_R`. Az `Obstacle` kör alakú; a `vx` és `vy` mezők az egyenletes mozgás sebességét jelentik. A `move(dt)` frissíti az akadály helyét.
+
+## 3. Robotparaméterek és kinematika
+
+Az alapértelmezett `robotconfig` keréksugara `0,033 m`, tengelytávja `0,08 m`, maximális keréksebessége `15 rad/s`, időlépése `0,1 s`, előretekintése `3 s`, robotrádiusza `0,10 m`, biztonsági margója pedig `0,15 m`.
+
+A differenciális hajtás összefüggései:
+
+$$
+v = r\frac{\omega_L + \omega_R}{2},
+\qquad
+\omega = r\frac{\omega_R - \omega_L}{b}
+$$
+
+Itt `r` a kerék sugara méterben, `b` a tengelytáv méterben, `omega_L` és `omega_R` a kerekek radián/másodperc egységű szögsebességei, `v` a robot lineáris sebessége méter/másodpercben, `omega` pedig a fordulási sebesség radián/másodpercben. Például `10 rad/s` azonos keréksebességnél:
+
+$$
+v = 0{,}033\frac{10+10}{2} = 0{,}33\ \mathrm{m/s},
+\qquad
+\omega = 0{,}033\frac{10-10}{0{,}08} = 0\ \mathrm{rad/s}
+$$
+
+Ez egyenes haladást jelent. Az `update()` az eredeti képlettel korlátozza a keréksebesség változását: egy `0,1 s` időlépésben legfeljebb `(2 / 0,033) * 0,1` radián/másodperc változás engedélyezett.
+
+## 4. A DWA döntési menete
+
+A `pairstochoose()` és a `safepairs()` az aktuális keréksebesség körül dinamikus ablakot képez. A `safepairs()` csak előrehaladó (`v >= 0`) párokat engedélyez. Az `optimisation()` a köztes waypointok előtt bátran halad, és csak az utolsó `0,2 m`-en igazítja a sebességet; a végső célpontnál a lassítási zóna `0,5 m`.
+
+Egy `0,10 m` sugarú robot, egy `0,20 m` sugarú akadály és `0,15 m` margója akkor ütközik, ha a középpontok távolsága legfeljebb `0,10 + 0,20 + 0,15 = 0,45 m`. A mozgó akadálynál a távolságvizsgálat az adott predikciós időpontra számolt pozíciót használja.
+
+Az eredeti logika szerint a `get_dist_on_trajectory()` csak a robot szenzorhatárán belüli (`3 m`) és a robot előtti `180` fokos látómezőben lévő akadályokat vizsgálja. A mozgó akadály pozíciója `x + vx * t`, illetve `y + vy * t` alapján változik. Az `AdmissableVelocity()` ezután a megállíthatóságot is ellenőrzi:
+
+$$
+|v| \leq \sqrt{2 a_{max} d}
+$$
+
+`v` a pillanatnyi lineáris sebesség, `a_max = 2,0 m/s^2` a lassulási korlát, `d` pedig az első ütközésig számított távolság. Például `d = 0,5 m` esetén a megengedett sebesség legfeljebb `sqrt(2 * 2,0 * 0,5) = 1,41 m/s`. Ha egy trajektória nem teljesíti ezt, a DWA elutasítja.
+
+Az érvényes sebességpárok pontszáma az aktuális `Alfa = 5`, `Beta = 2`, `Gamma = 3` súlyokat használja: a célirányt, az ütközésig megtett távolságot és a sebességet kombinálja. A robot hátramenete a szimulációban tiltott. Ha nincs biztonságos pár, az `optimisation()` `(None, [])` értéket ad vissza.
+
+## 5. A* és DWA kapcsolata
+
+Az A* nem ad ki közvetlenül `cmd_vel` üzenetet. A `DWA+A.py` mindig az aktuális
+aktív waypointot adja a DWA-nak. A következő waypoint csak akkor válik aktívvá,
+ha a robot `0,20 m`-es helyzettűrésen belülre ér és a sebessége legfeljebb
+`0,30 m/s`. A köztes pontoknál a befogási zóna kicsi, a végső célpontnál
+viszont `0,5 m`-es lassítási zóna működik.
+
+## 6. Biztonsági korlátok és jelenlegi határ
+
+Az A* térkép statikus; a mozgó akadályt a jelenlegi prototípus csak a DWA lokális predikciójában kezeli. A LiDAR-pontfelhőből körakadály-listát készítő ROS2-adapter, a zajszűrés, a teljes fékezési teszt és a globális újratervezés még külön feladat. A robotmodell és a DWA-modul ezért közvetlenül nem importál ROS2- vagy Matplotlib-csomagot.
+
+## 7. Tesztelés
+
+Az alábbi tesztek ellenőrzik a közös robotmagot, a kinematikát, a gyorsuláskorlátot, a mozgó akadály előrejelzését, a DWA ütközéselutasítását és az A* waypoint-kimenetét:
+
+```text
+python -m unittest codes_diploma.astar_project.tests.test_robot_and_dwa codes_diploma.astar_project.tests.test_dwa_a
+```
+
+## 8. Egyszerű újrahasználat
+
+Az A* és a DWA minimális használata:
+
+```python
+from codes_diploma.astar_project.grid_map import GridMap
+from codes_diploma.DWA import optimisation
+from codes_diploma.robot import Goal, Obstacle, robotconfig, robotstate
+
+config = robotconfig()
+state = robotstate(x=0.5, y=0.5)
+grid_map = GridMap(width=20, height=20, resolution=0.1)
+goal = Goal(1.5, 1.5)
+
+result, safe_pairs = optimisation(config, state, goal, [Obstacle(1.0, 0.8, radius=0.15)])
+
+if result is not None:
+    linear_speed = result[0]
+    angular_speed = result[1]
+```
+
+ROS2-ben a `linear_speed` értéke kerülhet a `Twist.linear.x`, az
+`angular_speed` pedig a `Twist.angular.z` mezőbe. A ROS2-node feladata az
+odometriából létrehozott `robotstate`, a LiDAR-ból létrehozott `Obstacle` lista
+és a `Twist` publikálása.
+
+Az új fájlok röviden:
+
+- `robot.py`: robotállapot, kinematika és akadályok;
+- `DWA.py`: DWA-sebességpárok, biztonság és pontozás;
+- `DWA+A.py`: A* waypoint és DWA összekötése;
+- `test_robot_and_dwa.py`, `test_dwa_a.py`: a két egység tesztjei.
+
+Az A*–DWA teljes folyamatát a `DWA+A.py` osztálya kezeli. A `best_pair` formája
+`[v, w, w_L, w_R]`; a ROS2-node a `v` és `w` értékeket `Twist.linear.x` és
+`Twist.angular.z` mezőbe írhatja.
+
+## 10. A szimulációs felület A* szerinti megjelenítése
+
+A `codes_diploma/simulation.py` a meglévő A* szimuláció felépítését követi,
+de a robotmozgást DWA-val egészíti ki. A bal oldali információs panel az A*
+aktuális celláját és a prioritási sor rövid részletét mutatja. A térképen:
+
+- a vékony vonalak a rácscellák határai;
+- a sötét cellák a statikus akadályok;
+- a kék pontok az A* által már vizsgált cellák;
+- a narancssárga pont az A* aktuális keresési pontja;
+- a sárga csillag a DWA aktuális waypointja;
+- a fekete szaggatott vonal az A* globális útvonala;
+- a narancssárga vonal a DWA lokális előrejelzett trajektóriája;
+- a piros körök a statikus és mozgó akadályok;
+- a kék vonal a robot eddigi nyomvonala.
+
+A program indításakor az A* szimulációjához hasonló beállítási ablak jelenik
+meg. Megadható a rács szélessége, magassága, felbontása, start- és célcellája,
+az átlós mozgás, valamint az automatikus lejátszás. A beállított start- és
+célcella rácskoordináta, például `(2, 2)`, amely a `0,2 m` felbontású térképen
+a cella középpontján keresztül világkoordinátává alakul.
+
+A szimuláció két vizuális fázisból áll. Először az A* keresés lépései jelennek
+meg egymás után. Ezután minden animációs időlépésben a mozgó akadályok
+frissülnek, a DWA kiválasztja a `best_pair` értéket, a `robot.py` `update()`
+függvénye mozgatja a robotot, végül a rajz frissül. A globális A* és Bézier-
+útvonal minden megjelenítési pontját kis piros pont jelöli; ezek a pontok a
+teljes animáció alatt láthatók. A vezérlés ettől külön ritkított waypoint-listát
+használ.
+
+Az aktív waypoint-index monoton növekszik: a DWA nem választhat ki újra korábbi
+útvonalpontot, és nem ugorhat át előre pontokat. Egy waypoint csak akkor vált,
+ha a robot `0,20 m`-en belülre ért és a sebessége legfeljebb `0,30 m/s`. A végső waypoint elérésekor a
+`plan_local()` `[0, 0, 0, 0]` parancsot ad vissza, ezért a célba ért robot nem
+kap újabb mozgási utasítást.
+
+Az indítóablakban beállítható a rács szélessége, magassága, felbontása,
+akadályinflációja, start- és célcellája, továbbá az A* heurisztikája
+(`manhattan`, `euclidean`, `chebyshev`, `octile`), az átlós mozgás, az
+automatikus lejátszás, valamint az `Alfa`, `Beta` és `Gamma` DWA-súlyok.
+Külön kapcsolóval engedélyezhető vagy kikapcsolható a waypoint-lassítás.
+
+A Bézier-simítás kanyarainál a kontrollponttól mért vágási távolság legfeljebb
+`3 * resolution` méter. Így például `0,20 m` felbontásnál legfeljebb `0,60 m`
+vágás engedélyezett. Ha a görbe akadályt érintene, a biztonsági ellenőrzés az
+eredeti A* útvonalat tartja meg.
+
+## 9. Egyszerű A*–DWA szimuláció
+
+A `codes_diploma/simulation.py` külön megjelenítési réteg. Nem tartalmaz új
+útvonaltervezési vagy DWA-algoritmust, hanem a `robot.py`, a `DWA.py` és a
+`DWA+A.py` függvényeit hívja meg.
+
+A `create_scene()` létrehoz egy rácstérképet, statikus akadályokat, két mozgó
+akadályt, robotállapotot és célt. A `create_simulation()` ezután A* útvonalat
+keres, Matplotlib-ábrát készít, és minden animációs lépésben ezt a sorrendet
+hajtja végre:
+
+```text
+mozgó akadályok frissítése
+    -> aktuális waypoint kiválasztása
+    -> DWA best_pair kiválasztása
+    -> robot.py: update()
+    -> robot, akadályok és trajektóriák kirajzolása
+```
+
+A `best_pair` formája `[v, w, w_L, w_R]`. Ha a DWA nem ad biztonságos párt,
+a szimuláció nullás keréksebességgel frissíti a robotot. A narancssárga vonal
+a kiválasztott keréksebesség-pár rövid előrejelzett trajektóriája, a kék vonal
+pedig a robot eddigi nyomvonala.
+
+### Futtatás
+
+A projekt gyökeréből:
+
+```text
+python -m codes_diploma.simulation
+```
+
+A megjelenítés automatikusan elindul és legfeljebb `600` animációs lépést
+futtat. A szimulációhoz nem kell ROS2; a Matplotlib és NumPy telepítése
+szükséges.

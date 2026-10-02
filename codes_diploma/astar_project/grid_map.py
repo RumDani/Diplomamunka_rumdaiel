@@ -90,7 +90,7 @@ class GridMap:
         """Szimulacios akadalyobjektumokbol frissiti a terkepet.
 
         Az objektumoknak ``x``, ``y`` es opcionisan ``radius`` attributummal
-        kell rendelkezniuk, ahogy az onlabos DWA Obstacle osztalyanak.
+        kell rendelkezniuk, ahogy a DWA Obstacle osztályának.
         """
         for obstacle in obstacles:
             radius = getattr(obstacle, "radius", 0.0)

@@ -1,5 +1,7 @@
 """Egyszeru, akadalybiztos masodfoku Bezier-utvonalsimitas."""
 
+import math
+
 
 def _bezier_point(start_point, control_point, end_point, parameter):    #bemenet start pont, kontrollpont, vegpont, parameter
 	"""Egy pontot szamol a harom kontrollponttal megadott gorben."""
@@ -53,7 +55,21 @@ def _curve_points(start_point, control_point, end_point, sample_count):
 	]
 
 
-def bezier_curve_points(path, samples_per_segment=10):
+def _cut_point(control_point, neighbor_point, max_distance):
+	"""A kontrollponttol legfeljebb max_distance tavolsagra vag."""
+	delta_row = neighbor_point[0] - control_point[0]
+	delta_column = neighbor_point[1] - control_point[1]
+	distance = math.hypot(delta_row, delta_column)
+	if distance == 0 or distance <= max_distance:
+		return neighbor_point
+	ratio = max_distance / distance
+	return (
+		control_point[0] + delta_row * ratio,
+		control_point[1] + delta_column * ratio,
+	)
+
+
+def bezier_curve_points(path, samples_per_segment=10, max_cut_distance=None):
 	"""Folytonos pontokat keszit az utvonal valodi kanyarai korul."""
 	turning_points = _remove_straight_points(path)
 	if len(turning_points) < 3:
@@ -66,14 +82,18 @@ def bezier_curve_points(path, samples_per_segment=10):
 		next_point = turning_points[point_index + 1]
 
 		# A gorbe a szomszedos elek felezopontjai kozott halad.
-		start_point = (
-			(previous_point[0] + control_point[0]) / 2,
-			(previous_point[1] + control_point[1]) / 2,
-		)
-		end_point = (
-			(control_point[0] + next_point[0]) / 2,
-			(control_point[1] + next_point[1]) / 2,
-		)
+		if max_cut_distance is None:
+			start_point = (
+				(previous_point[0] + control_point[0]) / 2,
+				(previous_point[1] + control_point[1]) / 2,
+			)
+			end_point = (
+				(control_point[0] + next_point[0]) / 2,
+				(control_point[1] + next_point[1]) / 2,
+			)
+		else:
+			start_point = _cut_point(control_point, previous_point, max_cut_distance)
+			end_point = _cut_point(control_point, next_point, max_cut_distance)
 		if point_index == 1:
 			start_point = turning_points[0]
 		if point_index == len(turning_points) - 2:
@@ -93,10 +113,27 @@ def bezier_curve_points(path, samples_per_segment=10):
 
 def _is_path_safe(grid_map, path, diagonal=False):
 	"""A folytonos gorbe kerekitett cellait es lepeskapcsolatait ellenorzi."""
+	if not path:
+		return True
+
 	rounded_cells = [
-		(round(point[0]), round(point[1]))
-		for point in path
+		(round(path[0][0]), round(path[0][1]))
 	]
+	for start_point, end_point in zip(path, path[1:]):
+		step_count = max(
+			1,
+			math.ceil(max(abs(end_point[0] - start_point[0]), abs(end_point[1] - start_point[1]))),
+		)
+		if len(path) == 2 and step_count > 1:
+			return False
+		for step_index in range(1, step_count + 1):
+			ratio = step_index / step_count
+			row = start_point[0] + ratio * (end_point[0] - start_point[0])
+			column = start_point[1] + ratio * (end_point[1] - start_point[1])
+			cell = (round(row), round(column))
+			if cell != rounded_cells[-1]:
+				rounded_cells.append(cell)
+
 	if not all(grid_map.is_free(*cell) for cell in rounded_cells):
 		return False
 
@@ -107,7 +144,17 @@ def _is_path_safe(grid_map, path, diagonal=False):
 	)
 
 
-def smooth_path_bezier(grid_map, path, samples_per_curve=8, diagonal=False):
+def _has_direction_reversal(path):
+	"""Megkeresi, hogy a gorbe egymas utan visszafordul-e."""
+	for previous, current, following in zip(path, path[1:], path[2:]):
+		incoming = (current[0] - previous[0], current[1] - previous[1])
+		outgoing = (following[0] - current[0], following[1] - current[1])
+		if incoming[0] * outgoing[0] + incoming[1] * outgoing[1] < -1e-9:
+			return True
+	return False
+
+
+def smooth_path_bezier(grid_map, path, samples_per_curve=8, diagonal=False, max_cut_distance=None):
 	"""Simiti a kanyarokon, veszely eseten az eredeti utat adja vissza."""
 	if len(path) < 3:
 		return list(path)
@@ -116,23 +163,27 @@ def smooth_path_bezier(grid_map, path, samples_per_curve=8, diagonal=False):
 	if len(turning_points) < 3:
 		return list(path)
 
-	smoothed_path = bezier_curve_points(path, samples_per_curve)
-	if _is_path_safe(grid_map, smoothed_path, diagonal):
+	if max_cut_distance is None:
+		max_cut_distance = 0.5 * grid_map.resolution
+	cut_distance_cells = max_cut_distance / grid_map.resolution
+	smoothed_path = bezier_curve_points(path, samples_per_curve, cut_distance_cells)
+	if _is_path_safe(grid_map, smoothed_path, diagonal) and not _has_direction_reversal(smoothed_path):
 		return smoothed_path
 	return list(path)
 
 
-def smooth_path(grid_map, path, diagonal=False, samples_per_curve=8):
+def smooth_path(grid_map, path, diagonal=False, samples_per_curve=8, max_cut_distance=None):
 	"""A projekt korabbi hivoinak megtartott belepesi pont."""
 	return smooth_path_bezier(
 		grid_map,
 		path,
 		samples_per_curve=samples_per_curve,
 		diagonal=diagonal,
+		max_cut_distance=max_cut_distance,
 	)
 
 
-"""Vizsgáljuk meg a kódot **függvényről függvényre, sorról sorra**, részletesen kitérve az összes paraméterre, belső változóra és a mögöttes logikára.
+r"""Vizsgáljuk meg a kódot **függvényről függvényre, sorról sorra**, részletesen kitérve az összes paraméterre, belső változóra és a mögöttes logikára.
 
 ---
 

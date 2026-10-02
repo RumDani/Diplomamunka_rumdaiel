@@ -119,6 +119,32 @@ digraph AStarCurrentCode {
     simulation_file -> simulation_start [label="szimulacio belepesi pont"]
     simulation_start -> settings [label="UI bemenetek"]
 
+    robot_core_file [label="robot.py\nrobotstate, robotconfig\nkinematika, akadaly", fillcolor="#ffedd5", color="#c2410c"]
+    dwa_file [label="DWA.py\npairstochoose, safepairs\noptimisation", fillcolor="#ffedd5", color="#c2410c"]
+    hybrid_file [label="DWA+A.py\nAStarDWAPlanner\nwaypoint-kovetes", fillcolor="#ffedd5", color="#c2410c"]
+    simulation_dwa_file [label="simulation.py\nMatplotlib animacio\nmozgo akadalyak", fillcolor="#ffedd5", color="#c2410c"]
+    robot_start [label="AStarDWAPlanner.plan_global()\nstart/goal vilagkoordinataban", shape=parallelogram, fillcolor="#fed7aa", color="#c2410c"]
+    robot_path [label="astar_search()\nracsutvonal -> vilagkoordinatas waypointok", fillcolor="#fed7aa", color="#c2410c"]
+    local_start [label="AStarDWAPlanner.plan_local()\nrobotstate + akadalyok", fillcolor="#fed7aa", color="#c2410c"]
+    dwa_window [label="safepairs()\ndinamikus kereksebesseg-ablak", fillcolor="#fed7aa", color="#c2410c"]
+    dwa_sensor [label="get_dist_on_trajectory()\n3 m szenzorhatar + 180 fokos FOV\nmozgo akadaly pozicioja t idoben", fillcolor="#fed7aa", color="#c2410c"]
+    dwa_admissible [label="AdmissableVelocity()\nmegallhato-e az utkozes elott?", shape=diamond, fillcolor="#fed7aa", color="#c2410c"]
+    dwa_rollout [label="optimisation()\nheading + tavolsag + sebesseg pontozasa", fillcolor="#fed7aa", color="#c2410c"]
+    dwa_command [label="best_pair\n[v, w, w_L, w_R]", shape=parallelogram, fillcolor="#ffedd5", color="#c2410c"]
+    robot_core_file -> dwa_file [label="robotmodell"]
+    dwa_file -> hybrid_file [label="lokalis DWA"]
+    hybrid_file -> simulation_dwa_file [label="szimulacios ciklus"]
+    hybrid_file -> robot_start [label="globalis terv"]
+    robot_start -> robot_path
+    robot_path -> local_start
+    local_start -> dwa_window
+    dwa_window -> dwa_sensor
+    dwa_sensor -> dwa_admissible
+    dwa_admissible -> dwa_rollout [label="igen"]
+    dwa_admissible -> dwa_window [label="nem: kovetkezo par"]
+    dwa_rollout -> dwa_command
+    hybrid_file -> local_start [label="waypoint"]
+
     start -> inside
     inside -> free [label="ervenyes"]
     inside -> invalid [label="nem ervenyes"]

@@ -5,6 +5,7 @@ import unittest
 from codes_diploma.astar_project.grid_map import GridMap
 from codes_diploma.astar_project.path_smoothing import (
 	_is_path_safe,
+	_cut_point,
 	bezier_curve_points,
 	smooth_path,
 )
@@ -58,6 +59,12 @@ class TestPathSmoothing(unittest.TestCase):
 		grid_map = GridMap(width=5, height=1)
 
 		self.assertFalse(_is_path_safe(grid_map, [(0, 0), (0, 2)]))
+
+	def test_bezier_cut_point_respects_maximum_distance(self):
+		cut_point = _cut_point((0.0, 2.0), (0.0, 0.0), 1.5)
+
+		self.assertAlmostEqual(cut_point[0], 0.0)
+		self.assertAlmostEqual(cut_point[1], 0.5)
 
 
 if __name__ == "__main__":

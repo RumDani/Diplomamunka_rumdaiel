@@ -26,7 +26,7 @@ Rácsos térkép
 
 ### 1.1. Meglévő Python DWA-szimuláció
 
-A `DWA_py.py` már tartalmazza:
+A korábbi DWA-szimuláció már tartalmazza:
 
 - differenciális hajtású robotmodell;
 - keréksebességből számított `v` és `w` értékeket;
@@ -490,6 +490,81 @@ Globális újratervezés szükséges lehet, ha:
 ---
 
 ## 8. DWA továbbfejlesztése az A* után
+
+### 8.1. Elkészült első robotmag
+
+Az első integrációs lépésben a robotra vonatkozó, ROS2-től és Matplotlibtől
+független részek két jól elkülönített fájlba kerültek:
+
+| Modul | Felelősség |
+|---|---|
+| `robot.py` | robotállapot, robotparaméterek, kinematika, akadály és állapotfrissítés |
+| `DWA.py` | dinamikus ablak, szenzoros akadályvizsgálat, fékezési feltétel és pontozás |
+| `DWA+A.py` | A* rácsútvonal, legfeljebb `3 * resolution` Bézier-simítás, waypoint-követés és DWA-vezérlés |
+| `simulation.py` | A* mintájú Matplotlib animáció látható rácscellákkal, waypointokkal és statikus/mozgó akadályokkal |
+
+A robotmag az eredeti, már használt neveket tartja meg: `robotstate`,
+`robotconfig`, `Obstacle`, `Goal`, `update`, `safepairs` és `optimisation`.
+A ROS2-node később ezeket tölti fel odometriából és LiDAR-ból, majd a `best_pair` értékeit írja
+`geometry_msgs/Twist` üzenetbe.
+
+A jelenlegi hívási sorrend:
+
+```text
+GridMap + start/goal világkoordináta
+        -> AStarDWAPlanner.plan_global()
+        -> astar_search()
+        -> rácsútvonal -> világkoordinátás waypointok
+        -> AStarDWAPlanner.plan_local() a DWA+A.py fájlban
+        -> Goal(aktuális waypoint)
+        -> optimisation(config, state, goal, obstacles)
+        -> best_pair = [v, w, w_L, w_R]
+```
+
+Az első prototípus már fogad egyenletesen mozgó akadályt is (`vx`, `vy`), de
+az akadályok pályáról való ki- és belépését, a LiDAR-zaj kezelését és a
+globális újratervezést még külön fázisban kell megvalósítani. A mozgó akadály
+előrejelzése nem teszi a globális A* térképet dinamikussá; az A* továbbra is
+statikus vagy pillanatfelvételként frissített rácson dolgozik.
+
+### 8.2. Robotparaméterek első konfigurációja
+
+Az alapértékek a meglévő Matplotlib DWA robotmodelljének értékeit követik:
+
+| Paraméter | Alapérték | Mértékegység |
+|---|---:|---|
+| `wheel_radius` | `0.033` | m |
+| `axle_track` | `0.08` | m |
+| `max_wheel_speed` | `15` | rad/s |
+| `max_wheel_acceleration` | `2 / 0.033` | rad/s² |
+| `control_period` | `0.1` | s |
+| `prediction_horizon` | `3.0` | s |
+| `robot_radius` | `0.10` | m |
+| `safety_margin` | `0.15` | m |
+
+Például azonos, `10 rad/s` keréksebességnél a lineáris sebesség:
+
+$$
+v = r\frac{\omega_L+\omega_R}{2}
+    = 0{,}033\frac{10+10}{2}
+    = 0{,}33\ \mathrm{m/s}
+$$
+
+Itt `r` a kerék sugara, `omega_L` és `omega_R` a bal és jobb kerék
+szögsebessége. Mivel a két kerék egyformán forog, az `omega` szögsebesség
+nulla, tehát a robot egyenes vonalban halad.
+
+### 8.3. Ellenőrzés
+
+Az új robotmag tesztjei:
+
+```text
+python -m unittest codes_diploma.astar_project.tests.test_robot_and_dwa codes_diploma.astar_project.tests.test_dwa_a
+```
+
+Ezek ellenőrzik az eredeti robotparamétereket, a kinematikát, a mozgó akadály
+kezelését, az `optimisation()` kimenetét és az A* útvonal waypointokká
+alakítását.
 
 A Python DWA-szimulációban megtartandó elemek:
 
