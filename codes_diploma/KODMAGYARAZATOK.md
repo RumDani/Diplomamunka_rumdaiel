@@ -1003,6 +1003,226 @@ A projekt gyökeréből:
 python -m codes_diploma.simulation
 ```
 
+## 11. A jelenlegi vegso A*--Bezier--DWA rendszer reszletes magyarazata
+
+### 11.1. A rendszer szerepei
+
+A rendszer negy kulon felelossegi szintet tartalmaz:
+
+1. A `GridMap` a vilagot racsos cellakra osztja.
+2. Az A* a statikus racson globalis utvonalat keres.
+3. A `path_smoothing.py` a racsos ut kanyarait biztonsagos Bezier-gorbevel
+     simitja.
+4. A DWA rovid, lokalis mozgasparancsot valaszt a robot aktualis allapotabol,
+     az akadalyokbol es az aktualis utvonalpontbol.
+
+A fo adatfolyam:
+
+```text
+GridMap
+    -> astar_search()
+    -> astar_path
+    -> smooth_path_bezier()
+    -> bezier_path
+    -> _create_waypoints()
+    -> aktualis waypoint
+    -> DWA optimisation()
+    -> [v, w, w_L, w_R]
+    -> robot.update()
+```
+
+### 11.2. `robot.py`: a robot fizikai modellje
+
+A `robotconfig` tarolja a differencialis meghajtasu robot adatait:
+
+- `r_kerek = 0,033 m`: a kerek sugara;
+- `b = 0,08 m`: a ket kerek tengelyiranyu tavolsaga;
+- `w_kerek_max = 15 rad/s`: maximalis kerekszogsebesseg;
+- `a_max = 2 m/s^2`: gyorsulasi/lassulasi korlat;
+- `dt = 0,1 s`: egy vezerlesi lepes idotartama;
+- `predict_time = 3 s`: DWA eloretekintesi ideje;
+- `rob_radius = 0,10 m`: a robot kor sugaru kozelitese;
+- `safety_margin = 0,15 m`: biztonsagi tavolsag;
+- `Alfa = 5`, `Beta = 2`, `Gamma = 3`: a DWA pontozasi sulya;
+- `allow_reverse = False`: a szimulacioban a hatramenet tiltott.
+
+A differencialis kerekkinematika:
+
+$$
+v = r\frac{\omega_L+\omega_R}{2}
+$$
+
+$$
+\omega = r\frac{\omega_R-\omega_L}{2b}
+$$
+
+`r` a kerek sugara, `b` a tengelytav, `omega_L` es `omega_R` a bal es jobb
+kerek szogsebessege, `v` a robot linearis sebessege, `omega` pedig a robot
+szogsebessege.
+
+Pelda az aktualis parameterekkel, azonos `10 rad/s` kerekszogsebessegnel:
+
+$$
+v = 0{,}033\frac{10+10}{2}=0{,}33\ \mathrm{m/s}
+$$
+
+$$
+\omega = 0{,}033\frac{10-10}{2\cdot0{,}08}=0\ \mathrm{rad/s}
+$$
+
+Ez egyenes haladast jelent, mert a ket kerek azonos sebesseggel forog.
+
+Az `update()` eloszor korlatozza a celzott kerekszogsebesseg valtozasat, majd
+az aktualis `v` es `omega` ertekekkel frissiti a robot helyzetet. Nem egyetlen
+ponttal ugrik a kovetkezo koordinatara, hanem a korpalyas kinematikai keplettel
+szamolja ki az uj `x`, `y` es `irany` erteket.
+
+### 11.3. Mozgo akadalyok
+
+Az `Obstacle` adatai:
+
+```python
+Obstacle(x, y, radius, vx, vy)
+```
+
+Az `x`, `y` a kozepont, a `radius` a kor sugara, a `vx`, `vy` pedig a
+vilagkoordinatas sebesseg komponensei. A szimulacios ciklus minden `dt` utan
+meghivja az akadaly `move(dt)` metodusat:
+
+$$
+x_{uj}=x_{regi}+v_x\cdot dt
+$$
+
+$$
+y_{uj}=y_{regi}+v_y\cdot dt
+$$
+
+Pelda: `v_y=0,25 m/s` es `dt=0,1 s` esetben az akadaly minden ciklusban
+`0,025 m`-rel mozog felfele.
+
+### 11.4. `DWA.py`: dinamikus ablak es biztonsag
+
+A `pairstochoose()` az aktualis kerekszogsebessegek korul mintakat general.
+Az ablak szelesseget az `a_max / r_kerek` kerekszoggyorsulas es a `dt` ido
+hatarozza meg.
+
+Az `AdmissableVelocity()` minden jelolt parnal meghivja a
+`get_dist_on_trajectory()` metodust. Ez a kovetkezoket vizsgalja:
+
+- legfeljebb `3 m` szenzortavolsag;
+- a robot elotti `180 fokos` latomezo;
+- a mozgo akadaly elore jelzett pozicioja;
+- a robot, az akadaly es a biztonsagi sav egyuttes sugara.
+
+Az elso utkozesig szamolt tavolsag legyen `d`. A megallithatosagi feltetel:
+
+$$
+|v|\leq\sqrt{2a_{max}d}
+$$
+
+Peldaul `a_max=2 m/s^2` es `d=0,5 m` eseten:
+
+$$
+|v|\leq\sqrt{2\cdot2\cdot0{,}5}=1{,}41\ \mathrm{m/s}
+$$
+
+Az ennel gyorsabb jelolt par kiesik a `safepairs()` listabol.
+
+Az `optimisation()` a megmaradt parokat heading, akadalybiztonsag es sebesseg
+alapjan pontozza. A cel kozeli lassitas csak az aktualis konfiguracio szerint
+kapcsolhato; a vegso cel elerese ettol fuggetlenul explicit nullas parancsot
+ad.
+
+### 11.5. `path_smoothing.py`: a Bezier-utvonal
+
+Az A* racspontjai torott vonalat alkotnak. A `_remove_straight_points()` az
+egyenes reszek felesleges pontjait kiszedi, a valodi kanyarokat megtartja.
+
+A masodfoku Bezier-keplet:
+
+$$
+B(t)=(1-t)^2P_0+2(1-t)tP_1+t^2P_2,
+\qquad 0\leq t\leq1
+$$
+
+`P_0` a kanyar kezdopontja, `P_1` a kontrollpont, `P_2` a kanyar vegpontja.
+Peldaul `t=0,5` eseten a kontrollpont a gorbe kozepere gyakorol hatast, de a
+gorbe nem feltetlenul megy at pontosan a kontrollponton.
+
+A kontrollponttol valo vagas alapertelmezetten `0,5 * resolution` meretu. A
+`_is_path_safe()` a gorbe koztes pontjait cellakra bontja, ellenorzi a szabad
+cellakat es a szomszedsagi kapcsolatokat. A `_has_direction_reversal()` a
+lokalis visszafordulast tiltja. Ha barmelyik biztonsagi ellenorzes sikertelen,
+a modul az eredeti A* utat adja vissza.
+
+Ezert a Bezier-utvonal ketfele lehet:
+
+- biztonsagos esetben folytonos, simitott gorbe;
+- szuk vagy veszelyes kanyarban az eredeti, torott A* ut.
+
+### 11.6. `DWA+A.py`: waypoint-allapotgep
+
+Az `AStarDWAPlanner.plan_global()` eltarolja az `astar_path` es a
+`bezier_path` listat, majd a simitott utbol vezerlesi waypointokat keszit.
+Az aktiv index a `waypoint_index`.
+
+Az aktiv waypoint csak akkor lep tovabb, ha:
+
+1. a robot a dinamikus waypoint-turesen belul van;
+2. a robot sebessege eleg kicsi;
+3. vagy a skalarszorzas alapjan mar elhaladt a waypoint mellett.
+
+Ez megakadályozza, hogy a DWA egy mar elhagyott ponthoz visszaforduljon.
+Az `optimisation()` bemeneti celja az aktiv waypoint, nem egy kulon, elugro
+racskoordinata.
+
+### 11.7. `simulation.py`: grafikus szimulacio
+
+A szimulacios ciklus sorrendje:
+
+```text
+1. A* vizsgalt cellak megjelenitese
+2. statikus es mozgo akadalyak letrehozasa
+3. mozgó akadalyak frissitese
+4. aktiv waypoint es DWA cel meghatarozasa
+5. DWA best_pair kivalsztasa
+6. robot.update()
+7. robotnyom, Bézier-ut, pontok es akadalyak kirajzolasa
+```
+
+A megjelenites jelolesei:
+
+- vilagos kek pontok: A* altal vizsgalt cellak;
+- zold vonal: Bézier-utvonal;
+- kis piros pontok: DWA vezerlesi waypointok;
+- sarga csillag: aktualis aktiv waypoint;
+- narancssarga vonal: DWA rovid lokalis trajektoria;
+- piros korok: statikus es mozgo akadalyak;
+- kek kor: robot.
+
+A program inditasa:
+
+```text
+python -m codes_diploma.simulation
+```
+
+Az ablakban a racs, a resolution, az akadalyinflacio, az A* heurisztika,
+az Alfa/Beta/Gamma sullyok, a Bezier-simitas es a waypoint-lassitas is
+allithato.
+
+### 11.8. Teszteles
+
+A teljes tesztcsomag parancsa:
+
+```text
+python -m unittest discover -s codes_diploma/astar_project/tests -p "test_*.py"
+```
+
+A tesztek ellenorzik az A* alapot, a racterkepet, a Bezier-biztonsagot, a
+robotkinematikat, a DWA-t, az A*--DWA kapcsolatot, a mozgó akadalyat es a
+szimulacios jelenetet. A legutobbi teljes ellenorzes eredmenye: `32 teszt
+sikeres`.
+
 A megjelenítés automatikusan elindul és legfeljebb `600` animációs lépést
 futtat. A szimulációhoz nem kell ROS2; a Matplotlib és NumPy telepítése
 szükséges.

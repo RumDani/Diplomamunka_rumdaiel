@@ -1,5 +1,6 @@
 """A* + DWA szimulacio lathato racs- es pontkivalasztasokkal."""
 
+from cmath import rect
 import importlib.util
 import math
 import tkinter as tk
@@ -35,7 +36,7 @@ def parse_cell(value):
 	return row, column
 
 
-def create_scene(width=30, height=20, resolution=0.2, start_cell=(2, 2), goal_cell=(17, 27), inflation_radius=0.1):
+def create_scene(width=30, height=20, resolution=0.2, start_cell=(2, 2), goal_cell=(17, 27), inflation_radius=0.11):
 	"""Letrehozza az A* es DWA kozos palyajat."""
 	grid_map = GridMap(width=width, height=height, resolution=resolution)
 	vertical_column = min(10, width - 2)
@@ -60,7 +61,7 @@ def create_scene(width=30, height=20, resolution=0.2, start_cell=(2, 2), goal_ce
 	static_obstacles = [Obstacle(*grid_map.grid_to_world(*cell), radius=0.12) for cell in static_cells]
 	dynamic_obstacles = [
 		# Az elso akadaly alulrol keresztezi az A* + Bezier utat a kozepso szakaszon.
-		Obstacle(2.4, 0.4, radius=0.18, vx=0.0, vy=0.25),
+		Obstacle(2.4, 0.4, radius=0.18, vx=0.0, vy=0.20),
 		# A masodik akadaly jobbrol balra halad a kesobbi vizszintes szakaszon.
 		Obstacle(6.8, 2.1, radius=0.18, vx=-0.25, vy=0.0),
 	]
@@ -98,13 +99,28 @@ def create_simulation(width=30, height=20, resolution=0.2, start_cell=(2, 2), go
 	priority_text = info_ax.text(0.02, 0.95, "", va="top", family="monospace", fontsize=8)
 
 	for row in range(grid_map.height + 1):
-		map_ax.axhline(row * resolution, color="#78909c", linewidth=0.65, alpha=0.75, zorder=0)
+				map_ax.axhline(row * resolution, color="#78909c", linewidth=0.65, alpha=0.75, zorder=0)
 	for column in range(grid_map.width + 1):
-		map_ax.axvline(column * resolution, color="#78909c", linewidth=0.65, alpha=0.75, zorder=0)
+				map_ax.axvline(column * resolution, color="#78909c", linewidth=0.65, alpha=0.75, zorder=0)
+
+	raw_obstacle_cells = set()
+	vertical_column = min(10, width - 2)
+	horizontal_row = min(12, height - 2)
+	for row in range(2, max(2, height - 2)):
+		if row not in range(7, 13):
+			raw_obstacle_cells.add((row, vertical_column))
+	for column in range(12, max(12, width - 2)):
+		if column not in range(19, 25):
+			raw_obstacle_cells.add((horizontal_row, column))
+
+	inflation_rectangles = []
 	for row in range(grid_map.height):
 		for column in range(grid_map.width):
 			if grid_map.grid[row][column] == 1:
-				map_ax.add_patch(Rectangle((column * resolution, row * resolution), resolution, resolution, color="#455a64", zorder=1))
+				rect = Rectangle((column * resolution, row * resolution), resolution, resolution, color="#455a64", zorder=1)
+				map_ax.add_patch(rect)
+				if (row, column) not in raw_obstacle_cells:
+					inflation_rectangles.append(rect)
 
 	astar_world = list(planner.astar_path)
 	astar_x, astar_y = zip(*astar_world)
@@ -176,41 +192,43 @@ def create_simulation(width=30, height=20, resolution=0.2, start_cell=(2, 2), go
 		trail_y.append(state.y)
 
 	def update_frame(frame):
-		nonlocal last_movement_frame
-		if frame < planning_frames:
-			explored.set_offsets(expanded_world[:frame + 1])
-			current_cell.set_offsets([expanded_world[frame]])
-			waypoint.set_offsets([[math.nan, math.nan]])
-			priority_text.set_text(priority_description(frame))
-			status.set_text(f"A* tervezes: {frame + 1}/{planning_frames}")
-			return
+			nonlocal last_movement_frame
+			if frame < planning_frames:
+				explored.set_offsets(expanded_world[:frame + 1])
+				current_cell.set_offsets([expanded_world[frame]])
+				waypoint.set_offsets([[math.nan, math.nan]])
+				priority_text.set_text(priority_description(frame))
+				status.set_text(f"A* tervezes: {frame + 1}/{planning_frames}")
+				return
 
-		if frame == movement_start - 1:
-			explored.set_offsets(expanded_world)
-			current_cell.set_offsets([[math.nan, math.nan]])
-			priority_text.set_text(priority_description(len(astar_result["search_steps"])))
-			status.set_text("A* kesz - DWA mozgas indul")
-			return
+			if frame == movement_start - 1:
+				for rect in inflation_rectangles:
+					rect.set_visible(False)
+				explored.set_offsets(expanded_world)
+				current_cell.set_offsets([[math.nan, math.nan]])
+				priority_text.set_text(priority_description(len(astar_result["search_steps"])))
+				status.set_text("A* kesz - DWA mozgas indul")
+				return
 
-		movement_frame = min(frame - movement_start, max_steps - 1)
-		while last_movement_frame < movement_frame:
-			advance_robot_one_step()
-			last_movement_frame += 1
-		if last_result is not None:
-			active_waypoint = last_result["waypoint"]
-			target = last_result["target"]
-			waypoint.set_offsets([active_waypoint])
-		else:
-			active_waypoint = None
-			target = None
-		local_x, local_y = predict_local_path(last_result["best_pair"] if last_result else None)
-		local_line.set_data(local_x, local_y)
-		trail_line.set_data(trail_x, trail_y)
-		robot.center = (state.x, state.y)
-		for patch, obstacle in zip(obstacle_patches, all_obstacles):
-			patch.center = (obstacle.x, obstacle.y)
-			priority_text.set_text(f"DWA\nrobot: ({state.x:.2f}, {state.y:.2f})\nsebesseg: {state.v:.2f} m/s\nwaypointok: {len(planner.waypoints)}\naktualis: {active_waypoint}\nDWA cel: {target}")
-		status.set_text("Cel elerve" if planner.reached_goal(state) else f"DWA mozgas: {movement_frame + 1}/{max_steps}")
+			movement_frame = min(frame - movement_start, max_steps - 1)
+			while last_movement_frame < movement_frame:
+				advance_robot_one_step()
+				last_movement_frame += 1
+			if last_result is not None:
+				active_waypoint = last_result["waypoint"]
+				target = last_result["target"]
+				waypoint.set_offsets([active_waypoint])
+			else:
+				active_waypoint = None
+				target = None
+			local_x, local_y = predict_local_path(last_result["best_pair"] if last_result else None)
+			local_line.set_data(local_x, local_y)
+			trail_line.set_data(trail_x, trail_y)
+			robot.center = (state.x, state.y)
+			for patch, obstacle in zip(obstacle_patches, all_obstacles):
+				patch.center = (obstacle.x, obstacle.y)
+				priority_text.set_text(f"DWA\nrobot: ({state.x:.2f}, {state.y:.2f})\nsebesseg: {state.v:.2f} m/s\nwaypointok: {len(planner.waypoints)}\naktualis: {active_waypoint}\nDWA cel: {target}")
+			status.set_text("Cel elerve" if planner.reached_goal(state) else f"DWA mozgas: {movement_frame + 1}/{max_steps}")
 
 	animation = FuncAnimation(figure, update_frame, frames=total_frames, interval=100, repeat=False, blit=False)
 	figure._simulation_animation = animation
@@ -235,7 +253,7 @@ def run_simulation():
 		"resolution": ("Felbontas [m]", "0.2"),
 		"start": ("Start (sor,oszlop)", "2,2"),
 		"goal": ("Cel (sor,oszlop)", "17,27"),
-		"inflation": ("Akadalyinflacio [m]", "0.1"),
+		"inflation": ("Akadalyinflacio [m]", "0.11"),
 			"alpha": ("Alfa - iranykovetes", "5"),
 			"beta": ("Beta - akadalybiztonsag", "2"),
 			"gamma": ("Gamma - sebesseg", "3"),

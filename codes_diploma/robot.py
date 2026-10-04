@@ -48,6 +48,7 @@ class robotconfig:
 		robot.predict_time = 3
 		robot.rob_radius = robot.b + 0.02
 		robot.safety_margin = 0.15
+		robot.static_safety_margin = 0.01  # Új paraméter a statikus falak melletti tűréshez
 		robot.Alfa = 5
 		robot.Beta = 2
 		robot.Gamma = 3

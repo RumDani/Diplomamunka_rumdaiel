@@ -144,29 +144,3 @@ class GridMap:
                 neighbors.append((new_row, new_column))
 
         return neighbors
-
-    def print_map(self, start=None, goal=None):
-        """Kiirja a terkepet: . szabad, # akadaly, ? ismeretlen."""
-        for row in range(self.height):
-            line = ""
-            for column in range(self.width):
-                position = (row, column)
-                if position == start:
-                    line += "S"
-                elif position == goal:
-                    line += "G"
-                elif self.grid[row][column] == 1:
-                    line += "#"
-                elif self.grid[row][column] == 2:
-                    line += "?"
-                else:
-                    line += "."
-            print(line)
-
-
-if __name__ == "__main__":
-    example_map = GridMap(width=10, height=6)
-    example_map.add_obstacle(2, 3)
-    example_map.add_obstacle(2, 4)
-    example_map.add_obstacle(2, 5)
-    example_map.print_map(start=(0, 0), goal=(5, 9))
