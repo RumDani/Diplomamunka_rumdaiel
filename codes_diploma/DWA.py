@@ -1,13 +1,12 @@
 """Dinamikus ablakos lokális útvonaltervezés."""
 
 import math
-
 import numpy as np
-
 from .robot import get_robot_kinematics, robotstate, update
 
 
 def get_dist_on_trajectory(state, config, w_L, w_R, obstacle_list):
+    """Az első ütközésig megtett távolságot számolja ki a trajektória mentén."""
     temp_robot = robotstate(x=state.x, y=state.y, irany=state.irany, w_L=state.w_L, w_R=state.w_R)
     accumulated_dist = 0.0
     v_actual, _ = get_robot_kinematics(w_L, w_R, config)
@@ -31,10 +30,10 @@ def get_dist_on_trajectory(state, config, w_L, w_R, obstacle_list):
             obs_future_x = obs.x + obs.vx * t
             obs_future_y = obs.y + obs.vy * t
             dist_centers = math.hypot(temp_robot.x - obs_future_x, temp_robot.y - obs_future_y)
-            
+
             is_static = (obs.vx == 0.0 and obs.vy == 0.0)
             if is_static:
-                collision_threshold = obs.radius + config.rob_radius + config.static_safety_margin
+                collision_threshold = obs.radius + config.rob_radius + getattr(config, "static_safety_margin", 0.01)
             else:
                 collision_threshold = config.rob_radius + obs.radius + config.safety_margin
 
@@ -46,8 +45,9 @@ def get_dist_on_trajectory(state, config, w_L, w_R, obstacle_list):
 
     return 10.0
 
+
 def AdmissableVelocity(config, w_L, w_R, state, obstacle_list):
-    """Ellenőrzi, hogy a robot meg tud-e állni az ütközés előtt."""
+    """Ellenőrzi, hogy a robot meg tud-e állni az ütközés előtt (Admissible Velocities)."""
     dist_to_obs = get_dist_on_trajectory(state, config, w_L, w_R, obstacle_list)
     v, _ = get_robot_kinematics(w_L, w_R, config)
     return abs(v) <= math.sqrt(2 * config.a_max * dist_to_obs)
@@ -76,7 +76,7 @@ def pairstochoose(config, state):
 
 
 def safepairs(config, state, obstacle_list):
-    """Csak a megállítható keréksebesség-párokat adja vissza."""
+    """Csak a megállítható (admissible) keréksebesség-párokat adja vissza."""
     return [
         pair
         for pair in pairstochoose(config, state)
@@ -86,7 +86,7 @@ def safepairs(config, state, obstacle_list):
 
 
 def optimisation(config, state, goal, obstacle_list):
-    """Kiválasztja a célhoz legjobban illeszkedő biztonságos párt."""
+    """Kiválasztja a célhoz legjobban illeszkedő biztonságos sebességpárt."""
     safe_list = safepairs(config, state, obstacle_list)
     if not safe_list:
         return None, []

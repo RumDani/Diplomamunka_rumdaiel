@@ -75,7 +75,7 @@ def _read_settings(fields, diagonal, heuristic):
 
 
 def _create_settings_window(on_apply):
-    """Letrehozza az A* bemeneti ertekeinek egyszeru feluletet."""
+    """Letrehozza az A* bemeneti ertekeinek feluletet."""
     window = tk.Tk()
     window.title("A* beallitasok")
     window.resizable(False, False)
@@ -123,10 +123,11 @@ def _create_settings_window(on_apply):
         variable=smooth_path_value,
     ).grid(row=9, column=0, columnspan=2, sticky="w", pady=5)
     fields["smooth_path"] = smooth_path_value
+
     auto_play_value = tk.BooleanVar(value=True)
     tk.Checkbutton(
         main,
-        text="Automatikus lejátszás",
+        text="Automatikus lejatszas",
         variable=auto_play_value,
     ).grid(row=10, column=0, columnspan=2, sticky="w", pady=5)
     fields["auto_play"] = auto_play_value
@@ -134,8 +135,8 @@ def _create_settings_window(on_apply):
     def apply_settings():
         try:
             settings = _read_settings(fields, diagonal, heuristic)
-            on_apply(settings)
             window.destroy()
+            on_apply(settings)
             plt.show()
         except (TypeError, ValueError, RuntimeError) as error:
             messagebox.showerror("Hibas beallitas", str(error), parent=window)
@@ -260,8 +261,8 @@ def plot_simulation(
     search_steps=None,
     original_path=None,
     robot_radius=0.08,
-    planning_interval=250,
-    movement_interval=60,
+    planning_interval=200,
+    movement_interval=50,
     auto_play=False,
     show=True,
     smoothed=False,
@@ -340,10 +341,10 @@ def plot_simulation(
     path_line, = map_ax.plot(
         path_x,
         path_y,
-        ":",
+        "-",
         color="#ef8a8a",
         linewidth=2.0,
-        alpha=0.7,
+        alpha=0.8,
         label="Bezier-simitott utvonal",
         visible=False,
         zorder=3,
@@ -368,18 +369,21 @@ def plot_simulation(
     planning_frames = len(expanded_world)
     movement_start = planning_frames + 1
     total_frames = movement_start + len(trajectory)
+    current_frame = 0
 
     def update(frame):
+        nonlocal current_frame
+        current_frame = frame
         if frame < planning_frames:
             explored.set_offsets(expanded_world[: frame + 1])
             current_search.set_offsets([expanded_world[frame]])
             priority_text.set_text(_priority_text(search_steps, frame))
             status.set_text(f"A* tervezes: {frame + 1}/{planning_frames}")
             path_line.set_visible(False)
+            original_line.set_visible(False)
             robot.center = (math.nan, math.nan)
             trail.set_data([], [])
         elif frame == movement_start - 1:
-            robot_animation.event_source.interval = movement_interval
             explored.set_offsets(expanded_world or [[math.nan, math.nan]])
             current_search.set_offsets([[math.nan, math.nan]])
             priority_text.set_text(_priority_text(search_steps, len(search_steps)))
@@ -413,18 +417,20 @@ def plot_simulation(
         )
 
     robot_animation = animation.FuncAnimation(
-        figure, update, frames=total_frames, interval=planning_interval, repeat=False
+        figure,
+        update,
+        frames=total_frames,
+        interval=planning_interval,
+        repeat=False,
+        blit=False,
     )
-    figure.canvas.mpl_disconnect(robot_animation._first_draw_id)
-    if auto_play:
-        robot_animation.event_source.add_callback(robot_animation._step)
-    else:
+
+    if not auto_play and robot_animation.event_source is not None:
         robot_animation.event_source.stop()
         update(0)
 
     next_button = Button(figure.add_axes((0.68, 0.035, 0.13, 0.06)), "Kovetkezo")
     reset_button = Button(figure.add_axes((0.83, 0.035, 0.13, 0.06)), "Ujrakezdes")
-    current_frame = 0
 
     def next_frame(_event=None):
         nonlocal current_frame
@@ -448,9 +454,6 @@ def plot_simulation(
         "key_press_event",
         lambda event: next_frame() if event.key in ("right", " ") else None,
     )
-    figure.canvas.draw()
-    if auto_play:
-        robot_animation.event_source.start()
     if show:
         plt.show()
     return figure, robot_animation
