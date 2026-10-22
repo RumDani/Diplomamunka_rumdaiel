@@ -210,5 +210,44 @@ digraph AStarCurrentCode {
     candidate_loop -> return_neighbors [label="minden irany kesz", color="#15803d"]
     return_neighbors -> movement [style=dashed, label="szabad szomszedok vissza az A*-nak", color="#15803d"]
 
+    subgraph cluster_ros2 {
+        label="ROS 2 / Gazebo robotfüggetlen C++ integráció"
+        fontname="Arial Bold"
+        fontsize=14
+        color="#0f766e"
+        style="rounded"
+        bgcolor="#f0fdfa"
+
+        ros_scan [label="/scan LaserScan\nakadálymérések", fillcolor="#ccfbf1", color="#0f766e"]
+        ros_odom [label="/odom Odometry\nx, y, yaw", fillcolor="#ccfbf1", color="#0f766e"]
+        ros_grid [label="astar_dwa_node\nlokális Grid + akadályinfláció", fillcolor="#ccfbf1", color="#0f766e"]
+        ros_astar [label="A* lokális útvonal\nGrid cellákból world pontok", fillcolor="#ccfbf1", color="#0f766e"]
+        ros_waypoint [label="Következő waypoint\nútvonalpont vagy cél", fillcolor="#ccfbf1", color="#0f766e"]
+        ros_dwa [label="DWA rollout\nsebességpárok és ütközésvizsgálat", fillcolor="#ccfbf1", color="#0f766e"]
+        ros_cmd [label="/cmd_vel Twist\nROSbot vagy Gazebo meghajtás", shape=parallelogram, fillcolor="#99f6e4", color="#0f766e"]
+        ros_markers [label="/astar_dwa_markers MarkerArray\nA* útvonal, cél, akadályok, DWA trajektória", shape=parallelogram, fillcolor="#99f6e4", color="#0f766e"]
+        ros_map [label="/astar_map OccupancyGrid\nismert térkép + inflált akadálycellák", shape=parallelogram, fillcolor="#99f6e4", color="#0f766e"]
+        ros_goal [label="/goal_pose PoseStamped\núj világkoordinátás cél", fillcolor="#ccfbf1", color="#0f766e"]
+        rviz_goal [label="RViz 2D Goal Pose\nkattintás + irányhúzás", fillcolor="#ccfbf1", color="#0f766e"]
+
+        ros_scan -> ros_grid
+        ros_odom -> ros_grid
+        ros_grid -> ros_astar
+        ros_astar -> ros_waypoint
+        ros_waypoint -> ros_dwa
+        ros_scan -> ros_dwa
+        ros_odom -> ros_dwa
+        ros_dwa -> ros_cmd
+        ros_astar -> ros_markers
+        ros_dwa -> ros_markers
+        ros_grid -> ros_map
+        ros_goal -> ros_astar [label="cél"]
+        rviz_goal -> ros_goal [label="kattintással"]
+        known_map [label="előre ismert statikus akadályparaméterek", fillcolor="#ccfbf1", color="#0f766e"]
+        moving_obstacle [label="moving_obstacle_node\nSetEntityPose + szinuszos pálya", fillcolor="#bfdbfe", color="#2563eb"]
+        known_map -> ros_astar
+        moving_obstacle -> ros_scan [style=dashed, label="LiDAR-ban megjelenik"]
+    }
+
     labelloc="t"
 }

@@ -284,32 +284,41 @@ def create_simulation(
     astar_x, astar_y = zip(*astar_world)
     path_x, path_y = zip(*path_world)
     waypoint_x, waypoint_y = zip(*planner.waypoints)
-    (astar_line,) = map_ax.plot(
-        astar_x,
-        astar_y,
-        ":",
-        color="#b0bec5",
-        linewidth=1.3,
-        label="A* racsutvonal",
-        zorder=2,
-    )
-    astar_line.set_visible(show_original_astar)
+
+    # 1. Bézier útvonal: zorder=4, de alpha=0.55-tel áttetsző, hogy ne takarja el az A*-ot
     map_ax.plot(
         path_x,
         path_y,
         "-",
         color="#2e7d32",
         linewidth=3.5,
+        alpha=0.55,
         label="Bezier utvonal",
         zorder=4,
     )
+
+# Vékony, finom szaggatott vonal apró csomóponti pontokkal a Bézier felett
+    (astar_line,) = map_ax.plot(
+        astar_x,
+        astar_y,
+        linestyle="--",
+        dashes=(3, 2),        # Sűrűbb, rövidebb szaggatás a finomabb megjelenéshez
+        marker="o",
+        markersize=2.0,       # Apró, finom pontok
+        color="#0a22a7",      # Élénk narancs a jó kontrasztért
+        linewidth=1.0,        # Vékony vonalvastagság (korábbi 1.8 helyett)
+        alpha=0.9,
+        label="Eredeti A* racsutvonal",
+        zorder=7,
+    )
+    astar_line.set_visible(show_original_astar)
     map_ax.scatter(
         waypoint_x,
         waypoint_y,
         s=14,
         color="#e53935",
-        edgecolors="#1b5e20",
-        linewidths=0.8,
+        edgecolors="#bdef48",
+        linewidths=0.5,
         label="Bezier DWA pontok",
         zorder=6,
     )

@@ -1226,3 +1226,404 @@ sikeres`.
 A megjelenítés automatikusan elindul és legfeljebb `600` animációs lépést
 futtat. A szimulációhoz nem kell ROS2; a Matplotlib és NumPy telepítése
 szükséges.
+
+## 12. ROS 2 / Gazebo robotfüggetlen C++ A* + DWA integráció
+
+### 12.1. A csomag célja
+
+Az új `ros2_astar_dwa_gazebo/src/astar_dwa_controller` csomag a korábbi
+Python prototípustól független, C++17 alapú ROS 2 vezérlő. A
+[astar_dwa_node.cpp](./ros2_astar_dwa_gazebo/src/astar_dwa_controller/src/astar_dwa_node.cpp)
+nem tartalmaz TurtleBot3- vagy ROSbot-specifikus meghajtási kódot. Szabványos
+ROS üzeneteket fogad és küld, ezért a robotmodell később topic-paraméterekkel
+cserélhető.
+
+### 12.2. Adatfolyam
+
+```text
+/scan + /odom
+    -> lokális akadályrács
+    -> A* (Grid cellák)
+    -> következő waypoint
+    -> DWA sebességvizsgálat
+    -> /cmd_vel
+```
+
+A `/goal_pose` üzenet új világkoordinátás célt állít be. Az A* útvonalat a
+`/astar_path` `nav_msgs/Path` topicon teszi közzé. A robot számára a lényeges
+interfész tehát: `LaserScan`, `Odometry`, `PoseStamped`, `Twist` és `Path`.
+
+### 12.3. Fontos paraméterek és koordináták
+
+Az `astar_dwa_controller/config/rosbot.yaml` tartalmazza a topic-neveket,
+a célt, a `map_size` értéket, a `resolution` cellaméretet és a
+`robot_radius` biztonsági sugarat. A C++ node lokális, négyzetes rácsot épít
+a robot körül. A rácskoordináta:
+
+```text
+row = floor((y - origin_y) / resolution)
+column = floor((x - origin_x) / resolution)
+```
+
+Például `resolution = 0.20 m`, `origin_y = -6.0 m`, `y = 0.4 m` esetén
+`row = floor(6.4 / 0.2) = 32`. A cellaközéppont visszaalakítása:
+`y = origin_y + (row + 0.5) * resolution`, ezért a 32-es sor középpontja
+`-6 + 32.5 * 0.2 = 0.5 m`.
+
+### 12.4. A* és DWA működése
+
+Az A* prioritási sort használ. A `g` az eddigi cellaköltség, a `h` az
+egyenes vonalú becslés a célig, az `f = g + h` pedig a kiválasztási érték.
+Egy átlós lépés költsége `sqrt(2)`, egyenes lépésé `1`. Például egy két
+egyenes és egy átlós lépés költsége `1 + 1 + 1.414 = 3.414` cellaköltség.
+Átlós sarokvágás csak akkor engedélyezett, ha a két oldalsó cella is szabad.
+
+A DWA a `v = 0...0.4 m/s` és `omega = -1.2...1.2 rad/s` mintapárokat
+vizsgálja. Minden pár 15 darab, egyenként `0.1 s` hosszú előrelépéssel
+szimulálódik. Ütközés esetén a pár kiesik. A pontszám:
+
+```text
+score = -goal_distance - 0.25 * |heading_error| + 0.15 * v
+```
+
+Ha egy jelölt 1 m-re van a céltól, a szögeltérés `0.2 rad`, a sebesség
+`0.4 m/s`, akkor a pontszám `-1 - 0.25*0.2 + 0.15*0.4 =
+-1 - 0.05 + 0.06 = -0.99`. A nagyobb pontszámú biztonságos pár
+kerül a `/cmd_vel` üzenetbe.
+
+### 12.5. ROSbot átültethetőség
+
+A ROSbot saját bringupja biztosítja a motorvezérlést, odometriát és LiDAR-t.
+Az algoritmus nem nyúl közvetlenül a motorokhoz. Ha a ROSbot például
+`/rosbot/scan`, `/rosbot/odom` és `/rosbot/cmd_vel` topicokat használ, a
+paraméterekkel ezek adhatók meg; a C++ forrás nem változik. A Gazebo-világ
+robotmodellje jelenleg TurtleBot3, ezért a ROSbot modellcsere külön
+szimulációs konfigurációs lépés, nem algoritmusmódosítás.
+
+### 12.6. Ellenőrzés
+
+Windows alatt a ROS fejlécek hiányában a Python launch-fájlok szintaxisa
+ellenőrizhető. A tényleges C++ fordítás WSL-ben történik:
+
+```bash
+cd ~/projects/ros2_astar_dwa_gazebo
+source /opt/ros/jazzy/setup.bash
+rosdep install --from-paths src --ignore-src -r -y
+colcon build --symlink-install
+```
+
+### 12.7. Ismert térkép, LiDAR és megjelenítés
+
+Az `astar_dwa_node` kizárólag az előre ismert statikus térképet használja.
+Az `known_obstacle_x`, `known_obstacle_y` és
+`known_obstacle_radius` paraméterekből építi fel az A* statikus térképét.
+Ez a szimulációban azt jelenti, hogy a piros és narancssárga statikus
+akadályok helye előre ismert. A DWA ettől még a `/scan` aktuális mérését
+használja, így az előre nem ismert vagy mozgó akadályokra is reagál.
+
+Az automatikus `lidar_map` és `frontier` módok eltávolítva, ezért a LiDAR
+csak a DWA pillanatnyi akadályvizsgálatához használatos.
+
+A `visualization.launch.py` RViz2-konfigurációja az `odom` fix keretben
+megjeleníti a TF-fa koordinátáit, a narancssárga `/scan` pontokat, a kék
+odometriát és a zöld `/astar_path` útvonalat. Ez a megjelenítés nem avatkozik
+be a vezérlésbe: ugyanazok a szabványos ROS topicok használhatók Gazebo-ban
+és a valódi ROSboton.
+
+### 12.8. Mozgó akadály szimuláció
+
+A `moving_obstacle_node.py` a Gazebo `SetEntityPose` szolgáltatásán keresztül
+mozgatja a `moving_obstacle` nevű kék hengert. A pozíció:
+
+```text
+x = 3.0 m
+y = 1.8 m + 1.2 m * sin(0.6 * t)
+```
+
+ahol `t` másodpercben mért szimulációs idő. Például `t = 0` esetén
+`y = 1.8 m`, `t = 1` esetén pedig körülbelül
+`1.8 + 1.2 * 0.565 = 2.478 m`. A henger a LiDAR-ban megjelenik, és a DWA
+ütközésvizsgálata a következő előrejelzett pontoknál figyelembe veszi.
+
+### 12.9. RViz-hibakeresés és a látható működés
+
+Az RViz konfiguráció fix koordinátakerete `odom`, nem `map`. A jelenlegi
+Gazebo-változatban nincs SLAM vagy térképkiszolgáló, ezért `map` TF nem
+létezik; a `Fixed Frame: map` hiba emiatt helyes hibajelzés. A
+`visualization.launch.py` az `astar_dwa.rviz` konfigurációt és az `odom`
+fix frame-et tölti be.
+
+Az `astar_dwa_node` minden vezérlési ciklusban közzéteszi az
+`/astar_dwa_markers` `visualization_msgs/MarkerArray` üzenetet:
+
+- zöld gömb: aktuális A* cél/waypoint;
+- zöld vonal: A* útvonal;
+- piros hengerek: ismert statikus akadályok;
+- kék vonal: a kiválasztott DWA sebességpár 15 lépéses előrejelzése.
+
+Az odometriából a node dinamikusan publikálja az `odom -> base_link`, majd a
+`base_link -> base_scan` TF-et. Ez teszi lehetővé, hogy az RViz a `/scan`
+LiDAR-pontokat az `odom` fix frame-be transzformálja. A valós ROSboton ezt a
+TF-et célszerű a robot saját bringupjára bízni; a vezérlő topic- és frame
+paraméterezése mellett a szabványos interfész változatlan marad.
+
+## 13. RViz-es célkijelölés és OccupancyGrid térkép
+
+### A fájlok célja
+
+Az `astar_dwa_node.cpp` most az `/astar_map` `nav_msgs/OccupancyGrid` topicot
+is publikálja. Ez a `known_map` módban a statikus akadályokat, a robot
+ráhagyásával inflált tiltott cellákat és a térkép szélét mutatja. Az
+`astar_dwa.rviz` ehhez hozzáadja a `Known occupancy map` displayt, valamint a
+`SetGoal` eszközt, amely a `/goal_pose` topicon küld célt.
+
+### Adatfolyam és célkijelölés
+
+Az RViz `2D Goal Pose` eszköz kattintásból és az egér húzásának irányából
+`PoseStamped` üzenetet készít. A node a pozíció `x` és `y` mezőjét eltárolja
+`goal_x_` és `goal_y_` értékként, naplózza az új célt, majd a következő
+vezérlési ciklusban újra lefuttatja az A*-t. Például egy `(4.0, 2.0)` cél az
+`odom` koordinátarendszerben a térkép origójától 4 méterre keletre és 2 méterre
+északra van; a node ezt a világkoordinátát cellává alakítja.
+
+### Térkép és koordináta-átalakítás
+
+Az OccupancyGrid origója `(-map_size/2, -map_size/2)`, a cellaméret
+`resolution`. Egy `(x, y) = (4.0, 2.0)` pont `resolution = 0.20 m` és
+`map_size = 16 m` mellett:
+
+```text
+column = floor((4.0 + 8.0) / 0.20) = 60
+row    = floor((2.0 + 8.0) / 0.20) = 50
+```
+
+Ez azt jelenti, hogy a pont a 80x80 cellás térkép 60. oszlopába és 50. sorába
+kerül. Az akadályok körül a kód
+`ceil((obstacle.radius + robot_radius) / resolution)` sugarú körben 100-as
+értékű, foglalt cellákat állít be; a többi ismert szabad cella 0.
+
+### Látható működés
+
+A célmarker most gömbből, célfeliratból és síkbeli céljelből áll. Az A* vonal
+vastagabb, a DWA előrejelzett vonala külön kék magasságban fut, továbbá a
+robot footprintje és haladási nyila is látható. A `/astar_map` tartós
+QoS-szal készül, ezért az RViz későbbi csatlakozásakor is megkapja az egyszer
+publikált statikus térképet. A node az odom első beérkezése után, majd minden
+vezérlési ciklusban meghívja a `publish_map()` függvényt. A `known_map` mód
+akadálylistája nem függ a LiDAR első üzenetétől, ezért a térkép akkor is
+nem üres, ha a szenzoradat néhány pillanattal később érkezik.
+
+Az RViz célüzenete nem Gazebo-topic. A `/goal_pose` a vezérlő node bemenete;
+az új cél alapján az A* útvonal újraszámolódik, majd a DWA a Gazebo felé a
+`/cmd_vel` topicot használja. Ha még nincs LiDAR, a node már akkor is közzéteszi
+a célmarkert, de sebességparancsot csak érvényes szenzoradat után ad.
+
+### Korlátok és ellenőrzés
+
+Az RViz-ből érkező cél az `odom` keretben legyen. A statikus térkép nem
+tartalmazza a mozgó kék akadályt, mert annak aktuális helyét a LiDAR és a DWA
+kezeli. Ellenőrizhető:
+
+```bash
+ros2 topic echo /astar_map --once
+ros2 topic echo /goal_pose --once
+```
+
+Az RViz `TF` display tengelyei korábban piros X-tengelyeket és nyilakat
+rajzoltak a `base_link` és `base_scan` keretekhez. Ezek vizualizációs elemek,
+nem akadályok és nem A*-útvonalak; a projekt konfigurációjában a nyilak,
+tengelyek és frame-nevek most ki vannak kapcsolva a tisztább nézet érdekében.
+
+## 14. LiDAR-alapú felhalmozott térkép
+
+### A fájl célja
+
+Az `astar_dwa_node.cpp` `planning_source` paramétere két működést választ:
+`known_map` esetén a YAML-ben megadott statikus akadályokból készül a tervezési
+térkép; `lidar_map` esetén a node a LiDAR-mérésekből fokozatosan felépített
+`OccupancyGrid`-et használja. Ez a mód a korábbi ismerttérképes megoldást nem
+törli, csak alternatív forrást ad az A* számára.
+
+### Adatfolyam
+
+Az `scan()` eltárolja az új `LaserScan` üzenetet, majd `lidar_map` vagy
+`frontier` módban
+meghívja az `update_lidar_map()` függvényt. Ez a robot aktuális
+`pose_` értékével az `odom` keretbe alakítja a LiDAR-sugarakat. A
+`mark_lidar_ray()` a robot cellájától a mérési végpontig halad:
+
+- a köztes cellák értéke `0`, vagyis szabad;
+- érvényes akadálymérésnél a végpont értéke `100`, vagyis foglalt;
+- `inf` vagy tartományon kívüli mérésnél a `range_max` végpontja nem lesz
+  foglalt, csak a sugár köztes cellái lesznek szabadok;
+- a korábbi cellaértékek megmaradnak, így a térkép összeadja a több
+  pozícióból érkező megfigyeléseket.
+
+Az `astar()` a `planning_obstacles()` eredményét használja. `lidar_map`
+módban a `lidar_map_obstacles()` minden `100`-as cellából akadálypontot
+képez, majd az A* a robot sugarával és a cella félméretével inflálja az
+akadály környezetét. A DWA ettől külön továbbra is az aktuális, nyers
+`obstacles()` LiDAR-pontokat használja. A lokális DWA csak a robot előtti
+180 fokos és legfeljebb 3 méteres mérési tartományt használja, így a falak
+és akadályok mögötti 360 fokos pontfelhő nem kényszeríti indokolatlan
+megállásra vagy helyben forgásra.
+
+### Rács, koordináták és képlet
+
+A térkép négyzetes, oldala `map_size` méter, cellamérete `resolution` méter,
+origója az `odom` rendszerben `(-map_size/2, -map_size/2)`. A
+`map_cell(x, y, row, column)` képlete:
+
+```text
+column = floor((x + map_size / 2) / resolution)
+row    = floor((y + map_size / 2) / resolution)
+```
+
+Itt `x` és `y` méterben mért világkoordináta, `row` és `column` egész
+cellaindex. Például `map_size = 16 m`, `resolution = 0.20 m` és
+`(x, y) = (4.0, 2.0)` esetén:
+
+```text
+column = floor((4.0 + 8.0) / 0.20) = floor(60.0) = 60
+row    = floor((2.0 + 8.0) / 0.20) = floor(50.0) = 50
+```
+
+Ez a 80x80 cellás térkép `(50, 60)` cellája. Ha a robot
+`(0, 0)` ponton áll, és egy sugár `2.0 m` távolságban, `0` radián szögben
+akadályt mér, akkor a végpont `(2.0, 0.0)`, amelynek cellája:
+
+```text
+column = floor((2.0 + 8.0) / 0.20) = 50
+row    = floor((0.0 + 8.0) / 0.20) = 40
+```
+
+A `mark_lidar_ray()` a robot cellájától a `(40, 50)` végpontig a diszkrét
+vonal celláit jelöli szabadnak, majd a `(40, 50)` cellát foglaltra állítja.
+
+### Megjelenítés és használat
+
+Az `publish_map()` `lidar_map` módban közvetlenül ezt a rácsot publikálja
+`/astar_map` néven. Az `OccupancyGrid` jelentése:
+
+- `-1`: még nem látott / ismeretlen;
+- `0`: LiDAR-sugár által szabadnak látott cella;
+- `100`: LiDAR-mérés végpontja, feltételezett akadály.
+
+A mód a launch paraméterével kapcsolható, a YAML alapértelmezése mellett:
+
+```bash
+ros2 launch dwa_gazebo_sim simulation.launch.py planning_source:=lidar_map
+```
+
+Ezután újra kell fordítani a workspace-t, majd a teljes
+`simulation.launch.py` indítással lehet futtatni. `known_map` módban az
+OccupancyGrid továbbra is a YAML statikus akadályait és a biztonsági
+inflációt mutatja.
+
+### Biztonsági korlátok
+
+Ez a megoldás LiDAR-odometriai térkép, nem teljes SLAM. Az `odom` driftje a
+térképben is megjelenhet, nincs loop closure és nincs map->odom korrekció.
+A cellán kívüli sugarakat a node elutasítja. Az ismeretlen cellákat a jelenlegi egyszerű
+szimulációs A* nem tiltja le, ezért a robot a cél felé haladva fedezhet fel
+új területet; valódi biztonságkritikus navigációhoz az ismeretlen cellákat
+blokkolni vagy Nav2/SLAM Toolbox megoldással kezelni kell.
+
+### Ellenőrzés
+
+A C++ változtatás WSL-ben fordítható és indítható:
+
+```bash
+cd "/mnt/c/Users/Rum Dániel/Desktop/Diplomamunka/codes_diploma/ros2_astar_dwa_gazebo"
+source /opt/ros/jazzy/setup.bash
+colcon build --symlink-install
+source install/setup.bash
+ros2 launch dwa_gazebo_sim simulation.launch.py
+```
+
+Futás közben a térkép ellenőrzése:
+
+```bash
+ros2 topic echo /astar_map --once
+```
+
+Az üzenetben a `data` tömbben kell megjelenniük a `-1`, `0` és `100`
+értékeknek; `known_map` módban a `-1` érték nem része az előre ismert
+statikus térképnek.
+
+## 15. Frontier-alapú automatikus feltérképezés
+
+### Működés
+
+Az új `planning_source: frontier` mód nem használ előre megadott célt. A
+vezérlő induló állapota és alapértelmezett célkoordinátája `(0, 0)`, de a cél
+nem aktív, ezért `known_map` és `lidar_map` módban is csak `/goal_pose`
+üzenet után indul a robot. Frontier módban a node a felhalmozott LiDAR-rács
+alapján automatikusan aktivál célt.
+
+Frontier célcellának azt az ismert szabad cellát tekinti, amely:
+
+- legalább egy 8-szomszédja még ismeretlen (`-1`);
+- legalább `0.6 m` távolságra van a robottól.
+
+A `select_frontier_goal()` a feltételeknek megfelelő szabad cellák közül a
+legközelebbit választja. Ezt a világkoordinátás cellaközéppontot az A* céljaként állítja be,
+majd a DWA a következő waypoint felé mozgatja a robotot. A frontier elérése
+után a cél deaktiválódik, és a következő vezérlési ciklus új frontiert keres.
+Ha nincs több ilyen cella, a node nulla sebességet publikál és megáll.
+
+Ha a frontier célhoz az aktuális, inflált LiDAR-térképen az A* nem talál
+útvonalat, a cél nem törlődik azonnal. A node megtartja a kiválasztott
+frontiert, és korlátozott recovery-forgatást indít. A haladásfigyelő akkor is
+recovery-t indít, ha több másodpercig nincs legalább `0.10 m` odometriai
+elmozdulás. A forgatás legfeljebb `2.5 s`, utána új A* útvonal készül. A cél
+így nem kerül törlésre, és a vezérlés nem keveri össze a DWA által választott
+nullasebességet a sikeres célbaéréssel.
+
+A LiDAR-térkép ray-castinget használ. Valós, érvényes végpontnál a sugár
+köztes cellái szabadak, a végpont foglalt; `inf` vagy tartományon kívüli
+mérésnél a sugár a `range_max` határig csak szabad cellákat jelöl. Így a
+nyitott előre irány nem marad tévesen teljesen ismeretlen, és a frontier
+kereső ténylegesen tud elérhető célcellát találni.
+
+A Gazebo-fizika stabilitása érdekében a DWA kimenete sebességrámpán halad:
+a lineáris sebesség legfeljebb `0.20 m/s`, a szögsebesség legfeljebb
+`0.8 rad/s`, egy 0,1 másodperces ciklusban pedig a változás legfeljebb
+`0.04 m/s` és `0.20 rad/s`. Üres A* útvonal esetén a node nulla sebességet
+publikál és megáll.
+
+### Adatfolyam és példa
+
+```text
+LiDAR -> lidar_map -> szabad/ismeretlen határ keresése
+                         -> frontier cél
+                         -> A* -> DWA -> /cmd_vel
+                                      |
+                                      +-> új LiDAR-mérés
+```
+
+Ha a robot `(0, 0)` helyen van, `resolution = 0.20 m`, és egy szabad cella
+középpontja `(1.1, 0.3)`, akkor a frontier cél ez a világpont lesz. Az A*
+ezt a célcellát használja; amikor a robot `0.3 m`-nél közelebb ér, a cél
+lezárul, és új határcella kiválasztása indul.
+
+### Korlátok
+
+Ez a frontier-mód egyszerű odometria-alapú feltérképezés. Az `odom` driftje
+eltolhatja a korábbi méréseket, és nincs loop closure. Az ismeretlen cellákat
+az egyszerű A* átjárhatónak kezeli, miközben a frontier kiválasztása csak
+ismert szabad cellára esik. Valós, biztonságkritikus roboton az ismeretlen
+cellákat konzervatívan blokkolni, illetve SLAM Toolbox/Nav2 rendszert használni
+célszerű.
+
+### Indítás és ellenőrzés
+
+```bash
+ros2 launch dwa_gazebo_sim simulation.launch.py planning_source:=frontier
+```
+
+A naplóban az automatikusan kiválasztott cél ilyen formában jelenik meg:
+
+```text
+Uj frontier cel: x=..., y=... m
+```
