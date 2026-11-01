@@ -42,6 +42,8 @@ digraph AStarCurrentCode {
         grid_file [label="grid_map.py\nGridMap osztaly\n2D racsterkep", fillcolor="#dcfce7", color="#15803d"]
         astar_file [label="astar_baseline.py\nklasszikus A*", fillcolor="#dcfce7", color="#15803d"]
         variants_file [label="astar_variants.py\nvalaszthato heurisztikak", fillcolor="#dcfce7", color="#15803d"]
+        experiments_file [label="experiments.py\n4 palya x 2 mozgasmód x\n4 heurisztika", fillcolor="#dcfce7", color="#15803d"]
+        runner_file [label="run_experiment.py\nCSV eredmenymentes", fillcolor="#dcfce7", color="#15803d"]
         smoothing_file [label="path_smoothing.py\nmasodfoku Bezier-simitas", fillcolor="#dcfce7", color="#15803d"]
         simulation_file [label="astar_simulation.py\nmatplotlib szimulacio", fillcolor="#dcfce7", color="#15803d"]
     }
@@ -112,9 +114,37 @@ digraph AStarCurrentCode {
         plot -> animation
     }
 
+    subgraph cluster_experiments {
+        label="experiments.py összehasonlítás"
+        fontname="Arial Bold"
+        fontsize=13
+        color="#0f766e"
+        style="rounded"
+        bgcolor="#f0fdfa"
+
+        scenario_maps [label="build_experiment_scenarios()\nopen_space, corridor\ncorner_cutting, diagonal_only", fillcolor="#ccfbf1", color="#0f766e"]
+        comparison [label="compare_heuristics()\ndiagonal = False / True\nManhattan, Euclidean,\nChebyshev, Octile", fillcolor="#ccfbf1", color="#0f766e"]
+        safety_cases [label="Sarokvágás ellenőrzése\nés nincs útvonal eset", shape=diamond, fillcolor="#ccfbf1", color="#0f766e"]
+        csv_output [label="write_results()\nheuristic_comparison.csv", shape=parallelogram, fillcolor="#ccfbf1", color="#0f766e"]
+        figure_output [label="generate_comparison_figures.py\noriginal_simulation térkép\nstraight és diagonal PNG pontokkal", shape=parallelogram, fillcolor="#ccfbf1", color="#0f766e"]
+        simulation_figure_output [label="generate_simulation_heuristic_comparison.py\ncreate_scene + obstacle inflation\nAStarDWAPlanner.plan_global()\ntwo-panel simulation figure", shape=parallelogram, fillcolor="#ccfbf1", color="#0f766e"]
+
+        runner_file -> scenario_maps
+        scenario_maps -> comparison
+        comparison -> safety_cases
+        comparison -> csv_output
+        comparison -> figure_output
+        comparison -> simulation_figure_output
+    }
+
     grid_file -> start [label="GridMap objektum"]
     astar_file -> start [label="belepesi fuggveny"]
     variants_file -> start [label="heuristic"]
+    variants_file -> comparison [label="4 heurisztika"]
+    astar_file -> comparison [label="astar_search"]
+    grid_file -> scenario_maps [label="GridMap pályák"]
+    experiments_file -> comparison [label="kísérleti logika"]
+    runner_file -> csv_output [label="parancssori futtatás"]
     smoothing_file -> smoothing [label="smooth_path"]
     simulation_file -> simulation_start [label="szimulacio belepesi pont"]
     simulation_start -> settings [label="UI bemenetek"]
@@ -219,16 +249,17 @@ digraph AStarCurrentCode {
         bgcolor="#f0fdfa"
 
         ros_scan [label="/scan LaserScan\nakadálymérések", fillcolor="#ccfbf1", color="#0f766e"]
-        ros_odom [label="/odom Odometry\nx, y, yaw", fillcolor="#ccfbf1", color="#0f766e"]
-        ros_grid [label="astar_dwa_node\nlokális Grid + akadályinfláció", fillcolor="#ccfbf1", color="#0f766e"]
-        ros_astar [label="A* lokális útvonal\nGrid cellákból world pontok", fillcolor="#ccfbf1", color="#0f766e"]
+        ros_odom [label="/odom Odometry\nx, y, yaw\n+ initial_pose (0.8, 0.8)", fillcolor="#ccfbf1", color="#0f766e"]
+        ros_grid [label="astar_dwa_node\n8 x 5 m-es statikus Grid\nkör alakú akadályinfláció", fillcolor="#ccfbf1", color="#0f766e"]
+        ros_astar [label="A* globális útvonal\nstatikus pályán, Grid cellákból\nworld pontok", fillcolor="#ccfbf1", color="#0f766e"]
         ros_waypoint [label="Következő waypoint\nútvonalpont vagy cél", fillcolor="#ccfbf1", color="#0f766e"]
-        ros_dwa [label="DWA rollout\nsebességpárok és ütközésvizsgálat", fillcolor="#ccfbf1", color="#0f766e"]
+        ros_dwa [label="DWA rollout\nkeréksebesség-dinamikus ablak\nAdmissableVelocity + Alfa/Beta/Gamma", fillcolor="#ccfbf1", color="#0f766e"]
         ros_cmd [label="/cmd_vel Twist\nROSbot vagy Gazebo meghajtás", shape=parallelogram, fillcolor="#99f6e4", color="#0f766e"]
-        ros_markers [label="/astar_dwa_markers MarkerArray\nA* útvonal, cél, akadályok, DWA trajektória", shape=parallelogram, fillcolor="#99f6e4", color="#0f766e"]
+        ros_markers [label="/astar_dwa_markers MarkerArray\nA* útvonal, cél, biztonsági zónák,\nLiDAR-pontok, DWA trajektória", shape=parallelogram, fillcolor="#99f6e4", color="#0f766e"]
         ros_map [label="/astar_map OccupancyGrid\nismert térkép + inflált akadálycellák", shape=parallelogram, fillcolor="#99f6e4", color="#0f766e"]
         ros_goal [label="/goal_pose PoseStamped\núj világkoordinátás cél", fillcolor="#ccfbf1", color="#0f766e"]
         rviz_goal [label="RViz 2D Goal Pose\nkattintás + irányhúzás", fillcolor="#ccfbf1", color="#0f766e"]
+        gazebo_gui [label="Gazebo GUI\nWSLg: X11-kompatibilis renderelés\nfekete kép esetén: software_rendering:=true", fillcolor="#fef3c7", color="#d97706"]
 
         ros_scan -> ros_grid
         ros_odom -> ros_grid
@@ -244,9 +275,14 @@ digraph AStarCurrentCode {
         ros_goal -> ros_astar [label="cél"]
         rviz_goal -> ros_goal [label="kattintással"]
         known_map [label="előre ismert statikus akadályparaméterek", fillcolor="#ccfbf1", color="#0f766e"]
-        moving_obstacle [label="moving_obstacle_node\nSetEntityPose + szinuszos pálya", fillcolor="#bfdbfe", color="#2563eb"]
+        moving_obstacle [label="moving_obstacle_node\nSetEntityPose + egyenletes Python-pálya", fillcolor="#bfdbfe", color="#2563eb"]
+        pose_bridge [label="ros_gz_bridge\n/world/dwa_world/set_pose\nROS2 service -> Gazebo", fillcolor="#dbeafe", color="#2563eb"]
         known_map -> ros_astar
+        moving_obstacle -> pose_bridge [label="SetEntityPose kérés"]
+        pose_bridge -> gazebo_gui [style=dashed, label="modell pozíciója"]
         moving_obstacle -> ros_scan [style=dashed, label="LiDAR-ban megjelenik"]
+        gazebo_gui -> ros_scan [style=dashed, label="szimulációs szenzorok"]
+        ros_cmd -> gazebo_gui [style=dashed, label="modell mozgatása"]
     }
 
     labelloc="t"

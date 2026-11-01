@@ -1627,3 +1627,804 @@ A naplóban az automatikusan kiválasztott cél ilyen formában jelenik meg:
 ```text
 Uj frontier cel: x=..., y=... m
 ```
+
+---
+
+# `simulation.py` – 1.1 Szimulációs eredmények és forgatókönyvek
+
+## 1. A fájl célja
+
+A `simulation.py` az A* globális útvonaltervezést és a DWA lokális mozgástervezést
+egy közös, kétdimenziós jelenetben mutatja be. A szimuláció nem csak a végső
+útvonalat rajzolja ki: az A* keresés közben megjeleníti a vizsgált cellákat és
+a prioritási sort, a DWA szakaszban pedig a lehetséges pályákat, a mozgó
+akadályokat, a waypointot és a fékezési szakaszokat is.
+
+Az alapbeállításokkal a térkép `30 x 20` cellás, a felbontás `0,2 m/cella`,
+ezért a megjelenített terület `6,0 m x 4,0 m`. A kezdőcella `(2, 2)`, a
+célcella `(17, 27)`, ahol a koordináta formája `(sor, oszlop)`. A világban
+ezek középpontjai rendre `(0,5 m, 0,5 m)` és `(5,5 m, 3,5 m)`.
+
+## 2. Adatfolyam
+
+Az `create_scene()` elkészíti a rácstérképet, a statikus akadályokat, a két
+mozgó akadályt és a robot kezdeti állapotát. Az akadályinfláció után az
+`astar_search()` megkeresi a globális útvonalat. Ezt az `AStarDWAPlanner`
+Bezier-simítással waypointokká alakítja. Az animáció első része az A* keresés
+lépéseit, a második része pedig a DWA ciklusait futtatja:
+
+```text
+create_scene -> A* keresés -> Bezier útvonal és waypointok
+             -> mozgó akadályok -> DWA pályajelöltek -> robotfrissítés
+```
+
+A `compute_onlab_trajectories()` minden DWA sebességpárhoz előre kiszámítja a
+jósolt pályát, majd a pálya végéről indított fékezési szakaszt. A pálya piros,
+ha ütközésveszélyes vagy a megálláshoz szükséges távolság nem elegendő; a
+biztonságos pályák szürkék, a kiválasztott pálya zöld.
+
+## 3. Fontos függvények és adatok
+
+- `load_planner_class()`: betölti a `DWA+A.py` fájlban lévő
+  `AStarDWAPlanner` osztályt.
+- `parse_cell(value)`: a `"sor,oszlop"` szöveget egész koordinátapárrá alakítja.
+- `create_scene(...)`: a rácsot és az akadályokat hozza létre.
+- `create_simulation(...)`: elvégzi a tervezést, felépíti a Matplotlib-ábrát,
+  majd visszaadja a `figure` és `FuncAnimation` objektumot.
+- `compute_onlab_trajectories(...)`: a DWA jelöltek biztonságát és fékezési
+  útját számolja.
+- `update_frame(frame)`: A* vagy DWA állapot szerint frissíti az ábrát.
+- `run_simulation()`: a Tkinter beállítóablakot indítja el.
+
+Az ábra bal oldali információs panelje az A* lépését és prioritási értékeit,
+illetve a DWA fázisban a robot helyzetét, sebességét, az összes, veszélyes és
+biztonságos pályák darabszámát mutatja. A jobb oldali térképen a sötét cellák
+az inflált akadályterületet, a piros körök a dinamikus vagy statikus akadályokat,
+a világoszöld vonal a simított útvonalat, a kék nyomvonal pedig a robot tényleges
+mozgását jelzi.
+
+## 4. A képek értelmezése
+
+Az alapbeállításokkal mentett képkockák a
+`codes_diploma/astar_project/results/figures/` mappában találhatók.
+
+1. `simulation_01_frame_0000.png`: az A* keresés első lépése. A bal oldali
+   panelen az aktuális cella `(2, 2)`, a prioritási sorban pedig az `f` értékek
+   láthatók. A világoskék pontok a már kibővített A* cellákat jelölik.
+2. `simulation_02_frame_0100.png`: az A* keresés késői szakasza. A statikus
+   akadályok közötti átjárók és az infláció miatt tiltott biztonsági zónák
+   szemléltetik, hogy a robot nem matematikai pontként tervez útvonalat.
+3. `simulation_03_frame_0250.png`: a DWA mozgás közbeni állapota. A robot
+   körül sok piros és szürke jelölt pálya látható; a piros jelöltek veszélyesek,
+   a szürke jelöltek a pillanatnyilag megengedett alternatívák. A vastag zöld
+   görbe az aktuálisan választott pályát, a csillag a waypointot jelöli.
+4. `simulation_04_frame_0500.png`: a robot a középső akadályrendszer után
+   közelít a felső átjáróhoz. Ez jó kép az akadálykerülés és a waypoint-követés
+   együttes bemutatására.
+5. `simulation_05_frame_0650.png`: késői DWA állapot, amikor a robot már a cél
+   előtti szakaszon halad. A kék nyomvonal és a zöld globális útvonal közötti
+   eltérés a lokális korrekciót szemlélteti.
+6. `simulation_06_frame_0725.png`: végállapot. A panelen `Cel elerve`, a
+   sebesség `0,00 m/s`, a robot pedig a cél körül áll. Ez a legjobb összefoglaló
+   kép a sikeres útvonaltervezés és végrehajtás bemutatására.
+
+## 5. Konkrét számolási példa
+
+Az alapbeállításban a célcella `(17, 27)`, a felbontás `0,2 m`, az origó
+`(0,0)`. A célpont világkoordinátája:
+
+```text
+x = (27 + 0,5) * 0,2 m = 5,5 m
+y = (17 + 0,5) * 0,2 m = 3,5 m
+```
+
+Az animációban a tervezési fázis 125 képkockából áll. A DWA mozgás ezért a
+`movement_start = 126` képkockánál kezdődik, és legfeljebb 600 mozgási lépést
+kap. A `frame = 250` kép így a `250 - 126 = 124`-edik mozgási állapot környékét
+mutatja, nem egy újratervezett globális A* útvonalat.
+
+## 6. Korlátok és indítás
+
+A közvetlen
+
+```text
+python -m codes_diploma.simulation
+```
+
+indítás a Tkinter beállítóablakot és utána a blokkoló Matplotlib-ablakot nyitja
+meg, ezért parancssori futtatásban az ablak bezárásáig nem ad vissza promptot.
+Képek mentéséhez a `create_simulation(..., show=False)` visszaadott ábrájának
+képkockái menthetők. A jelenlegi képek az `euclidean` heurisztikával,
+átlós mozgással, `0,11 m` inflációval és Bezier-simítással készültek.
+
+A vizsgálat nem jelent statisztikai összehasonlítást: egy rögzített jelenet
+egy futását dokumentálja. Több forgatókönyvhöz külön kell változtatni például
+a kezdő- és célcellát, az inflációt, a heurisztikát, a simítást vagy a DWA
+`alpha`, `beta`, `gamma` súlyait, majd azonos módon menteni és összevetni a
+képeket és a mérőszámokat.
+
+## 7. Ellenőrzés
+
+Lefutott a kért `python -m codes_diploma.simulation` parancs; a grafikus
+ablakos működés miatt a folyamatot a képernyőmentésre szolgáló vezérelt futás
+egészítette ki. A vezérelt futás hat képet mentett a
+`codes_diploma/astar_project/results/figures/` mappába, összesen 726 animációs
+képkockával. A képeken ellenőrizhető az A* tervezési szakasz, a DWA jelölt
+pályái, a fékezési megjelenítés és a cél elérése.
+
+---
+
+# `experiments.py` és `run_experiment.py` – heurisztika- és mozgásmód-vizsgálat
+
+## 1. A vizsgálat célja
+
+Az összehasonlító mérés négy heurisztikát vizsgál azonos pályákon:
+Manhattan, Euklideszi, Chebyshev és octile. Minden pálya két módban fut:
+átlós mozgással (`diagonal=True`) és csak négy főirányú mozgással
+(`diagonal=False`). Így külön látható a heurisztika hatása, valamint az,
+hogy az átlós lépés megengedése vagy tiltása megváltoztatja-e a megoldhatóságot.
+
+## 2. Pályák és adatfolyam
+
+A `build_experiment_scenarios()` négy rögzített pályát készít:
+
+- `original_simulation`: az eredeti `simulation.py` 30×20 cellás fal- és
+  átjáróelrendezése, start `(2,2)` és cél `(17,27)` ponttal;
+- `compact_corridor`: ennek kisebb, 10×7 cellás szemléltető változata;
+- `corner_cutting`: saroknál elhelyezett akadályok, ahol a közös sarok
+  átvágását a `GridMap.get_neighbors()` tiltja;
+- `diagonal_only`: kereszt alakú akadály, amelyben a start és a cél között
+  csak egy nem engedélyezett átlós átkelés lenne.
+
+Az `original_simulation` pálya az eredeti szimuláció fal- és átjáróelrendezését
+használja. A `compact_corridor` ennek kisebb, 10×7 cellás változata. A képek
+elsődleges eredménye az eredeti térképen készült; az inflációt és a DWA
+mozgó akadályait ez az A* összehasonlítás külön nem tartalmazza.
+
+A `run_scenario_comparison()` minden pályát mindkét mozgásmódban, azon belül
+mind a négy heurisztikával lefuttat. A `compare_heuristics()` az A* részletes
+eredményéből a következőket menti: sikeresség, útvonal költsége, útvonalhossz,
+vizsgált csomópontok száma és maga az útvonal. A `write_results()` az útvonal
+kivételével CSV-be írja az összehasonlítható mérőszámokat.
+
+## 3. Eredmények
+
+Az eredményfájl:
+
+`codes_diploma/astar_project/results/tables/heuristic_comparison.csv`
+
+Összesen 32 sor készült: 4 pálya × 2 mozgásmód × 4 heurisztika.
+
+Az `original_simulation` pályán főirányú mozgásnál minden heurisztika 40,00
+költségű utat talált. Átlós mozgásnál a Manhattan költsége 32,38, az
+Euklideszi, Chebyshev és octile változatoké 31,21 lett. Ez a különbség nem
+heurisztikai hiba, hanem az engedélyezett mozgások és a heurisztika együttese.
+
+A `compact_corridor` pályán az átjárók miatt minden konfiguráció talált utat.
+Főirányú módban a költség `15,0`, átlós módban `12,0711` lett. Az
+`diagonal_only` pályán viszont mind a négy heurisztika helyesen `success=False`
+eredményt adott nem átlós és átlós módban is: a cél körüli akadályok miatt a
+tiltott sarokátvágással sem lehet szabályos útvonalat létrehozni.
+
+## 4. Sarokvágás kezelése
+
+Átlós mozgás esetén sem elég azt ellenőrizni, hogy az átlós célcella szabad-e.
+A `GridMap.get_neighbors()` a két köztes oldalsó cellát is megvizsgálja. Ha
+például `(1,1)` cellából a `(2,2)` cellába lépne a robot, akkor a `(1,2)` és
+`(2,1)` cellának is szabadnak kell lennie. Ha valamelyik akadály, az átlós
+szomszédot elutasítja. Ez akadályozza meg, hogy a robot két akadály közös
+sarkán fizikailag átvágjon.
+
+A `corner_cutting` teszt ezt ellenőrzi: a talált út nem tartalmazza a
+tiltott `(2,2)` sarokátvágási cellát. A teszt ugyanakkor azt is ellenőrzi,
+hogy a pálya kerülő úton továbbra is megoldható marad.
+
+## 5. Konkrét költségpélda
+
+Az eredeti szimulációs pályán a start `(2,2)`, a cél `(17,27)`. Főirányú
+módban 40 egyenes lépés szükséges. Átlós mozgásnál a start és a cél
+koordinátakülönbsége `15` sor és `25` oszlop, ezért az ideális, akadályt nem
+keresztező geometriai alsó becslés 15 átlós és 10 egyenes lépés:
+
+```text
+15 * sqrt(2) + 10 * 1
+= 15 * 1,41421356 + 10
+= 31,2132
+```
+
+Az eredeti falak miatt a tényleges út ennél hosszabb lehet. A mérésben a
+Manhattan változat 32,38, a másik három heurisztika 31,21 költséget adott;
+ez azt is megmutatja, hogy a Manhattan heurisztika átlós költség mellett nem
+ugyanolyan természetes választás, mint az octile vagy az Euklideszi heurisztika.
+
+Az egyenes lépés költsége 1 cella, az átlós lépés költsége
+`sqrt(2) ≈ 1,4142` cella. A heurisztika a kibővített csomópontok számát
+befolyásolhatja, de szabályos, megengedett mozgásoknál nem vezethet
+olcsóbb útvonalhoz az optimálisnál.
+
+## 6. Indítás és tesztelés
+
+Az összehasonlítás indítása:
+
+```text
+python -m codes_diploma.astar_project.run_experiment
+```
+
+A célzott tesztek:
+
+```text
+python -m unittest codes_diploma.astar_project.tests.test_experiments codes_diploma.astar_project.tests.test_astar_baseline codes_diploma.astar_project.tests.test_grid_map -v
+```
+
+A futtatás eredménye: 13 teszt sikeres. A tesztek ellenőrzik mind a négy
+heurisztika és mindkét mozgásmód lefutását, a nem átlós módban elutasított
+megoldhatatlan pályát és a sarokvágás tiltását.
+
+## 7. Az egységes, kontrasztos összehasonlító ábrák
+
+Az aktuális ábrák ismét egyetlen térképen jelenítik meg mind a négy heurisztika útvonalát. A heurisztikákat nagy kontrasztú színek különböztetik meg: Manhattan kék, Euklideszi narancssárga, Chebyshev zöld, Octile lila. A folytonos vonal az átlós mozgás tiltását, a szaggatott vonal az átlós mozgás engedélyezését jelenti. Az útvonalak vastagok, fehér kontúrt kapnak, ezért a szomszédos vagy egymást fedő szakaszok is jobban elkülönülnek. A kezdőpont zöld `S`, a célpont piros `G` jelölést kapott.
+
+Az ábrákat a `python -m codes_diploma.astar_project.generate_comparison_figures` parancs generálja újra. A program minden forgatókönyvhöz egy képet ment a `codes_diploma/astar_project/results/figures/` könyvtárba.
+
+### 7.1. Eredeti szimulációs térkép
+
+**Kép:** `heuristics_original_simulation.png`
+
+**Képaláírás:** *A négy A* heurisztika útvonalainak összehasonlítása az eredeti szimulációs térképen.*
+
+**Beilleszthető szöveg:**
+Az ábra ugyanazon, 30×20 cellás térképen mutatja be a Manhattan, Euklideszi, Chebyshev és Octile heurisztika által talált útvonalakat. A szín a heurisztikát, a vonal típusa pedig a mozgási módot jelöli. Így egyetlen térképen látható, hogy az átlós lépések engedélyezése rövidebb útvonalakat eredményezhet, miközben az akadályok megkerülésének szabályai minden változatban érvényben maradnak.
+
+### 7.2. Kisebb, átjárós ellenőrző pálya
+
+**Kép:** `heuristics_compact_corridor.png`
+
+**Képaláírás:** *Heurisztika-összehasonlítás kisebb, átjárókat tartalmazó rácstérképen.*
+
+**Beilleszthető szöveg:**
+A kisebb ellenőrző pálya egy függőleges és egy vízszintes akadályfalon kialakított átjárókat tartalmaz. Az ábra azt szemlélteti, hogy az összes vizsgált heurisztika képes megtalálni a falak közötti szabályos útvonalat, az átlós mozgás pedig csökkenti az útvonal geometriai költségét.
+
+### 7.3. Sarokvágási vizsgálat
+
+**Kép:** `heuristics_corner_cutting.png`
+
+**Képaláírás:** *A sarokvágás elleni szomszédvizsgálat hatása átlós mozgásnál.*
+
+**Beilleszthető szöveg:**
+Az átlós mozgás engedélyezése mellett az algoritmus nem léphet át két akadály közös sarkán. A szomszédvizsgálat a két köztes oldalsó cellát is ellenőrzi, ezért a megtalált útvonal szabályos kerülőutat használ.
+
+### 7.4. Megoldhatatlan pálya
+
+**Kép:** `heuristics_diagonal_only.png`
+
+**Képaláírás:** *Megoldhatatlan rácspálya felismerése két mozgási módban.*
+
+**Beilleszthető szöveg:**
+A kereszt alakú akadályrendszer elzárja a kezdő- és a célcellát. Egyik heurisztika sem tud szabályos útvonalat létrehozni, ezért az algoritmus mindkét mozgási módban helyesen jelzi a `NO PATH` eredményt. Ez megerősíti, hogy a heurisztika a keresés sorrendjét befolyásolja, az akadály- és szomszédsági szabályokat nem írja felül.
+## 7. K?tpaneles, szimul?ci?s st?lus? ?sszehasonl?t? ?bra
+
+Az aktu?lis k?p az eredeti `python -m codes_diploma.simulation` t?rk?prajzol?si
+st?lus?hoz igazodik. A t?rk?p k?t egym?s melletti panelen l?that?: balra a
+n?gyir?ny?, jobbra az ?tl?s mozg?st is enged?lyez? A* keres?s eredm?nye. Mindk?t
+panelen egyszerre szerepel a Manhattan, Euklideszi, Chebyshev ?s Octile
+heurisztika. Az akad?lyok sz?rk?s t?glalapok, a cellahat?rok finom r?csvonalak,
+az ?tvonal pedig v?kony, szaggatott vonal apr? csom?ponti jel?l?sekkel. Ez a
+jel?l?s k?zelebb ?ll a szimul?ci? eredeti A* ?tvonal-megjelen?t?s?hez, ?s nem
+takarja el az akad?lyokat vagy a t?bbi ?tvonalat.
+
+**K?p:** `heuristics_original_simulation.png`
+
+**K?pal??r?s:** *A n?gy A* heurisztika ?sszehasonl?t?sa az eredeti szimul?ci?s
+t?rk?pen: balra a n?gyir?ny?, jobbra az ?tl?s mozg?st is enged?lyez? eset.*
+
+**Beilleszthet? sz?veg:**
+Az ?bra az eredeti szimul?ci? t?rk?pelrendez?s?t ?s megjelen?t?si logik?j?t
+k?veti. A bal oldali panelen csak a n?gy f?ir?ny, a jobb oldali panelen pedig
+az ?tl?s szomsz?dcell?k is haszn?lhat?k. Az ?tvonalakat a sz?nek k?l?n?tik el,
+a v?kony szaggatott vonal ?s az apr? csom?ponti jel?l?s pedig az A* r?cs?tvonal
+alakj?t mutatja. A vil?gkoordin?t?s tengelyek miatt az ?bra a szimul?ci?ban
+l?that? t?rk?phez hasonl?an ?rtelmezhet?.
+
+
+## 8. Val?di szimul?ci?s t?rk?pen v?gzett heurisztika-?sszehasonl?t?s
+
+A `simulation_heuristic_comparison.py` k?l?n ?sszehasonl?t? ?br?t k?sz?t az
+alap szimul?ci? t?rk?p?p?t?s?t felhaszn?lva. A `simulation.create_scene()`
+hozza l?tre a 30?20 cell?s t?rk?pet, majd az `inflation_radius=0.1` param?terrel
+a `GridMap.inflate_obstacles()` biztons?gi z?n?val kib?v?ti az akad?lyokat. Ez
+fontos k?l?nbs?g a puszt?n nyers akad?lycell?kat rajzol? k?s?rleti ?br?khoz
+k?pest: az ?tvonaltervez?s a robot k?r?li tiltott r?hagy?st is figyelembe veszi.
+
+A program mind a n?gy heurisztik?hoz l?trehozza az `AStarDWAPlanner` p?ld?ny?t,
+majd a `plan_global()` f?ggv?nyt futtatja egyszer n?gyir?ny? ?s egyszer ?tl?s
+mozg?ssal. Az ?gy kapott, nem sim?tott A* glob?lis ?tvonalakat egy k?z?s, k?t paneles ?br?n jelen?ti meg. A bal panel a n?gyir?ny?, a jobb panel az ?tl?s mozg?s eredm?nye; mindk?t panelen egyszerre l?that? mind a n?gy heurisztika. Az akad?lyok ?s a biztons?gi z?na v?ltozatlanul az alap szimul?ci?b?l sz?rmaznak, a heurisztik?kat pedig csak elt?r? sz?nek k?l?nb?ztetik meg. A panelenk?nti jelmagyar?zat az ?tvonal-k?lts?get jel?li.
+
+**Kimeneti k?p:** `astar_project/results/figures/simulation_heuristic_comparison.png`
+
+**?jragener?l?s:**
+
+```text
+python -m codes_diploma.astar_project.generate_simulation_heuristic_comparison
+```
+
+A friss?tett v?ltozatban a n?gy heurisztika kontrasztos sz?neket kapott. A t?rk?p ?s az ?tvonalak geometri?ja nem v?ltozott, ?gy a megjelen?t?s csak az elk?l?n?thet?s?get jav?tja.
+
+Ez az ?bra a megl?v? `heuristics_original_simulation.png` k?pet nem ?rja fel?l;
+a k?t k?p elt?r? c?lt szolg?l. A megl?v? k?p a kor?bbi vizu?lis ?sszehasonl?t?
+st?lust ?rzi meg, az ?j k?p viszont az alap szimul?ci? t?nyleges, infl?lt
+GridMap-j?re ?s A*+DWA ?tvonaltervez?j?re ?p?l.
+## 6. Ind?t?s ?s tesztel?s
+
+Az ?sszehasonl?t?s ind?t?sa:
+
+```text
+python -m codes_diploma.astar_project.run_experiment
+```
+
+A c?lzott tesztek:
+
+```text
+python -m unittest codes_diploma.astar_project.tests.test_experiments codes_diploma.astar_project.tests.test_astar_baseline codes_diploma.astar_project.tests.test_grid_map -v
+```
+
+A k?s?rleti tesztek ellen?rzik a n?gy heurisztika ?s a k?t mozg?si m?d lefut?s?t, a sarokv?g?s tilt?s?t ?s a megoldhatatlan p?lya kezel?s?t.
+
+## 7. A `simulation_heuristic_comparison.png` ?bra le?r?sa
+
+**K?p:** `astar_project/results/figures/simulation_heuristic_comparison.png`
+
+**K?pal??r?s:** *A n?gy A* heurisztika ?sszehasonl?t?sa az eredeti, akad?lyinfl?ci?val kib?v?tett szimul?ci?s t?rk?pen: balra a n?gyir?ny?, jobbra az ?tl?s mozg?s.*
+
+**Beilleszthet? sz?veg:**
+
+Az ?bra az alap szimul?ci? `create_scene()` f?ggv?ny?vel l?trehozott, 30?20 cell?s t?rk?pet haszn?lja. A t?rk?p akad?lyai az `inflation_radius=0.1` param?terrel vannak kib?v?tve, ez?rt a sz?rke akad?lyter?let a robot sz?m?ra fenntartott biztons?gi z?n?t is tartalmazza.
+
+A bal oldali panelen az A* csak fel, le, balra ?s jobbra l?phet. A jobb oldali panelen az ?tl?s szomsz?dcella is enged?lyezett. Mindk?t panelen ugyanaz a n?gy heurisztika fut le az `AStarDWAPlanner.plan_global()` f?ggv?nyen kereszt?l, sim?t?s n?lk?l. A k?t panel ugyanazon szimul?ci?s t?rk?pen hasonl?tja ?ssze a mozg?si szab?lyokat.
+
+A heurisztik?k sz?nei:
+
+- Manhattan: k?k;
+- Euklideszi: narancss?rga;
+- Chebyshev: z?ld;
+- Octile: magenta.
+
+A panelenk?nti jelmagyar?zat az adott ?tvonal k?lts?g?t mutatja. A geometriai ?tvonalak a t?nyleges, infl?lt `GridMap`-b?l sz?rmaznak; a sz?nek csak az ?tvonalak vizu?lis elk?l?n?t?s?t szolg?lj?k.
+
+**?jragener?l?s:**
+
+```text
+python -m codes_diploma.astar_project.generate_simulation_heuristic_comparison
+```
+
+A kor?bbi `heuristics_original_simulation.png` k?pet meghagytam, de a szakdolgozati le?r?s ehhez az ?j, biztons?gi z?n?t is tartalmaz? `simulation_heuristic_comparison.png` k?phez tartozik.
+## 8. ROS 2 A* + DWA akadályinfláció és útvonalhiba
+
+Az `astar_dwa_node.cpp` az odometriából, a célból és a statikus akadályokból
+A* rácstérképet készít, majd a DWA-val sebességet küld a `/cmd_vel` témára.
+A mostani javítás az akadályinflációt érinti: a korábbi négyzetes tiltás
+lezárhatta a fizikailag átjárható réseket.
+
+A paraméterek szerint a rács felbontása `resolution=0.20 m`, a robot sugara
+`robot_radius=0.28 m`. Egy 0,35 m sugarú akadálynál a biztonsági sugár:
+
+```text
+0,35 m + 0,28 m = 0,63 m
+```
+
+Az új kód a cellaközéppont és az akadályközéppont euklideszi távolságát méri:
+
+```text
+d = sqrt((x_c - x_o)^2 + (y_c - y_o)^2)
+```
+
+ahol `x_c,y_c` a cellaközéppont, `x_o,y_o` az akadály középpontja méterben.
+Csak a `d <= 0,63 m` feltételnek megfelelő cellák lesznek blokkoltak.
+Korábban a teljes négyzetes rácsblokk tiltott volt, így két akadály között
+összeérhettek a biztonsági zónák.
+
+Például 1,80 m középponttávolság és két 0,63 m-es biztonsági sugár esetén:
+
+```text
+1,80 m - 2 * 0,63 m = 0,54 m
+```
+
+marad geometriai szabad távolság. A kör alakú infláció ezért kevésbé
+konzervatív, miközben a robot sugarát továbbra is figyelembe veszi.
+
+Ha a kezdő- vagy célcella kívül esik a térképen, vagy blokkolt, a node most
+diagnosztikai figyelmeztetést ír ki a `start=(row,column)`, `goal=(row,column)`,
+`start_blocked` és `goal_blocked` értékekkel. Ez megmutatja, hogy érvénytelen
+cella vagy ténylegesen megszakadt A* kapcsolat okozza-e az üres útvonalat.
+
+A DWA külön réteg: az A* útvonal megtalálása után a LiDAR-pontok alapján még
+megállíthatja a robotot, ha minden kipróbált sebességpálya ütközne. A javítás
+az A* statikus térképét teszi pontosabbá, a lokális LiDAR-viselkedést nem
+rejti el.
+
+Ellenőrzés:
+
+```bash
+colcon build --symlink-install --packages-select astar_dwa_controller
+```
+
+Ezután az `/astar_path`, `/astar_map` és `/astar_dwa_markers` témákon lehet
+ellenőrizni, hogy a két akadály közötti útvonal létrejön-e.
+## 9. A ROS 2 A* + DWA tesztelési vizualizációja és sebességkorlátja
+
+Az `astar_dwa_node.cpp` vezérlője két külön feladatot végez. Az A* a statikus
+akadályokból útvonalat készít, a DWA pedig a LiDAR alapján kiválasztja a
+következő sebességpárt. A tesztelés áttekinthetőbb lett az RViz
+`/astar_dwa_markers` témáján:
+
+- zöld vonal: A* útvonal;
+- kék vonal: az aktuálisan kiválasztott DWA-előrejelzés;
+- piros hengerek: ismert statikus akadályok;
+- halványsárga lapok: statikus akadály plusz robot-sugár biztonsági zónája;
+- sárga pontok: a LiDAR által éppen érzékelt akadálypontok;
+- kék áttetsző henger és nyíl: robotpozíció és haladási irány.
+
+A maximális lineáris sebesség most paraméterezett. A `rosbot.yaml`
+`max_linear_velocity=0.32 m/s` értéke azt jelenti, hogy a kiadott
+`Twist.linear.x` nem lehet nagyobb 0,32 m/s-nél. A korábbi kód ezt 0,20 m/s-ra
+korlátozta, miközben a DWA 0,40 m/s-ig vizsgált sebességeket. A
+`max_angular_velocity=1.00 rad/s` az elfordulási sebesség felső határa.
+
+A vezérlő ciklusa 0,10 s. Az új lineáris gyorsítási lépés legfeljebb 0,08 m/s
+ciklusonként, vagyis ideális esetben:
+
+```text
+0,32 m/s / 0,08 m/s = 4 ciklus
+4 * 0,10 s = 0,40 s
+```
+
+alatt éri el a maximális értéket. Ez nem gyorsítja fel a veszélyes helyzeteket:
+az ütközésvizsgálat minden DWA-jelölt pályán továbbra is lefut.
+
+Az RViz-es vizsgálat menete:
+
+1. `/astar_path`: van-e globális útvonal;
+2. `/astar_map`: a statikus biztonsági zónák helye;
+3. sárga LiDAR-pontok: lát-e a robot váratlan akadályt;
+4. kék DWA-vonal: a lokális vezérlő merre tervezi a következő 1,5 másodpercet.
+
+Ha zöld útvonal van, de a kék vonal rövid vagy a robot áll, akkor a DWA
+LiDAR-biztonsági ellenőrzése állította meg. Ha zöld útvonal sincs, akkor az
+A* statikus térképét vagy a célt kell ellenőrizni.
+
+## 10. A Gazebo mozgó akadály működése és javítása
+
+### A fájlok célja
+
+A mozgó akadály működését három fájl együtt adja:
+
+- `worlds/dwa_world.sdf`: a `moving_obstacle` Gazebo-modellje;
+- `dwa_gazebo_sim/moving_obstacle_node.py`: a modell új pozícióját számítja;
+- `launch/bridge_and_controller.launch.py`: ROS 2 service bridge-et indít a
+  Gazebo `/world/dwa_world/set_pose` szolgáltatásához.
+
+### Adatfolyam
+
+Az akadály kezdeti világkoordinátája `(x, y, z) = (3.0, 1.8, 0.45) m`.
+A `moving_obstacle_node` 0,05 másodpercenként frissítési ciklust futtat. A
+pozíció y-koordinátája:
+
+```text
+y(t) = 1,8 + 1,2 * sin(0,6 * t) m
+```
+
+Itt `t` a node által követett idő másodpercben, a `1,8 m` a középvonal, a
+`1,2 m` a kitérés amplitúdója, a `0,6 1/s` pedig a szögsebesség jellegű
+szorzó. Például `t = 0 s` esetén:
+
+```text
+y(0) = 1,8 + 1,2 * sin(0) = 1,8 m
+```
+
+`t = 2 s` esetén `0,6 * 2 = 1,2`, ezért
+`y(2) ≈ 1,8 + 1,2 * 0,932 ≈ 2,92 m`. Az x-koordináta végig `3,0 m`,
+tehát az akadály függőleges irányban mozog.
+
+### Mi akadályozta a mozgást?
+
+Korábban a world fájlban ez szerepelt:
+
+```xml
+<static>true</static>
+```
+
+Ez azt jelentette, hogy a Gazebo a modellt statikus objektumként kezelte.
+Ezt `<static>false</static>` értékre módosítottam. Ezen kívül a node ugyan
+meghívta a service klienst, de a launch fájl nem bridge-elte a
+`SetEntityPose` szolgáltatást. Most ez is bekerült:
+
+```text
+/world/dwa_world/set_pose@ros_gz_interfaces/srv/SetEntityPose
+```
+
+Ez a kapcsolat továbbítja a ROS 2 service-kérést a Gazebo transport felé.
+
+### A node biztonságos frissítése
+
+A node a `request_in_flight` állapottal biztosítja, hogy ne küldjön új
+pozíciókérést addig, amíg az előző válasz meg nem érkezett. Így a 20 Hz-es
+timer nem halmozza fel a Gazebo service-kéréseket. A válasz `success` mezőjét
+ellenőrzi, és sikertelen frissítésnél figyelmeztetést ír a ROS 2 naplóba.
+
+### Ellenőrzés
+
+A módosítás után lefutott:
+
+```bash
+colcon build --symlink-install --packages-select dwa_gazebo_sim
+python3 -m py_compile moving_obstacle_node.py
+```
+
+A futási ellenőrzés során a Gazebo pose-adatában a `moving_obstacle` y-értéke
+változott, például `2,8703 m`, majd `2,8536 m`, később `2,8359 m` lett. Ez
+igazolja, hogy az akadály már nem csak a node-ban számolja a pályát, hanem a
+Gazebo-modell tényleges pozíciója is frissül.
+
+## 11. A mozgó akadály kezelése az A* + DWA C++ vezérlőben
+
+### A fájl célja
+
+Az `astar_dwa_node.cpp` a ROS 2 vezérlőben két külön feladatot kapcsol össze:
+az A* egy rövid, globális útvonalat keres, a DWA pedig a következő útvonalpont
+felé választ sebességet. A korábbi működésben az A* csak a YAML-ben megadott
+statikus akadályokat használta. A mozgó akadályt ugyan látta a LiDAR, de az A*
+útvonala nem változott, ezért az útvonal a dinamikus akadályon keresztül is
+vezethetett.
+
+### Adatfolyam és módosítás
+
+A vezérlési ciklus az `obstacles()` függvénnyel a `/scan` LaserScan mérési
+pontjait világkoordinátára alakítja, és csak a robot előtti, legfeljebb 3,0 m-es
+tartományt tartja meg. Az aktuális LiDAR-akadályokat a lokális DWA használja; a globális A* rács
+továbbra is a statikus akadálymodellt használja, a Python-szimulátor logikájával
+összhangban.
+
+### Fontos függvények
+
+- `obstacles()`: a LiDAR-pontokat szűri és `Obstacle{x, y, radius}` adatokká
+  alakítja;
+- `astar(const std::vector<Obstacle>& sensed_obstacles)`: a statikus térképet
+  statikus akadályok alapján felépíti az A* rácsot; a LiDAR-listát a lokális
+  DWA kezeli;
+- `dwa(...)`: előrehaladó, helyben forduló és visszatolató sebességpárokat
+  vizsgál, majd a célhoz közelebb vivő biztonságos párost választja;
+- `control()`: egy ciklusban egyszer gyűjti a LiDAR-akadályokat, újratervez,
+  kiválasztja a waypointot, majd publikálja a `/cmd_vel` üzenetet.
+
+### DWA biztonsági változás
+
+A DWA sebességmintája előremenő jelölteket vizsgál. A jelölt pálya
+15 lépésen keresztül, 0,1 s-os lépéssel kerül ellenőrzésre, vagyis a konfigurált
+vizsgált időtáv 1,5 s. A LiDAR-mérés pontszerű, ezért az akadály sugara `0 m`;
+a robot sugarához `0,05 m` biztonsági tartalék adódik.
+
+Például egy LiDAR-pont 0,36 m-re van a jelölt robotpozíciótól:
+
+```text
+robot_radius + obstacle_radius + tartalek
+= 0,28 m + 0,00 m + 0,05 m
+= 0,33 m
+```
+
+Ez a pálya veszélyesnek minősül, ezért a DWA másik elfordulási irányt vagy
+visszatolató pályát keres. Ha egyetlen minta sem biztonságos, a korábbi
+biztonsági ág marad érvényben: a robot `v=0` sebességgel a cél irányába fordul,
+nem hajt bele az akadályba.
+
+### Miért oldja meg az elakadást?
+
+Ha a mozgó akadály a globális A* útvonalra kerül, a DWA a lokális
+előrejelzésben kerüli ki vagy fékezi le. A LiDAR minden mérési pontját nem
+szabad külön A* akadályként inflálni, mert egy fizikai akadály sok sűrű pontot
+ad, és a cellák körüli zónák tévesen teljes átjárókat zárhatnak le.
+
+### Ellenőrzés
+
+A módosított csomag ellenőrzött buildje:
+
+```bash
+source /opt/ros/jazzy/setup.bash
+cd ros2_astar_dwa_gazebo
+colcon build --packages-select astar_dwa_controller --symlink-install
+```
+
+A build sikeresen lefutott. Az RViz-ben az `/astar_path`, a sárga LiDAR-pontok
+és a kék DWA-trajektória együttesét kell figyelni. Ha a robot mégsem halad,
+a vezérlő naplójában az `Az A* nem talált elérhető útvonalat` üzenet
+különválasztja a valódi útvonalhiányt a DWA biztonsági megállásától.
+
+## 12. A ROS/Gazebo térkép és a Python-szimulátor összehangolása
+
+A ROS/Gazebo változat most a Python `simulation.py` alapértelmezett térképét
+használja referenciaként. A rács 30 oszlopból és 20 sorból áll, a
+`resolution=0,2 m`, ezért a tervezési terület 6,0 m széles és 4,0 m magas.
+A rács origója `(0,0) m`, így a `(2,2)` kezdőcella középpontja:
+
+```text
+x = (2 + 0,5) * 0,2 = 0,5 m
+y = (2 + 0,5) * 0,2 = 0,5 m
+```
+
+A `(17,27)` célcella középpontja ugyanígy `(5,5; 3,5) m`. A függőleges
+akadálysor a 10. oszlopban, a 7-12. sorok között nyitott réssel, a vízszintes
+akadálysor pedig a 12. sorban, a 19-24. oszlopok közötti nyitott réssel
+szerepel. A Gazebo SDF-ben ezek összefüggő, 0,2 m vastag falszakaszokként
+jelennek meg; ez a cellák fizikai megfelelője.
+
+### A két mozgó akadály
+
+A Python-szimulátorban szereplő akadályok ROS oldali kezdőpozíciója és
+sebessége:
+
+```text
+moving_obstacle_1: (2,4; 0,4) m + (0; 0,20) m/s * t
+moving_obstacle_2: (6,8; 2,1) m + (-0,25; 0) m/s * t
+```
+
+Például 5 másodpercnél az első akadály helye
+`(2,4; 1,4) m`, a másodiké pedig `(5,55; 2,1) m`. A
+`moving_obstacle_node.py` ezeket a pozíciókat a
+`/world/dwa_world/set_pose` szolgáltatáson keresztül adja át a Gazebónak.
+Egyszerre csak egy service-kérés van függőben, ezért az akadályfrissítés nem
+halmozódik fel.
+
+### A DWA működési egyezése
+
+Az `astar_dwa_node.cpp` DWA-része a Python `robotconfig` fő paramétereit
+használja: keréksugár `0,033 m`, keréktávolság `0,08 m`, maximális
+keréksebesség `15 rad/s`, keréksebesség-lépés `1 rad/s`, gyorsulási korlát
+`2 m/s²`, `dt=0,1 s`, előrejelzési idő `3 s`, biztonsági ráhagyás `0,15 m`,
+valamint `Alfa=5`, `Beta=2`, `Gamma=3`.
+
+Egy bal és jobb keréksebességből a Python- és ROS-kód azonos módon számolja:
+
+```text
+v = ((w_L + w_R) / 2) * r
+w = ((w_R - w_L) / (2 * b)) * r
+```
+
+Például `w_L=w_R=10 rad/s` esetén `v=0,33 m/s`, `w=0 rad/s`, tehát a robot
+egyenesen halad. A ROS DWA a dinamikus ablakban ezeket a keréksebességeket
+vizsgálja, a pályát 0,1 s-os lépésekben integrálja, és az ütközésig mért
+távolság alapján alkalmazza a Python-féle megállíthatósági feltételt:
+
+```text
+|v| <= sqrt(2 * a_max * distance_to_obstacle)
+```
+
+Ez a dokumentáció és az `ASTAR_PROJEKT_FOLYAMATBRA.gv` az új,
+keréksebesség-alapú ROS DWA-hívási sorrendet tükrözi.
+
+---
+
+# `astar_dwa_node.cpp` – ROS odometria, cél és A* útvonal ellenőrzése
+
+## 1. A fájl célja
+
+Az `astar_dwa_node.cpp` a ROS 2 és Gazebo közötti vezérlőcsomópont. Az
+`/odom` és `/scan` adataiból felépíti a robot aktuális állapotát és a
+pillanatnyi akadályképet, az RViz `/goal_pose` üzenetéből célt vesz át, majd
+A*-útvonalat és DWA-sebességet publikál `/astar_path` és `/cmd_vel` témákon.
+
+## 2. Odometriai kezdőeltolás
+
+A TurtleBot Gazebo odometria-pluginja a robot spawnhelyéhez képest lokális
+koordinátát ad vissza, miközben a modell `(0.8, 0.8)` méteren spawnol. Ezért a
+konfigurációban `initial_pose_x = 0.8 m` és `initial_pose_y = 0.8 m`. Az `odom()`
+ezt a világkoordinátára állító offsetet adja hozzá:
+
+```cpp
+pose_.x = msg->pose.pose.position.x + initial_pose_x_;
+pose_.y = msg->pose.pose.position.y + initial_pose_y_;
+```
+
+A Gazebo-odom `(0, 0)` mérés így a tervezőben `(0.8, 0.8)` világpozícióvá
+válik. `resolution = 0.2 m/cella` mellett ez:
+
+```text
+column = floor(0.8 / 0.2) = 4
+row    = floor(0.8 / 0.2) = 4
+```
+
+tehát a Python-szimulátor kezdőcellája `(4, 4)`, nem egy kétszeresen eltolt
+pozíció.
+
+## 3. Cél- és útvonal-adatfolyam
+
+Az RViz `2D Goal Pose` eszköze `geometry_msgs/msg/PoseStamped` üzenetet küld
+`/goal_pose` témán. A node a világkoordinátás `x` és `y` értéket eltárolja,
+majd a vezérlési ciklusban a jelenlegi pozícióból és a célból cellát készít.
+Az A* eredménye `nav_msgs/msg/Path` formában jelenik meg `/astar_path`-on;
+az útvonal pontjai az `odom` frame-ben, 0,2 méteres cellaközéppontokként
+szerepelnek. A következő waypointot a DWA lokális vezérlése követi, amely a
+`/cmd_vel` Twist üzenetet publikálja.
+
+## 4. Biztonsági feltételek
+
+Odometria nélkül a vezérlő nem tervez. Érvénytelen vagy foglalt kezdő- illetve
+célcella esetén az A* figyelmeztetést ír, üres útvonalat publikál és nulla
+sebességgel állítja meg a robotot. Ezért a `/astar_path` topic megléte önmagában
+nem elég: az üzenet `poses` tömbjének is tartalmaznia kell útvonalpontokat.
+
+## 5. Ellenőrzött futás
+
+A javítás ellenőrzéséhez a következő parancs futott:
+
+```bash
+colcon build --packages-select astar_dwa_controller --symlink-install
+```
+
+A build sikeres volt. Tiszta Gazebo- és bridge-indítás után a `/goal_pose`
+cél `(5.50, 3.50)` értékkel érkezett meg, a node `ut=27 pont` útvonalat írt
+a naplóba, és az `/astar_path` üzenet 27, a célhoz vezető pontot tartalmazott.
+
+---
+
+# Pályahatár-védelem és a Gazebo-pálya nagyítása
+
+A korábbi `6,0 m x 4,0 m` térkép csak az A* cellakeresésének határa volt. A DWA
+előrejelzése azonban kizárólag a LiDAR által érzékelt akadályokat vizsgálta,
+ezért a pálya szélén nem volt olyan feltétel, amely a sebességjelöltet
+elutasította volna. A Gazebo-világban sem volt fizikai határfal.
+
+Az aktuális pálya `8,0 m x 5,0 m`, `0,2 m/cella` felbontással, vagyis
+`40 x 25` cellás. A robot kezdőpontja `(0,8 m, 0,8 m)`, amelynek cellája:
+
+```text
+column = floor(0.8 / 0.2) = 4
+row    = floor(0.8 / 0.2) = 4
+```
+
+A DWA most minden előrejelzett pontnál ellenőrzi a
+`robot_radius + safety_margin = 0,28 + 0,15 = 0,43 m` biztonsági sávot.
+Ez azt jelenti, hogy a robot középpontja nem közelítheti meg a pálya szélét
+`0,43 m`-nél jobban. Például az alsó határnál a megengedett tartomány kezdete
+`y = 0,43 m`; az ennél kisebb `y` értéket eredményező DWA-jelöltet a node
+veszélyesnek jelöli és nem választja ki.
+
+A világfájl négy statikus falat is tartalmaz a `0..8 m` és `0..5 m` terület
+körül. Így a vizuális pálya és a tervező rácsa ugyanazt a koordinátatartományt
+használja. Ha a robot már a biztonsági határon kívül van, a vezérlő nulla
+`/cmd_vel` értéket küld, és figyelmeztetést ír a naplóba.
+
+A ROS- és Python-DWA közötti fontos különbség, hogy a ROS-vezérlő a
+keréksebesség-jelöltekből számított `v` és `w` értékeket publikálja. Ha a
+jelölt túllépi a publikált sebességhatárt, a korábbi kód csak a végső Twist
+üzenetet vágta le. Például egy `w = 1,86 rad/s` jelöltből `1,0 rad/s` került
+ki a topicra, miközben a belső kerékállapot továbbra is az `1,86` értékű
+jelöltet követte. Ez eltérést okozott a tervezett és a tényleges mozgás között.
+Az aktuális kód már a DWA pontozása előtt elutasítja azokat a jelölteket,
+amelyek `v > 0,32 m/s` vagy `|w| > 1,0 rad/s` értéket adnak.
+
+Ha a LiDAR-biztonsági feltétel, a pályahatár vagy a sebességkorlát miatt egyetlen
+előremeneti jelölt sem marad, a node ezt külön kezeli. A korábbi keréksebesség
+helyett lenullázza a kerékállapotot, és a cél irányába legfeljebb
+`1,0 rad/s` helyben forgást ad vissza. Így a robot nem marad csendben nulla
+sebességen egy régi vagy érvénytelen DWA-állapot miatt.
+
+---
+
+# Iránybaállítás a körkörös mozgás elkerülésére
+
+A vezérlő a következő waypoint és a robot aktuális `pose_.yaw` értéke alapján
+irányhibát számol:
+
+```text
+heading_error = wrap(atan2(target_y - pose_y, target_x - pose_x) - yaw)
+```
+
+Az `atan2` a cél felé mutató szöget adja radiánban, a `yaw` a robot jelenlegi
+irányultsága, a `wrap` pedig `[-pi, pi]` tartományba hozza a különbséget.
+Például ha a célirány `1,2 rad`, a robot iránya `-0,2 rad`, akkor a hiba
+`1,4 rad`, ezért a robot először helyben fordul, nem pedig előremenetben
+köröz.
+
+Ha az abszolút irányhiba nagyobb `0,6 rad` értéknél, a vezérlő `linear.x=0`
+értéket küld, az `angular.z` pedig a hiba előjelének megfelelően legfeljebb
+`1,0 rad/s`. A keréksebesség-állapotot is nullázza, így a következő DWA-ciklus
+nem örököl régi forgási lendületet. Csak `0,6 rad` alatt indul újra az
+előremeneti DWA.

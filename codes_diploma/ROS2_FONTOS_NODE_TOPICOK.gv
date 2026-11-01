@@ -1,0 +1,110 @@
+digraph ROS2ImportantGraph {
+    graph [
+        label="ROS 2 A* + DWA - fontos node-ok és topicok"
+        labelloc=t
+        fontsize=22
+        fontname="Arial Bold"
+        rankdir=LR
+        splines=ortho
+        nodesep=0.45
+        ranksep=0.8
+        pad=0.25
+        bgcolor="white"
+    ]
+
+    node [
+        shape=box
+        style="rounded,filled"
+        fontname="Arial"
+        fontsize=11
+        margin="0.16,0.10"
+        color="#475569"
+        penwidth=1.5
+    ]
+
+    edge [
+        fontname="Arial"
+        fontsize=9
+        color="#64748b"
+        penwidth=1.2
+        arrowsize=0.7
+    ]
+
+    gazebo [
+        label="Gazebo Sim\nfizikai világ + robot\n/clock, szenzorok"
+        fillcolor="#fef3c7"
+        color="#d97706"
+    ]
+
+    bridge [
+        label="/ros_gz_bridge\nGazebo <-> ROS 2\nátalakító"
+        fillcolor="#dbeafe"
+        color="#2563eb"
+    ]
+
+    controller [
+        label="/astar_dwa_node\nA* globális tervező\nDWA lokális vezérlő"
+        fillcolor="#dcfce7"
+        color="#15803d"
+    ]
+
+    moving [
+        label="/moving_obstacle\nmozgó akadály\nidőzített pozíciófrissítés"
+        fillcolor="#ffedd5"
+        color="#c2410c"
+    ]
+
+    rviz [
+        label="/rviz2\nRViz megjelenítés\nMap, Path, TF, LiDAR, Markers"
+        fillcolor="#ede9fe"
+        color="#7c3aed"
+    ]
+
+    goal [
+        label="RViz 2D Goal Pose\nfelhasználói cél"
+        shape=parallelogram
+        fillcolor="#fce7f3"
+        color="#db2777"
+    ]
+
+    clock [label="/clock\nszimulációs idő", shape=note, fillcolor="#f1f5f9"]
+    scan [label="/scan\nLaserScan", shape=note, fillcolor="#fef3c7", color="#d97706"]
+    odom [label="/odom\nOdometry", shape=note, fillcolor="#fef3c7", color="#d97706"]
+    cmd [label="/cmd_vel\nTwist", shape=note, fillcolor="#bfdbfe", color="#2563eb"]
+    goal_topic [label="/goal_pose\nPoseStamped", shape=note, fillcolor="#fbcfe8", color="#db2777"]
+    map [label="/astar_map\nOccupancyGrid", shape=note, fillcolor="#bbf7d0", color="#15803d"]
+    path [label="/astar_path\nnav_msgs/Path", shape=note, fillcolor="#bbf7d0", color="#15803d"]
+    markers [label="/astar_dwa_markers\nMarkerArray", shape=note, fillcolor="#bbf7d0", color="#15803d"]
+    tf [label="/tf\nodom -> base_link\nbase_link -> base_scan", shape=note, fillcolor="#ddd6fe", color="#7c3aed"]
+
+    gazebo -> clock [label="publishes"]
+    gazebo -> scan [label="publishes"]
+    gazebo -> odom [label="publishes"]
+    cmd -> bridge [label="ROS -> Gazebo"]
+    bridge -> scan [label="Gazebo -> ROS"]
+    bridge -> odom [label="Gazebo -> ROS"]
+    bridge -> clock [label="Gazebo -> ROS"]
+    bridge -> cmd [label="forwards"]
+
+    clock -> controller [label="subscribes"]
+    scan -> controller [label="subscribes"]
+    odom -> controller [label="subscribes"]
+    goal_topic -> controller [label="subscribes"]
+    goal -> goal_topic [label="publishes"]
+
+    controller -> cmd [label="publishes"]
+    controller -> map [label="publishes"]
+    controller -> path [label="publishes"]
+    controller -> markers [label="publishes"]
+    controller -> tf [label="publishes"]
+
+    map -> rviz [label="display"]
+    path -> rviz [label="display"]
+    scan -> rviz [label="display"]
+    markers -> rviz [label="display"]
+    tf -> rviz [label="display"]
+    odom -> rviz [label="display"]
+
+    clock -> moving [label="subscribes"]
+    moving -> gazebo [label="SetEntityPose service"]
+}
