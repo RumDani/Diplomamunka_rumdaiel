@@ -21,5 +21,6 @@ def generate_launch_description():
             name="rviz2",
             output="screen",
             arguments=["-d", rviz_config, "-f", "odom"],
+            parameters=[{"use_sim_time": True}],
         )
     ])

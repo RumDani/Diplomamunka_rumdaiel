@@ -27,53 +27,70 @@ colcon build --symlink-install --packages-select dwa_gazebo_sim
 source install/setup.bash
 ```
 
-## Mukodo Gazebo-inditas
+## Inditas - csak terminalparancsok
 
-A megbízható indítási sorrend mindig ez:
+Egy munkamenetben csak egy fő launch és egy RViz fusson. A fő launch egyetlen
+paranccsal indítja a Gazebo-t, a bridge-et, az A* + DWA vezérlőt és a mozgó
+akadályt.
 
-1. Gazebo világ;
-2. ROS–Gazebo bridge, A* + DWA vezérlő és mozgó akadály node;
-3. RViz;
-4. célpozíció küldése az RViz `2D Goal Pose` eszközével vagy terminálból.
-
-Egy munkamenetben csak egy Gazebo, egy bridge/vezérlő launch és egy RViz
-példány fusson. Ha a robot nem mozog, először a folyamatokat és a topicokat
-ellenőrizd, ne küldj egymás után több új célt.
-
-A WSLg-s Gazebo GUI a projekt világával közvetlenül indítva működik. A fekete
-képernyő elkerüléséhez ne kényszerítsd az OpenGL/llvmpipe változókat; az
-`xcb` mód és a rendszer alapértelmezett OpenGL beállítása működik.
+### Terminal 1: szimulacio
 
 ```bash
+source /opt/ros/jazzy/setup.bash
 export TURTLEBOT3_MODEL=waffle
+export DISPLAY=:0
+export XDG_RUNTIME_DIR=/tmp/gazebo-runtime
+mkdir -p "$XDG_RUNTIME_DIR"
+chmod 700 "$XDG_RUNTIME_DIR"
+cd "/mnt/c/Users/Rum Dániel/Desktop/Diplomamunka/codes_diploma/ros2_astar_dwa_gazebo"
+source install/setup.bash
+export ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST
+ros2 launch dwa_gazebo_sim simulation.launch.py software_rendering:=true
+```
+
+### Terminal 2: RViz
+
+```bash
+source /opt/ros/jazzy/setup.bash
 export DISPLAY=:0
 export XDG_RUNTIME_DIR=/tmp/gazebo-runtime
 mkdir -p "$XDG_RUNTIME_DIR"
 chmod 700 "$XDG_RUNTIME_DIR"
 export QT_QPA_PLATFORM=xcb
 export QT_X11_NO_MITSHM=1
-export GZ_SIM_RESOURCE_PATH=/opt/ros/jazzy/share/turtlebot3_gazebo/models
-
-gz sim -v 4 -r \
-"/mnt/c/Users/Rum Dániel/Desktop/Diplomamunka/codes_diploma/ros2_astar_dwa_gazebo/src/dwa_gazebo_sim/worlds/dwa_world.sdf"
+export ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST
+cd "/mnt/c/Users/Rum Dániel/Desktop/Diplomamunka/codes_diploma/ros2_astar_dwa_gazebo"
+source install/setup.bash
+ros2 launch dwa_gazebo_sim visualization.launch.py
 ```
 
-A `GZ_SIM_RESOURCE_PATH` azért szükséges, mert a világfájl a
-`model://turtlebot3_waffle` modellt használja. Ha ez nincs beállítva, a Gazebo
-ablaka elindulhat, de a világ vagy a robot nem töltődik be.
-
-A közvetlen `gz sim` indítás a tesztelt megoldás. A ROS bridge és az A* node
-külön, második terminálban indítandó, miután a Gazebo szerver és GUI már fut.
-E nélkül az RViz és a vezérlő nem kap `/scan`, `/odom` és `/clock` adatokat.
+### Terminal 3: cel kuldese opcionálisan
 
 ```bash
-cd "/mnt/c/Users/Rum Dániel/Desktop/Diplomamunka/codes_diploma/ros2_astar_dwa_gazebo"
-unset AMENT_PREFIX_PATH
-unset COLCON_PREFIX_PATH
 source /opt/ros/jazzy/setup.bash
-source install/setup.bash
-ros2 launch dwa_gazebo_sim bridge_and_controller.launch.py
+export ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST
+ros2 topic pub --once /goal_pose geometry_msgs/msg/PoseStamped \
+  "{header: {frame_id: odom}, pose: {position: {x: 6.5, y: 4.2, z: 0.0}, orientation: {w: 1.0}}}"
 ```
+
+Az RViz-ben a Fixed Frame `odom`, a célküldéshez a `2D Goal Pose` eszköz
+használható. A `GZ_SIM_RESOURCE_PATH` beállítását a fő launch automatikusan
+elvégzi a `turtlebot3_waffle` modell feloldásához.
+
+Az RViz konfigurációban a nyers `Odometry` display alapból ki van kapcsolva,
+mert a Gazebo lokális odometriája és az A* világkoordinátája külön offsetet
+használ. A robot és az útvonal megjelenítéséhez a TF, az `/astar_map`, az
+`/astar_path` és az `/astar_dwa_markers` rétegek szolgálnak.
+
+A C++ ROS 2 szimuláció a Python DWA-val azonos alapelveket használja
+(differenciális kerékkinematika, gyorsuláskorlát, trajektória-predikció,
+fékezhetőség és pontozás), de nem azonos program: a robot sugara, a
+`predict_time`, a DWA-súlyok és az akadálybemenet eltérhetnek.
+
+A statikus falakat az A* kezeli a `rosbot.yaml` ismert akadálypontjaiból.
+A DWA LiDAR-bemenetéből azokat a pontokat kiszűrjük, amelyek a statikus
+térképpontok környezetébe esnek; így ugyanazt a falat nem ellenőrzi kétszer,
+és a résben nem lassul le indokolatlanul a statikus fal újrafelfedezése miatt.
 
 Ellenőrizd, hogy a bridge és a vezérlő tényleg létrehozta-e a kapcsolatokat:
 
@@ -141,50 +158,17 @@ indult-e a módosított forrásból, és ne maradjon futva egy régi Gazebo-pél
 Az új world és az akadálymozgás a Python-szimuláció `0,1 s` időlépéses,
 egyenletes `vx/vy` modelljét követi.
 
-A Gazebo térképe jelenleg `8 x 5 m`, `0,2 m` felbontással, vagyis `40 x 25`
-cellás tervezési terület. A Gazebo robotmodell `(0,8; 0,8) m` helyen spawnol.
-Az `/odom` plugin lokális koordinátáját a vezérlő a
-`rosbot.yaml` `initial_pose_x/y = 0,8 m` offsetjével alakítja térképi
-világkoordinátává. A tesztelt célpozíció `(6,5; 4,2) m`.
+A Gazebo térképe jelenleg `8,2 x 5,2 m`, `0,2 m` felbontással. A robot az SDF
+világban `(0,8; 0,8) m` helyen spawnol. A Gazebo `/odom` üzenete lokális
+koordinátát ad, ezért a vezérlő egyszer hozzáadja a `rosbot.yaml`
+`initial_pose_x/y = 0,8 m` értékeit, és így képezi a térképi világkoordinátát.
+A tesztelt célpozíció `(6,5; 4,2) m`.
 
 Az RViz-ben az A* útvonal zöld, a kiválasztott DWA-trajektória kék, a
 statikus akadályok pirosak, azok robotmérettel növelt biztonsági zónája
 halványsárga, a LiDAR által érzékelt pontok pedig sárgák. A vezérlő alapértelmezett
 maximális lineáris sebessége `0,32 m/s`; ez a `rosbot.yaml` paraméterben
 állítható.
-
-## RViz inditasa
-
-Harmadik terminalban:
-
-```bash
-source /opt/ros/jazzy/setup.bash
-source "/mnt/c/Users/Rum Dániel/Desktop/Diplomamunka/codes_diploma/ros2_astar_dwa_gazebo/install/setup.bash"
-export ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST
-export DISPLAY=:0
-export XDG_RUNTIME_DIR=/tmp/gazebo-runtime
-mkdir -p "$XDG_RUNTIME_DIR"
-chmod 700 "$XDG_RUNTIME_DIR"
-export QT_QPA_PLATFORM=xcb
-export QT_X11_NO_MITSHM=1
-ros2 launch dwa_gazebo_sim visualization.launch.py
-```
-
-Az RViz konfiguráció automatikusan az `odom` Fixed Frame-et és a
-`2D Goal Pose` eszközt tölti be. Ha a gomb nem látható, az RViz bal oldali
-eszköztárában válaszd ki a `2D Goal Pose` ikont, majd kattints a térképen a
-célhelyre és húzd meg a kívánt irányt.
-
-Terminálból ugyanígy küldhető cél:
-
-```bash
-ros2 topic pub --once /goal_pose geometry_msgs/msg/PoseStamped \
-  "{header: {frame_id: odom}, pose: {position: {x: 6.5, y: 4.2, z: 0.0}, orientation: {w: 1.0}}}"
-```
-
-Új célpozíciót mindig azután küldj, hogy az `/odom`, `/scan` és `/goal_pose`
-kapcsolatokat ellenőrizted. A célpozíció nem marad meg a vezérlő
-újraindítása után.
 
 ## Gyors hibaellenőrzés
 
@@ -210,6 +194,54 @@ DWA jeloltek: teszt=..., sebesseg=..., hatar=..., akadaly=..., fekezes=...
 Az `akadaly` érték növekedése LiDAR-alapú biztonsági elutasítást jelent; ez
 szűk átjáróban lassulást okozhat, de önmagában nem jelenti azt, hogy az A*
 nem talált útvonalat.
+
+## Fekete Gazebo-kepernyo
+
+Először csak egy Gazebo-példány fusson. A régi példányok ellenőrzése:
+
+```bash
+ps -ef | grep -E 'gz sim|ros2 launch|rviz2' | grep -v grep
+```
+
+Ha régi folyamat maradt, zárd le a saját PID-jeit, majd indítsd újra a fő
+launchot. Ne indítsd egyszerre a `gz sim` közvetlen parancsot és a
+`simulation.launch.py` fájlt.
+
+A modellútvonal ellenőrzése:
+
+```bash
+source /opt/ros/jazzy/setup.bash
+echo "$GZ_SIM_RESOURCE_PATH"
+ls /opt/ros/jazzy/share/turtlebot3_gazebo/models/turtlebot3_waffle
+```
+
+Ha a GUI fekete, de a `gz sim` folyamat fut, közvetlenül teszteld a Gazebo-t
+az önlabos működő paranccsal:
+
+```bash
+source /opt/ros/jazzy/setup.bash
+export TURTLEBOT3_MODEL=waffle
+export DISPLAY=:0
+export XDG_RUNTIME_DIR=/tmp/gazebo-runtime
+mkdir -p "$XDG_RUNTIME_DIR"
+chmod 700 "$XDG_RUNTIME_DIR"
+export GZ_SIM_RESOURCE_PATH=/opt/ros/jazzy/share/turtlebot3_gazebo/models
+export LIBGL_ALWAYS_SOFTWARE=1
+gz sim -v 4 -r \
+  "/mnt/c/Users/Rum Dániel/Desktop/Diplomamunka/codes_diploma/ros2_astar_dwa_gazebo/src/dwa_gazebo_sim/worlds/dwa_world.sdf"
+```
+
+Ha ez a közvetlen parancs is fekete, a hiba WSLg/Mesa grafikus környezeti
+hiba, nem A* vagy DWA hiba. Ellenőrizd:
+
+```bash
+echo "$DISPLAY"
+echo "$WAYLAND_DISPLAY"
+glxinfo -B 2>/dev/null | grep -E 'OpenGL renderer|OpenGL version'
+```
+
+Ha a `glxinfo` nincs telepítve, ez nem akadályozza a szimulációt. A Gazebo
+indítási logja és a `gz sim` folyamat megléte fontosabb, mint az RViz topiclista.
 
 ## Fontos topicok
 

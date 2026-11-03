@@ -2423,8 +2423,33 @@ Például ha a célirány `1,2 rad`, a robot iránya `-0,2 rad`, akkor a hiba
 `1,4 rad`, ezért a robot először helyben fordul, nem pedig előremenetben
 köröz.
 
-Ha az abszolút irányhiba nagyobb `0,6 rad` értéknél, a vezérlő `linear.x=0`
-értéket küld, az `angular.z` pedig a hiba előjelének megfelelően legfeljebb
-`1,0 rad/s`. A keréksebesség-állapotot is nullázza, így a következő DWA-ciklus
-nem örököl régi forgási lendületet. Csak `0,6 rad` alatt indul újra az
-előremeneti DWA.
+Az aktuális vezérlőben nincs külön `0,6 rad` feletti teljes megállási ág. A
+heading-score, az akadálypredikció és a fékezhetőségi feltétel együtt dönti el,
+hogy a DWA helyben forduljon, vagy lassú íves előremenetet válasszon. Ez azért
+fontos a rés előtt, mert a korábbi külön ág minden nagyobb irányhibánál
+`linear.x=0` értéket küldött, és a robot megtorpanhatott. A módosított logban
+például `cmd=(0.15, 0.62)`, majd `cmd=(0.32, 0.21)` látható, ami előremeneti
+befordulást jelent.
+
+## 13. C++ DWA frissítés a Python referencia alapján
+
+Az aktuális `dwa()` trajektória közben kumulálja az ívhosszt. Ha a pálya később
+ér akadályt, a jelölt nem esik ki azonnal: a `collision_distance` alapján az
+`abs(v) <= sqrt(2 * acceleration_limit * collision_distance)` fékezési feltétel
+dönt. Csak az első lépésben bekövetkező ütközés azonnali elutasítás.
+
+A lokális cél távolsága 1 méter alatt az adaptív előretekintés
+`max(0.5, 2 * dist_to_goal)`, egyébként a konfigurált `predict_time`. A
+sebességpont a Python referencia célsebességéhez igazodik.
+
+Az A* akadályinflációja a robot sugarát, az akadály sugarát és a biztonsági
+margin értékét együtt használja. A `control()` 0,35 méteres lokális waypointot
+követ, ezért a robot nem vágja le a rés előtti A* kanyart. A statikus LiDAR-
+falpontok kiszűrése miatt a DWA nem ellenőrzi ugyanazt a falat második,
+dinamikus akadályként.
+
+Ellenőrzés:
+
+```text
+colcon build --packages-select astar_dwa_controller dwa_gazebo_sim --symlink-install
+```

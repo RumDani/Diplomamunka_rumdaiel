@@ -12,6 +12,9 @@ def generate_launch_description():
             executable="astar_dwa_node",
             name="astar_dwa_node",
             output="screen",
-            parameters=[os.path.join(package_share, "config", "rosbot.yaml")],
+            parameters=[
+                os.path.join(package_share, "config", "rosbot.yaml"),
+                {"use_sim_time": True},
+            ],
         )
     ])

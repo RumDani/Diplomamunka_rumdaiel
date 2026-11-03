@@ -15,7 +15,7 @@ Visualization Manager:
       Reference Frame: <Fixed Frame>
     - Class: rviz_default_plugins/Map
       Name: Known occupancy map
-      Enabled: true
+      Enabled: false
       Topic:
         Depth: 1
         Durability Policy: Transient Local
@@ -60,7 +60,7 @@ Visualization Manager:
       Line Width: 0.3
     - Class: rviz_default_plugins/Odometry
       Name: Odometry
-      Enabled: true
+      Enabled: false
       Topic:
         Depth: 5
         Durability Policy: Volatile
@@ -74,7 +74,7 @@ Visualization Manager:
       Shaft Radius: 0.04
     - Class: rviz_default_plugins/MarkerArray
       Name: A* and DWA internals
-      Enabled: true
+      Enabled: false
       Marker Topic: /astar_dwa_markers
   Enabled: true
   Global Options:
@@ -93,7 +93,7 @@ Visualization Manager:
       Class: rviz_default_plugins/TopDownOrtho
       Name: Top view
       Angle: 0
-      Scale: 8
+      Scale: 3.5
       Target Frame: odom
       X: 4
       Y: 2.5

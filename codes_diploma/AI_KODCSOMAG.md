@@ -1,6 +1,6 @@
 ﻿# AI-kodcsomag - aktualis projektforras
 
-Generalt datum: 2026-11-01 11:58
+Generalt datum: 2026-11-01 13:45
 Ez a fajl a jelenlegi forraskodot, ROS 2/Gazebo konfiguraciokat, teszteket es dokumentaciokat tartalmazza. A build/install/log/.venv/cache es binaris fajlok kimaradnak.
 
 ### .github/copilot-instructions.md
@@ -6777,6 +6777,18 @@ EllenĹ‘rzĂ©s:
 colcon build --symlink-install --packages-select astar_dwa_controller
 ```
 
+### 2026-11-02 Python-kompatibilis DWA frissites
+
+- `collision_distance` most a trajektoria megtett ivhossza, nem konstans
+    `10.0`; kesoi utkozesnel a jelolt a fekezesi feltetelen keresztul marad.
+- A predikcios ido a lokalis cel tavolsagahoz igazodik.
+- A sebessegpont a Python `v_target = min(v_max, max(0.08, 1.4 * dist))`
+    logikajat koveti.
+- A `robot_radius` `0.22`, a `safety_margin` `0.05` a YAML-ben.
+- Az A* inflacio es a map/marker biztonsagi zona is tartalmazza a margint.
+- A legutobbi build mindket csomagra sikeres:
+    `colcon build --packages-select astar_dwa_controller dwa_gazebo_sim --symlink-install`.
+
 EzutĂˇn az `/astar_path`, `/astar_map` Ă©s `/astar_dwa_markers` tĂ©mĂˇkon lehet
 ellenĹ‘rizni, hogy a kĂ©t akadĂˇly kĂ¶zĂ¶tti Ăştvonal lĂ©trejĂ¶n-e.
 ## 9. A ROS 2 A* + DWA tesztelĂ©si vizualizĂˇciĂłja Ă©s sebessĂ©gkorlĂˇtja
@@ -11339,4 +11351,235 @@ edge [style=invis];
 }->"odom";
 }
 ```
+
+## Aktualis AI-kezatadas - 2026-11-01
+
+Ez a fejezet a jelenlegi ROS 2 Jazzy + Gazebo Sim projekt aktualis allapota.
+Masik AI-nak ezt a fejezetet es a felsorolt forrasfajlokat add at; a regi,
+beagyazott fajlmasolatokat ne tekintse automatikusan frissebbnek.
+
+### Projekt
+
+- Workspace: `codes_diploma/ros2_astar_dwa_gazebo`
+- ROS: Jazzy
+- Gazebo Sim: 8.10.0
+- Robot: TurtleBot3 Waffle
+- A projekt WSL2 Ubuntu alatt fut.
+- A fo szimulacio egy launchbol inditja a Gazebo-t, a bridge-et, az A* + DWA
+  node-ot es a mozgo akadaly node-ot.
+
+### Aktualis, ellenorzott fajlok
+
+- `src/astar_dwa_controller/src/astar_dwa_node.cpp`
+- `src/astar_dwa_controller/config/rosbot.yaml`
+- `src/astar_dwa_controller/launch/controller.launch.py`
+- `src/dwa_gazebo_sim/launch/simulation.launch.py`
+- `src/dwa_gazebo_sim/launch/bridge_and_controller.launch.py`
+- `src/dwa_gazebo_sim/launch/visualization.launch.py`
+- `src/dwa_gazebo_sim/worlds/dwa_world.sdf`
+- `src/dwa_gazebo_sim/setup.py`
+- `README.md`
+
+### Elvegzett kodjavitasok
+
+1. Az A* `cost` es `parent` tombjei `width * height` meretuak. A regi
+    `width * width` foglalas nem maradhat vissza.
+2. A LiDAR sajat roboton beluli pontjai ki vannak szurve. Ha nincs DWA-jelolt,
+    a node biztonsagos, lassu elorehaladassal probalja feloldani a teves
+    deadlockot; valos akadaly eseten forgasi fallback marad.
+3. A nyers Gazebo `/odom` lokalis koordinata. A node egyszer hozzaadja a
+    `rosbot.yaml` `initial_pose_x/y = 0.8` offsetjet, igy az A* es a vilagban
+    megadott cel/akadaly koordinatak egy rendszerben vannak.
+4. A statikus falpontok a `rosbot.yaml` fajlban az SDF falak 0.2 m-es mintai.
+5. A controller, bridge es RViz hasznalja a `use_sim_time: true` parametert.
+6. A fo Gazebo launch kozvetlenul a `gz sim` binarist inditja, nem a
+    `gz_sim.launch.py` wrappert. A mukodo forma:
+    `gz sim -v 4 -r <dwa_world.sdf>`.
+7. Az `AI_KODCSOMAG.md` nem helyettesiti a tenyleges forrasfajlokat. Minden
+    kodkovetkeztetest a fenti aktualis fajlokbol kell ellenorizni.
+
+### Aktualitasan igazolt mukodes
+
+- A tiszta build sikeres:
+  `colcon build --symlink-install --packages-up-to dwa_gazebo_sim`
+- Az `/odom` publisher megjelent a koordinata-javitas utan.
+- A `/goal_pose` cel bejutott az A* + DWA node-ba.
+- Az A* utvonal letrejott, peldaul `ut=28 pont`.
+- A DWA sebessegparancsot adott, peldaul `cmd=(0.31, 0.21)`.
+- A `/cmd_vel` bridge a Gazebo fele csatlakozik.
+- RViz topicok: `/odom`, `/scan`, `/astar_path`, `/astar_map`,
+  `/astar_dwa_markers`, `/goal_pose`.
+
+### Ismert koordinata-megjelenitesi kockazat
+
+Az RViz nyers `Odometry` display-je a Gazebo lokalis `/odom` uzenetet mutatja,
+mig az A* terkep es a statikus markerek a kezdopozicio-offsettel korrigalt
+vilagkoordinatat hasznaljak. Ha RViz-ben ket eltolodott reteget latni, a nyers
+`Odometry` display-t kapcsold ki, a Fixed Frame maradjon `odom`. A TF es az A*
+marker koordinatait ezutan kell veglegesiteni, nem ujabb offset hozzaadasaval.
+
+### Masolhato feladatprompt masik AI-nak
+
+```text
+Egy ROS 2 Jazzy + Gazebo Sim 8.10 projektet kell folytatnod WSL2 Ubuntu alatt.
+A projekt TurtleBot3 Waffle robotot, C++ A* globalis es DWA lokalis tervezot
+hasznal. A fo workspace:
+codes_diploma/ros2_astar_dwa_gazebo
+
+Eloszor olvasd el a tenyleges aktualis fajlokat:
+src/astar_dwa_controller/src/astar_dwa_node.cpp
+src/astar_dwa_controller/config/rosbot.yaml
+src/astar_dwa_controller/launch/controller.launch.py
+src/dwa_gazebo_sim/launch/simulation.launch.py
+src/dwa_gazebo_sim/launch/bridge_and_controller.launch.py
+src/dwa_gazebo_sim/launch/visualization.launch.py
+src/dwa_gazebo_sim/worlds/dwa_world.sdf
+README.md
+
+Ne a regi AI_KODCSOMAG.md-beagyazott kodmasolatbol kovetkeztess, hanem a
+tenyleges forrasokat ellenorizd.
+
+A mar kijavitott hibak:
+- A* cost es parent tomb merete width * height.
+- LiDAR sajat roboton beluli pontjai szurve vannak.
+- DWA deadlock esetere lassu, biztonsagos elorehaladasi fallback van.
+- A nyers Gazebo odom lokalis, ezert az initial_pose_x/y egyszeri offsetkent
+  kerul a belso vilagkoordinataba.
+- A statikus falpontok a SDF falak 0.2 m-es mintai.
+- use_sim_time minden erintett ROS node-on true.
+- A fo launch kozvetlen gz sim folyamatot indit.
+
+Aktualis ellenorzes:
+colcon build --symlink-install --packages-up-to dwa_gazebo_sim
+
+Inditas Terminal 1-ben:
+source /opt/ros/jazzy/setup.bash
+export TURTLEBOT3_MODEL=waffle
+export DISPLAY=:0
+export XDG_RUNTIME_DIR=/tmp/gazebo-runtime
+mkdir -p "$XDG_RUNTIME_DIR"
+chmod 700 "$XDG_RUNTIME_DIR"
+cd "/mnt/c/Users/Rum Dániel/Desktop/Diplomamunka/codes_diploma/ros2_astar_dwa_gazebo"
+source install/setup.bash
+export ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST
+ros2 launch dwa_gazebo_sim simulation.launch.py software_rendering:=true
+
+Inditas Terminal 2-ben:
+source /opt/ros/jazzy/setup.bash
+export DISPLAY=:0
+export XDG_RUNTIME_DIR=/tmp/gazebo-runtime
+mkdir -p "$XDG_RUNTIME_DIR"
+chmod 700 "$XDG_RUNTIME_DIR"
+export QT_QPA_PLATFORM=xcb
+export QT_X11_NO_MITSHM=1
+export ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST
+cd "/mnt/c/Users/Rum Dániel/Desktop/Diplomamunka/codes_diploma/ros2_astar_dwa_gazebo"
+source install/setup.bash
+ros2 launch dwa_gazebo_sim visualization.launch.py
+
+Nyitott feladat:
+Vizsgald meg az RViz-ben, hogy a nyers /odom Odometry display okoz-e masodik,
+eltolt koordinatareteget. A static map, A* path es marker frame jelenleg odom.
+Ne adj ujabb offsetet addig, amig a nyers odom, TF, OccupancyGrid es MarkerArray
+frame-je nincs egyutt ellenorizve.
+``` 
+
+### Legujabb allapot - DWA res elotti megtorpanas
+
+2026-11-02-en a C++ `astar_dwa_node.cpp`-ben eltavolitasra kerult a kulon
+`heading_error > 0.6` ag, amely teljesen nullazta a linearis sebesseget, ha a
+robot az elso res elott iranyt akart valtani. A DWA sajat heading-score-ja,
+trajektoria-predikcioja es akadalyellenorzese dont most a lassu, ivben torteno
+befordulasrol.
+
+Az RViz nyers `Odometry` display-e alapbol kikapcsolt allapotba kerult, mert a
+lokalis Gazebo odometria es a vilagkoordinatas statikus A* retegek egyutt egy
+eltolodott trailszeru megjelenitest okoztak.
+
+Ellenorzott tesztlog:
+
+```text
+DWA jeloltek: teszt=169, sebesseg=123, hatar=0, akadaly=0,
+fekezes=0, elfogadott=igen
+Frontier vezerles: waypoint=(1.20, 1.20), cmd=(0.15, 0.62)
+Frontier vezerles: waypoint=(1.60, 1.60), cmd=(0.32, 0.21)
+```
+
+Ez igazolja, hogy a robot az elso waypoint fele elorehaladva fordul, nem a
+regi teljes megallasi agban varakozik.
+
+A legujabb DWA-javitas az `obstacles()` fuggvenyben kiszuri a LiDAR-pontokat,
+ha azok a `planning_obstacles()` statikus falpontjainak `resolution` tavolsagan
+belul vannak. Az A* tovabbra is hasznalja a statikus falterkepeket, de a DWA
+nem kezeli ugyanazt a falat masodik, dinamikus akadalykent.
+
+### Python es C++ modell kapcsolata
+
+A C++ ROS 2 node ugyanazokat az alapelveket hasznalja, mint az `Onlab/DWA_py.py`:
+differencialis kerekkinematika, gyorsulaskorlatozas, trajektoria-predikcio,
+megallhatosagi feltetel es heading/tavolsag/sebesseg pontozas. Nem azonos
+program es nem azonos parameterekkel fut: elter a robot sugar, a `predict_time`,
+a DWA-sulyok es az akadalylista forrasa. A C++ valtozat a Gazebo `/scan` es
+`/odom` adatait hasznalja, a Python valtozat sajat szimulalt akadalylistat.
+
+### Legujabb frissites - biztonsagosabb globalis utvonal es RViz
+
+- Az A* inflacio most `robot_radius + obstacle.radius + safety_margin`.
+- A `/astar_map` es az RViz biztonsagi markerek ugyanazt a megnovelt
+    inflacios sugarat mutatjak.
+- A DWA LiDAR-szures a statikus falakat nem kezeli ujra dinamikus akadalykent.
+- A DWA waypoint-eloreneyezese `0.5 m` helyett `0.35 m`, hogy ne vagja le az
+    A* biztonsagos kanyarjait a szuk res elott.
+- RViz-ben alapbol ki van kapcsolva a statikus `/astar_map`, a statikus
+    MarkerArray es a nyers Odometry trail. A LiDAR marad aktiv, a nezeti cel a
+    `base_link`, a TopDownOrtho skala `3.5`.
+
+Az utolso C++ build sikeres:
+
+```text
+colcon build --symlink-install --packages-select astar_dwa_controller
+```
+
+### Legujabb A* LiDAR-frissites
+
+Az `astar()` keresesi akadalylistaja most egyesiti a `planning_obstacles()`
+statikus akadalyait es a control ciklus aktualis `sensed_obstacles` LiDAR-
+pontjait. Az A* igy az ujratervezeskor nemcsak a kezdeti statikus terkepet,
+hanem a friss szenzoros akadalyhelyzetet is blokkolt cellakkal kezeli.
+
+### Aktualis A* + DWA szetvalasztas
+
+Az A* statikus `planning_obstacles()` alapjan dolgozik; a LiDAR-pontok nem
+modositjak a globalis racsterkepe. A `control()` az A* utvonal aktualis
+waypoint-indexet Python-szeruen kezeli: 0,20 m-es tolerancia vagy a ponton valo
+atadas utan lep tovabb, majd az A* lokalis erintoiranyaba ad celpontot a DWA-nak.
+Igy a DWA az `alpha_` heading-pontozassal a zold utvonal iranyat koveti, mikozben
+a mozgo akadalyakat a LiDAR-alapu lokaliz biztonsagi ellenorzes kezeli.
+
+### Mozgo akadaly biztonsagi javitas
+
+Az `obstacles()` most nem szuri ki automatikusan a statikus falak kornyezetebe
+eso LiDAR-pontokat. Ez szukseges, mert a fal mellett halado mozgó henger pontjai
+korabban eltuntek a DWA bemenetebol, es a robot nem reagalt rajuk. Az A* tovabbra
+is csak a statikus `planning_obstacles()` terkepet hasznalja; a DWA minden
+ervenyes LiDAR-pontot lokalis akadalykent ellenoriz.
+
+A legujabb minimalis javitas az `obstacles()` fuggvenyben csak a statikus
+falpontok kozvetlen, `static_obstacle.radius + 0.12 m` kornyezetet szuri ki.
+A falaktol tavolabbi LiDAR-pontok, igy a mozgó akadalyak, megmaradnak a DWA
+szamara.
+
+### Legujabb DWA-menekulesi frissites
+
+- Az `obstacles()` LiDAR-szures kozeli hatara `0.12 m`, igy a mozgó akadaly
+    kozeli pontjai nem vesznek el.
+- A `dwa()` az utkozesnel mindig figyelembe veszi a
+    `robot_radius + safety_margin` biztonsagi tavolsagot.
+- Ha nincs biztonsagos eloremeno jelolt, a robot eloszor lassu, `0.04 m/s`
+    hatramenetet probal, majd legalabb `0.5 * max_angular_velocity` helyben
+    fordulasi korrekciot ad.
+- Az A* ujratervezesi es `control()` logikahoz ebben a frissitesben nem
+    nyultunk.
+
+A jelenlegi C++ fajl diagnosztikaja hibamentes.
 
