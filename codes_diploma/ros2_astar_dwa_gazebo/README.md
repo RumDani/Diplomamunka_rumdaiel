@@ -1,37 +1,25 @@
-# ROS 2 + Gazebo A* + DWA
+## Terminalparancsok
 
-ROS 2 Jazzy + Gazebo szimulacio TurtleBot3 Waffle robottal:
-
-- A* globalis utvonaltervezes;
-- DWA lokalis sebessegvezerles;
-- elore ismert statikus akadalyterkep;
-- RViz-bol kuldheto celpozicio.
-
-## Forditas WSL2 alatt
-
-WSL Ubuntu terminalban:
+### Terminal 0: regi folyamatok leallitasa
 
 ```bash
-cd "/mnt/c/Users/Rum Dániel/Desktop/Diplomamunka/codes_diploma/ros2_astar_dwa_gazebo"
-unset AMENT_PREFIX_PATH
-unset COLCON_PREFIX_PATH
+pkill -9 -x astar_dwa_node 2>/dev/null || true
+pkill -9 -x moving_obstacle 2>/dev/null || true
+pkill -9 -x parameter_bridge 2>/dev/null || true
+pkill -9 -x ruby 2>/dev/null || true
+pkill -9 -x rviz2 2>/dev/null || true
+pkill -9 -x ros2 2>/dev/null || true
+ros2 daemon stop 2>/dev/null || true
+ros2 daemon start 2>/dev/null || true
+```
+
+### Terminal 0: teljes ujraforditas
+
+```bash
 source /opt/ros/jazzy/setup.bash
+cd "/mnt/c/Users/Rum Dániel/Desktop/Diplomamunka/codes_diploma/ros2_astar_dwa_gazebo"
 colcon build --symlink-install
-source install/setup.bash
 ```
-
-Ha a launch vagy a vilagfajl modosult, elegendo a Gazebo-csomagot ujraepiteni:
-
-```bash
-colcon build --symlink-install --packages-select dwa_gazebo_sim
-source install/setup.bash
-```
-
-## Inditas - csak terminalparancsok
-
-Egy munkamenetben csak egy fő launch és egy RViz fusson. A fő launch egyetlen
-paranccsal indítja a Gazebo-t, a bridge-et, az A* + DWA vezérlőt és a mozgó
-akadályt.
 
 ### Terminal 1: szimulacio
 
@@ -47,6 +35,26 @@ source install/setup.bash
 export ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST
 ros2 launch dwa_gazebo_sim simulation.launch.py software_rendering:=true
 ```
+
+### Terminal 1 ellenorzes: csak egy ido- es odom-forras
+
+```bash
+source /opt/ros/jazzy/setup.bash
+export ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST
+ros2 topic info /clock
+ros2 topic info /odom
+ros2 topic info /clock -v
+```
+
+```text
+/clock Publisher count: 1
+/odom Publisher count: 1
+```
+
+Ha bármelyik érték `2`, ne indíts RViz-t; ismételd meg a Terminal 0
+leállító blokkot, majd indítsd újra csak a fő szimulációt.
+
+RViz-t csak ezek után indítsd.
 
 ### Terminal 2: RViz
 
@@ -64,11 +72,12 @@ source install/setup.bash
 ros2 launch dwa_gazebo_sim visualization.launch.py
 ```
 
-### Terminal 3: cel kuldese opcionálisan
+### Terminal 3: cel kuldese
 
 ```bash
 source /opt/ros/jazzy/setup.bash
 export ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST
+ros2 topic info /goal_pose
 ros2 topic pub --once /goal_pose geometry_msgs/msg/PoseStamped \
   "{header: {frame_id: odom}, pose: {position: {x: 6.5, y: 4.2, z: 0.0}, orientation: {w: 1.0}}}"
 ```
@@ -88,9 +97,8 @@ fékezhetőség és pontozás), de nem azonos program: a robot sugara, a
 `predict_time`, a DWA-súlyok és az akadálybemenet eltérhetnek.
 
 A statikus falakat az A* kezeli a `rosbot.yaml` ismert akadálypontjaiból.
-A DWA LiDAR-bemenetéből azokat a pontokat kiszűrjük, amelyek a statikus
-térképpontok környezetébe esnek; így ugyanazt a falat nem ellenőrzi kétszer,
-és a résben nem lassul le indokolatlanul a statikus fal újrafelfedezése miatt.
+A DWA a LiDAR-bemenetből csak a statikus fal közvetlen visszaverődési pontjait
+szűri ki; a mozgó akadályok távolabbi pontjai megmaradnak a lokális vizsgálathoz.
 
 Ellenőrizd, hogy a bridge és a vezérlő tényleg létrehozta-e a kapcsolatokat:
 
@@ -100,6 +108,7 @@ ros2 topic list
 ros2 topic info /odom
 ros2 topic info /scan
 ros2 topic info /goal_pose
+ros2 topic info /clock
 ```
 
 Elvárt állapot:
@@ -107,6 +116,7 @@ Elvárt állapot:
 - `/odom`: `Publisher count: 1`;
 - `/scan`: `Publisher count: 1`;
 - `/goal_pose`: `Subscription count: 1`;
+- `/clock`: `Publisher count: 1`;
 - `/astar_path`: aktív publisher.
 
 Ha az `/odom` vagy `/scan` még nem létezik, várj néhány másodpercet. Ha

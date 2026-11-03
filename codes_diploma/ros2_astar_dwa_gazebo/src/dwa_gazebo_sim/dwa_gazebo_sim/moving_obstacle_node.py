@@ -1,7 +1,8 @@
 import rclpy
-from geometry_msgs.msg import Pose
+from geometry_msgs.msg import Pose, PoseStamped
 from rclpy.node import Node
 from ros_gz_interfaces.srv import SetEntityPose
+from std_msgs.msg import Bool
 
 
 class MovingObstacle(Node):
@@ -18,9 +19,22 @@ class MovingObstacle(Node):
         self.obstacle_index = 0
         self.request_in_flight = False
         self.service_wait_logged = False
+        self.sim_active = False
+        self.goal_received = False
+        self.create_subscription(Bool, "/sim_active", self.sim_active_callback, 10)
+        self.create_subscription(PoseStamped, "/goal_pose", self.goal_callback, 10)
         self.timer = self.create_timer(0.10, self.update)
 
+    def sim_active_callback(self, message):
+        self.sim_active = bool(message.data)
+
+    def goal_callback(self, _message):
+        self.goal_received = True
+
     def update(self):
+        if not self.goal_received:
+            return
+
         dt = 0.10
         self.time += dt
         if not self.client.service_is_ready():

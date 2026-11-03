@@ -1,14 +1,17 @@
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
+#include <fstream>
+#include <sstream>
+#include <thread>
 #include <functional>
 #include <limits>
 #include <memory>
-#include <optional>
 #include <queue>
 #include <string>
-#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -24,13 +27,15 @@
 #include "visualization_msgs/msg/marker_array.hpp"
 
 namespace {
-struct Obstacle { double x, y, radius; };
+// vx, vy: becsult sebesseg [m/s] (LiDAR-klaszter koveto adja), allo akadalynal 0.
+struct Obstacle { double x, y, radius, vx{0.0}, vy{0.0}; };
+struct Track { double x, y, vx, vy; };
 struct Pose { double x{0.0}, y{0.0}, yaw{0.0}; };
 double angle_error(double value) { return std::atan2(std::sin(value), std::cos(value)); }
 double distance(double ax, double ay, double bx, double by) {
   return std::hypot(ax - bx, ay - by);
 }
-}
+}  // namespace
 
 class AStarDwaNode final : public rclcpp::Node {
 public:
@@ -49,29 +54,28 @@ public:
     initial_pose_x_ = declare_parameter("initial_pose_x", 0.5);
     initial_pose_y_ = declare_parameter("initial_pose_y", 0.5);
     resolution_ = declare_parameter("resolution", 0.20);
-    robot_radius_ = declare_parameter("robot_radius", 0.28);
-    max_linear_velocity_ = declare_parameter("max_linear_velocity", 0.32);
+    robot_radius_ = declare_parameter("robot_radius", 0.22);
+    max_linear_velocity_ = declare_parameter("max_linear_velocity", 0.26);
     max_angular_velocity_ = declare_parameter("max_angular_velocity", 1.0);
     wheel_radius_ = declare_parameter("wheel_radius", 0.033);
     wheel_base_ = declare_parameter("wheel_base", 0.08);
     wheel_max_ = declare_parameter("wheel_max", 15.0);
-    wheel_resolution_ = declare_parameter("wheel_resolution", 1.0);
+    wheel_resolution_ = declare_parameter("wheel_resolution", 0.5);
     acceleration_limit_ = declare_parameter("acceleration_limit", 2.0);
-    predict_time_ = declare_parameter("predict_time", 3.0);
-    safety_margin_ = declare_parameter("safety_margin", 0.15);
-    max_linear_velocity_ = 0.40;
-    max_angular_velocity_ = 1.20;
-    safety_margin_ = 0.15;
+    predict_time_ = declare_parameter("predict_time", 2.5);
+    safety_margin_ = declare_parameter("safety_margin", 0.08);
+    min_ttc_ = declare_parameter("min_ttc", 1.0);
+    static_safety_margin_ = declare_parameter("static_safety_margin", 0.03);
+    gazebo_path_debug_ = declare_parameter("gazebo_path_debug", true);
+    gazebo_world_ = declare_parameter("gazebo_world", std::string("dwa_world"));
     alpha_ = declare_parameter("alpha", 5.0);
     beta_ = declare_parameter("beta", 2.0);
     gamma_ = declare_parameter("gamma", 3.0);
-    known_obstacle_x_ = declare_parameter(
-      "known_obstacle_x", std::vector<double>{});
-    known_obstacle_y_ = declare_parameter(
-      "known_obstacle_y", std::vector<double>{});
-    known_obstacle_radius_ = declare_parameter(
-      "known_obstacle_radius", std::vector<double>{});
+    known_obstacle_x_ = declare_parameter("known_obstacle_x", std::vector<double>{});
+    known_obstacle_y_ = declare_parameter("known_obstacle_y", std::vector<double>{});
+    known_obstacle_radius_ = declare_parameter("known_obstacle_radius", std::vector<double>{});
     const double period = declare_parameter("control_period", 0.10);
+    dt_ = period;
     cmd_pub_ = create_publisher<geometry_msgs::msg::Twist>(cmd_topic_, 10);
     path_pub_ = create_publisher<nav_msgs::msg::Path>(path_topic_, 10);
     map_pub_ = create_publisher<nav_msgs::msg::OccupancyGrid>(
@@ -86,15 +90,90 @@ public:
       goal_topic_, 10, [this](geometry_msgs::msg::PoseStamped::ConstSharedPtr msg) {
         goal_x_ = msg->pose.position.x; goal_y_ = msg->pose.position.y;
         has_goal_ = true;
+        blocked_cycles_ = 0;
+        need_replan_ = true;
         RCLCPP_INFO(get_logger(), "Uj cel: x=%.2f m, y=%.2f m", goal_x_, goal_y_); });
     timer_ = create_wall_timer(
       std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::duration<double>(period)),
       [this]() { control(); });
-    RCLCPP_INFO(get_logger(), "Robotfüggetlen A* + DWA C++ node elindult");
+    RCLCPP_INFO(get_logger(), "Robotfuggetlen A* + DWA C++ node elindult");
+  }
+
+public:
+  ~AStarDwaNode() override {
+    if (debug_thread_.joinable()) debug_thread_.join();
   }
 
 private:
+  // ---------------------------------------------------------------- szenzorok
+  // ------------------------------------------------ Gazebo 3D utvonal-megjelenites
+  // Visual-only (collision nelkuli) "debug_path" modell: kek szakaszok + zold waypointok.
+  // Nem akadaly a LiDAR-nak. A gz service hivas kulon szalon fut, nem blokkolja a vezerlest.
+  std::string build_path_sdf(const std::vector<std::pair<double, double>> & path) const {
+    std::ostringstream s;
+    s.precision(4);
+    s << std::fixed;
+    s << "<?xml version=\"1.0\"?>\n<sdf version=\"1.8\">\n<model name=\"debug_path\">\n"
+         "<static>true</static>\n<link name=\"link\">\n";
+    for (std::size_t i = 0; i < path.size(); ++i) {
+      s << "<visual name=\"wp_" << i << "\"><pose>" << path[i].first << " " << path[i].second
+        << " 0.04 0 0 0</pose><cast_shadows>false</cast_shadows><geometry><sphere><radius>0.035"
+           "</radius></sphere></geometry><material><ambient>0.1 0.9 0.2 1</ambient>"
+           "<diffuse>0.1 0.9 0.2 1</diffuse></material></visual>\n";
+      if (i + 1 < path.size()) {
+        const double dx = path[i + 1].first - path[i].first;
+        const double dy = path[i + 1].second - path[i].second;
+        const double len = std::hypot(dx, dy);
+        if (len < 1e-3) continue;
+        s << "<visual name=\"seg_" << i << "\"><pose>" << (path[i].first + dx / 2.0) << " "
+          << (path[i].second + dy / 2.0) << " 0.03 0 0 " << std::atan2(dy, dx)
+          << "</pose><cast_shadows>false</cast_shadows><geometry><box><size>" << len
+          << " 0.035 0.01</size></box></geometry><material><ambient>0.1 0.4 1 1</ambient>"
+             "<diffuse>0.1 0.4 1 1</diffuse></material></visual>\n";
+      }
+    }
+    s << "</link>\n</model>\n</sdf>\n";
+    return s.str();
+  }
+
+  void update_gazebo_path(const std::vector<std::pair<double, double>> & path) {
+    if (!gazebo_path_debug_ || path.size() < 2 || debug_busy_) return;
+    const double now_s = now().seconds();
+    if (now_s - last_debug_time_ < 1.5) return;
+    bool changed = last_debug_path_.size() < 2 ||
+      std::abs(static_cast<int>(path.size()) - static_cast<int>(last_debug_path_.size())) > 2;
+    if (!changed) {
+      const auto & a = path.back();
+      const auto & b = last_debug_path_.back();
+      changed = distance(a.first, a.second, b.first, b.second) > 0.1;
+    }
+    if (!changed) return;
+    last_debug_time_ = now_s;
+    last_debug_path_ = path;
+    const std::string sdf = build_path_sdf(path);
+    const std::string world = gazebo_world_;
+    if (debug_thread_.joinable()) debug_thread_.join();
+    debug_busy_ = true;
+    debug_thread_ = std::thread([this, sdf, world]() {
+      const std::string file = "/tmp/astar_debug_path.sdf";
+      {
+        std::ofstream out(file);
+        out << sdf;
+      }
+      const std::string cmd =
+        "gz service -s /world/" + world + "/remove --reqtype gz.msgs.Entity "
+        "--reptype gz.msgs.Boolean --timeout 1000 --req 'name: \"debug_path\" type: MODEL' "
+        ">/dev/null 2>&1; "
+        "gz service -s /world/" + world + "/create --reqtype gz.msgs.EntityFactory "
+        "--reptype gz.msgs.Boolean --timeout 3000 --req 'sdf_filename: \"" + file + "\"' "
+        ">/dev/null 2>&1";
+      const int rc = std::system(cmd.c_str());
+      (void)rc;
+      debug_busy_ = false;
+    });
+  }
+
   void odom(const nav_msgs::msg::Odometry::ConstSharedPtr msg) {
     const auto & q = msg->pose.pose.orientation;
     pose_.x = msg->pose.pose.position.x + initial_pose_x_;
@@ -121,54 +200,19 @@ private:
     tf_broadcaster_->sendTransform(transform);
     have_odom_ = true;
   }
+
   void scan(const sensor_msgs::msg::LaserScan::ConstSharedPtr msg) {
     scan_ = msg;
     have_scan_ = true;
   }
+
   int map_width() const {
     return std::max(3, static_cast<int>(std::ceil(map_size_ / resolution_)));
   }
   int map_height() const {
     return std::max(3, static_cast<int>(std::ceil(map_height_ / resolution_)));
   }
-  std::vector<Obstacle> obstacles() const {
-    std::vector<Obstacle> result;
-    if (!scan_) return result;
-    const auto static_obstacles = planning_obstacles();
-    constexpr double max_sensor_distance = 3.0;
-    constexpr double front_half_angle = 1.57079632679;
-    for (std::size_t i = 0; i < scan_->ranges.size(); ++i) {
-      const double r = scan_->ranges[i];
-      if (!std::isfinite(r) || r < scan_->range_min || r > scan_->range_max) continue;
-      if (r < 0.12) continue;
-      const double relative_angle =
-        scan_->angle_min + static_cast<double>(i) * scan_->angle_increment;
-      if (r > max_sensor_distance || std::abs(angle_error(relative_angle)) > front_half_angle)
-        continue;
-      const double a = pose_.yaw + relative_angle;
-      const double obstacle_x = pose_.x + r * std::cos(a);
-      const double obstacle_y = pose_.y + r * std::sin(a);
-      if (distance(pose_.x, pose_.y, obstacle_x, obstacle_y) < robot_radius_) continue;
-      const double boundary_filter = robot_radius_ + safety_margin_ + 0.12;
-      if (obstacle_x < map_origin_x_ + boundary_filter ||
-          obstacle_x > map_origin_x_ + map_size_ - boundary_filter ||
-          obstacle_y < map_origin_y_ + boundary_filter ||
-          obstacle_y > map_origin_y_ + map_height_ - boundary_filter) {
-        continue;
-      }
-      bool static_wall_point = false;
-      for (const auto & static_obstacle : static_obstacles) {
-        if (distance(obstacle_x, obstacle_y, static_obstacle.x, static_obstacle.y) <=
-            static_obstacle.radius + robot_radius_ + safety_margin_) {
-          static_wall_point = true;
-          break;
-        }
-      }
-      if (static_wall_point) continue;
-      result.push_back({obstacle_x, obstacle_y, 0.0});
-    }
-    return result;
-  }
+
   std::vector<Obstacle> planning_obstacles() const {
     std::vector<Obstacle> result;
     const std::size_t count = std::min(
@@ -177,12 +221,82 @@ private:
       result.push_back({known_obstacle_x_[i], known_obstacle_y_[i], known_obstacle_radius_[i]});
     return result;
   }
+
+  // LiDAR-pontok vilagkoordinatan + klaszterezes + sebessegbecsles.
+  // Ciklusonkent EGYSZER hivando (a vezerles a sensed_cache_-t hasznalja tovabb).
+  std::vector<Obstacle> obstacles() {
+    std::vector<Obstacle> pts;
+    std::vector<std::size_t> scan_index;
+    if (!scan_) return pts;
+    constexpr double max_dist = 3.0;
+    constexpr double half_fov = 1.57079632679;
+    for (std::size_t i = 0; i < scan_->ranges.size(); ++i) {
+      const double r = scan_->ranges[i];
+      if (!std::isfinite(r) || r < scan_->range_min || r > scan_->range_max) continue;
+      const double rel = scan_->angle_min + static_cast<double>(i) * scan_->angle_increment;
+      if (r > max_dist || std::abs(angle_error(rel)) > half_fov) continue;
+      const double a = pose_.yaw + rel;
+      pts.push_back({pose_.x + r * std::cos(a), pose_.y + r * std::sin(a), 0.0});
+      scan_index.push_back(i);
+    }
+
+    std::vector<std::vector<std::size_t>> clusters;
+    for (std::size_t k = 0; k < pts.size(); ++k) {
+      bool join = false;
+      if (!clusters.empty()) {
+        const std::size_t last = clusters.back().back();
+        join = (scan_index[k] - scan_index[last] <= 2) &&
+               distance(pts[k].x, pts[k].y, pts[last].x, pts[last].y) < 0.15;
+      }
+      if (join) clusters.back().push_back(k); else clusters.push_back({k});
+    }
+
+    const auto statics = planning_obstacles();
+    const double now_s = now().seconds();
+    const double dt = now_s - last_track_time_;
+    std::vector<Track> new_tracks;
+    for (const auto & cl : clusters) {
+      double cx = 0.0, cy = 0.0;
+      for (auto k : cl) { cx += pts[k].x; cy += pts[k].y; }
+      cx /= static_cast<double>(cl.size());
+      cy /= static_cast<double>(cl.size());
+      const double extent = distance(pts[cl.front()].x, pts[cl.front()].y,
+                                     pts[cl.back()].x, pts[cl.back()].y);
+      bool near_static = false;
+      for (const auto & s : statics)
+        if (distance(cx, cy, s.x, s.y) < s.radius + 0.25) { near_static = true; break; }
+      double vx = 0.0, vy = 0.0;
+      // Csak kicsi, nem fal-kozeli objektumot koveto: a falszilankok nem kaphatnak hamis sebesseget.
+      if (!near_static && extent < 0.6 && dt > 0.02 && dt < 0.5) {
+        const Track * best = nullptr;
+        double best_d = 0.35;
+        for (const auto & t : tracks_) {
+          const double d = distance(cx, cy, t.x, t.y);
+          if (d < best_d) { best_d = d; best = &t; }
+        }
+        if (best) {
+          vx = 0.6 * best->vx + 0.4 * (cx - best->x) / dt;
+          vy = 0.6 * best->vy + 0.4 * (cy - best->y) / dt;
+          const double sp = std::hypot(vx, vy);
+          if (sp < 0.06) { vx = 0.0; vy = 0.0; }
+          else if (sp > 0.6) { vx *= 0.6 / sp; vy *= 0.6 / sp; }
+        }
+      }
+      new_tracks.push_back({cx, cy, vx, vy});
+      for (auto k : cl) { pts[k].vx = vx; pts[k].vy = vy; }
+    }
+    tracks_ = new_tracks;
+    last_track_time_ = now_s;
+    return pts;
+  }
+
+  // ---------------------------------------------------------------------- A*
   std::vector<std::pair<double, double>> astar(
-    const std::vector<Obstacle> & sensed_obstacles) const {
-    const int width = std::max(3, static_cast<int>(std::ceil(map_size_ / resolution_)));
+    const std::vector<Obstacle> & sensed_obstacles, bool use_sensed) const {
+    const int width = map_width();
     const int height = map_height();
     const double ox = map_origin_x_, oy = map_origin_y_;
-    std::vector<bool> blocked(width * height, false);
+    std::vector<bool> blocked(static_cast<std::size_t>(width) * height, false);
     auto inside = [width, height](int r, int c) { return r >= 0 && c >= 0 && r < height && c < width; };
     auto index = [width](int r, int c) { return r * width + c; };
     auto cell = [resolution = resolution_, ox, oy](double x, double y) {
@@ -192,52 +306,63 @@ private:
     auto world = [resolution = resolution_, ox, oy](int r, int c) {
       return std::pair<double, double>{ox + (c + 0.5) * resolution, oy + (r + 0.5) * resolution};
     };
-    (void)sensed_obstacles;
-    const auto search_obstacles = planning_obstacles();
-    for (const auto & obstacle : search_obstacles) {
+
+    auto inflate = [&](const Obstacle & obstacle) {
       const auto center = cell(obstacle.x, obstacle.y);
-      const double inflation = robot_radius_ + obstacle.radius + 0.25;
-      const int radius = static_cast<int>(std::ceil(
-        inflation / resolution_));
+      const double inflation = robot_radius_ + obstacle.radius + safety_margin_;
+      const int radius = static_cast<int>(std::ceil(inflation / resolution_));
       for (int r = center.first - radius; r <= center.first + radius; ++r)
         for (int c = center.second - radius; c <= center.second + radius; ++c)
           if (inside(r, c)) {
-            const auto point = world(r, c);
-            if (distance(point.first, point.second, obstacle.x, obstacle.y) <= inflation) {
+            const auto p = world(r, c);
+            if (distance(p.first, p.second, obstacle.x, obstacle.y) <= inflation)
               blocked[index(r, c)] = true;
-            }
           }
-    }
-    const double boundary_margin = robot_radius_ + safety_margin_;
-    for (int r = 0; r < height; ++r) {
-      for (int c = 0; c < width; ++c) {
-        const auto point = world(r, c);
-        if (point.first < ox + boundary_margin ||
-            point.first > ox + map_size_ - boundary_margin ||
-            point.second < oy + boundary_margin ||
-            point.second > oy + map_height_ - boundary_margin) {
-          blocked[index(r, c)] = true;
-        }
+    };
+
+    const auto statics = planning_obstacles();
+    for (const auto & obstacle : statics) inflate(obstacle);
+    if (use_sensed) {
+      for (const auto & o : sensed_obstacles) {
+        if (distance(pose_.x, pose_.y, o.x, o.y) < 0.35) continue;  // sajat test kozeli pontjai
+        bool known = false;
+        for (const auto & s : statics)
+          if (distance(o.x, o.y, s.x, s.y) < s.radius + 0.25) { known = true; break; }
+        if (known) continue;                                        // mar a statikus terkepen van
+        inflate({o.x, o.y, 0.05});
       }
     }
-    const auto start = cell(pose_.x, pose_.y), target = cell(goal_x_, goal_y_);
+
+    const double boundary_margin = robot_radius_ + safety_margin_;
+    for (int r = 0; r < height; ++r)
+      for (int c = 0; c < width; ++c) {
+        const auto p = world(r, c);
+        if (p.first < ox + boundary_margin || p.first > ox + map_size_ - boundary_margin ||
+            p.second < oy + boundary_margin || p.second > oy + map_height_ - boundary_margin)
+          blocked[index(r, c)] = true;
+      }
+
+    const auto start = cell(pose_.x, pose_.y);
+    const auto target = cell(goal_x_, goal_y_);
     if (!inside(start.first, start.second) || !inside(target.first, target.second) ||
-        blocked[index(start.first, start.second)] || blocked[index(target.first, target.second)]) {
+        blocked[index(target.first, target.second)]) {
       RCLCPP_WARN_THROTTLE(
         get_logger(), *get_clock(), 5000,
-        "A* ervenytelen kezdo/celcella: start=(%d,%d), cel=(%d,%d), "
-        "start_blocked=%s, cel_blocked=%s",
-        start.first, start.second, target.first, target.second,
-        (inside(start.first, start.second) && blocked[index(start.first, start.second)])
-          ? "igen" : "nem",
-        (inside(target.first, target.second) && blocked[index(target.first, target.second)])
-          ? "igen" : "nem");
+        "A* ervenytelen kezdo/celcella: start=(%d,%d), cel=(%d,%d)",
+        start.first, start.second, target.first, target.second);
       return {};
     }
-    struct Entry { double f, g; int r, c; bool operator>(const Entry & other) const { return f > other.f; } };
+    // A robot sajat cellaja sosem lehet blokkolt (kulonben az A* azonnal elbukik).
+    blocked[index(start.first, start.second)] = false;
+
+    struct Entry {
+      double f, g; int r, c;
+      bool operator>(const Entry & other) const { return f > other.f; }
+    };
     std::priority_queue<Entry, std::vector<Entry>, std::greater<Entry>> open;
-    std::vector<double> cost(width * height, std::numeric_limits<double>::infinity());
-    std::vector<int> parent(width * height, -1);
+    const std::size_t total = static_cast<std::size_t>(width) * height;
+    std::vector<double> cost(total, std::numeric_limits<double>::infinity());
+    std::vector<int> parent(total, -1);
     auto heuristic = [&target](int r, int c) { return std::hypot(target.first - r, target.second - c); };
     open.push({heuristic(start.first, start.second), 0.0, start.first, start.second});
     cost[index(start.first, start.second)] = 0.0;
@@ -246,20 +371,21 @@ private:
       const auto current = open.top(); open.pop();
       if (current.g > cost[index(current.r, current.c)]) continue;
       if (current.r == target.first && current.c == target.second) break;
-      for (const auto & direction : directions) {
-        const int nr = current.r + direction[0], nc = current.c + direction[1];
+      for (const auto & d : directions) {
+        const int nr = current.r + d[0], nc = current.c + d[1];
         if (!inside(nr, nc) || blocked[index(nr, nc)]) continue;
-        if (direction[0] && direction[1] &&
-            (blocked[index(current.r, nc)] || blocked[index(nr, current.c)])) continue;
-        const double ng = current.g + ((direction[0] && direction[1]) ? std::sqrt(2.0) : 1.0);
+        if (d[0] && d[1] && (blocked[index(current.r, nc)] || blocked[index(nr, current.c)])) continue;
+        const double ng = current.g + ((d[0] && d[1]) ? std::sqrt(2.0) : 1.0);
         if (ng < cost[index(nr, nc)]) {
-          cost[index(nr, nc)] = ng; parent[index(nr, nc)] = index(current.r, current.c);
+          cost[index(nr, nc)] = ng;
+          parent[index(nr, nc)] = index(current.r, current.c);
           open.push({ng + heuristic(nr, nc), ng, nr, nc});
         }
       }
     }
     std::vector<std::pair<double, double>> path;
-    int current = index(target.first, target.second), start_index = index(start.first, start.second);
+    int current = index(target.first, target.second);
+    const int start_index = index(start.first, start.second);
     if (current != start_index && parent[current] < 0) return path;
     while (current >= 0) {
       path.push_back(world(current / width, current % width));
@@ -269,227 +395,173 @@ private:
     std::reverse(path.begin(), path.end());
     return path;
   }
+
   void publish_map() {
     nav_msgs::msg::OccupancyGrid map;
     map.header.frame_id = "odom";
     map.header.stamp = now();
-    map.info.resolution = resolution_;
+    map.info.resolution = static_cast<float>(resolution_);
     map.info.width = static_cast<std::uint32_t>(map_width());
     map.info.height = static_cast<std::uint32_t>(map_height());
     map.info.origin.position.x = map_origin_x_;
     map.info.origin.position.y = map_origin_y_;
     map.info.origin.orientation.w = 1.0;
     map.data.assign(map.info.width * map.info.height, 0);
-    auto cell = [this](double x, double y) {
-      return std::pair<int, int>{
-        static_cast<int>(std::floor((x - map_origin_x_) / resolution_)),
-        static_cast<int>(std::floor((y - map_origin_y_) / resolution_))};
-    };
     const int width = static_cast<int>(map.info.width);
+    const int height = static_cast<int>(map.info.height);
     for (const auto & obstacle : planning_obstacles()) {
-      const auto center = cell(obstacle.x, obstacle.y);
-      const int radius = static_cast<int>(std::ceil(
-        (obstacle.radius + robot_radius_ + safety_margin_) / resolution_));
-      for (int y = center.second - radius; y <= center.second + radius; ++y) {
-        for (int x = center.first - radius; x <= center.first + radius; ++x) {
-          if (x >= 0 && y >= 0 && x < width && y < map_height()) {
-            const double dx = (x + 0.5) * resolution_ - (center.first + 0.5) * resolution_;
-            const double dy = (y + 0.5) * resolution_ - (center.second + 0.5) * resolution_;
-            if (std::hypot(dx, dy) <= obstacle.radius + robot_radius_ + safety_margin_) {
-            map.data[y * width + x] = 100;
-            }
+      const double inflation = obstacle.radius + robot_radius_ + safety_margin_;
+      const int radius = static_cast<int>(std::ceil(inflation / resolution_));
+      const int cc = static_cast<int>(std::floor((obstacle.x - map_origin_x_) / resolution_));
+      const int cr = static_cast<int>(std::floor((obstacle.y - map_origin_y_) / resolution_));
+      for (int r = cr - radius; r <= cr + radius; ++r)
+        for (int c = cc - radius; c <= cc + radius; ++c)
+          if (r >= 0 && c >= 0 && r < height && c < width) {
+            const double px = map_origin_x_ + (c + 0.5) * resolution_;
+            const double py = map_origin_y_ + (r + 0.5) * resolution_;
+            if (distance(px, py, obstacle.x, obstacle.y) <= inflation)
+              map.data[static_cast<std::size_t>(r) * width + c] = 100;
           }
-        }
-      }
     }
     map_pub_->publish(map);
   }
+
+  // --------------------------------------------------------------------- DWA
   std::pair<double, double> wheel_kinematics(double left, double right) const {
     const double velocity = ((left + right) / 2.0) * wheel_radius_;
     const double angular = ((right - left) / (2.0 * wheel_base_)) * wheel_radius_;
     return {velocity, angular};
   }
+
+  // A Python DWA logikajaval egyezo: az utkozes NEM dob el egy jeloltet automatikusan,
+  // hanem az utkozesig megtett ivhossz (collision_dist) donti el a fekezesi feltetel alapjan.
   std::pair<double, double> dwa(double target_x, double target_y,
                                 const std::vector<Obstacle> & sensed) {
-    const double wheel_acceleration = acceleration_limit_ / wheel_radius_;
-    const double left_min = std::max(-wheel_max_, wheel_left_ - wheel_acceleration * dt_);
-    const double left_max = std::min(wheel_max_, wheel_left_ + wheel_acceleration * dt_);
-    const double right_min = std::max(-wheel_max_, wheel_right_ - wheel_acceleration * dt_);
-    const double right_max = std::min(wheel_max_, wheel_right_ + wheel_acceleration * dt_);
+    const double wa = acceleration_limit_ / wheel_radius_;
+    const double left_min = std::max(-wheel_max_, wheel_left_ - wa * dt_);
+    const double left_max = std::min(wheel_max_, wheel_left_ + wa * dt_);
+    const double right_min = std::max(-wheel_max_, wheel_right_ - wa * dt_);
+    const double right_max = std::min(wheel_max_, wheel_right_ + wa * dt_);
+    const double clearance_limit = robot_radius_ + safety_margin_;
+    const double goal_dist = distance(pose_.x, pose_.y, target_x, target_y);
+    const double horizon = std::clamp(goal_dist * 2.0, 0.8, predict_time_);
+
     double best_score = -std::numeric_limits<double>::infinity();
-    double best_left = wheel_left_, best_right = wheel_right_;
-    bool found_candidate = false;
-    std::size_t rejected_velocity = 0;
-    std::size_t rejected_boundary = 0;
-    std::size_t rejected_obstacle = 0;
-    std::size_t rejected_braking = 0;
-    std::size_t tested_candidates = 0;
-    const double dist_to_goal = distance(pose_.x, pose_.y, target_x, target_y);
-    const double adaptive_predict_time = dist_to_goal < 1.0
-      ? std::max(0.5, dist_to_goal * 2.0) : predict_time_;
-    const double v_max_robot = max_linear_velocity_;
-    const double v_target = std::min(
-      v_max_robot, std::max(0.08, dist_to_goal * 1.4));
-    for (double left = left_min; left <= left_max + wheel_resolution_ * 0.5;
-         left += wheel_resolution_) {
-      for (double right = right_min; right <= right_max + wheel_resolution_ * 0.5;
-           right += wheel_resolution_) {
-        ++tested_candidates;
-        const auto candidate = wheel_kinematics(left, right);
-        const double v = candidate.first;
-        if (v < 0.0) {
-          ++rejected_velocity;
+    double best_left = 0.0, best_right = 0.0;
+    bool found = false;
+    std::size_t n_test = 0, n_vel = 0, n_ttc = 0, n_brake = 0;
+
+    for (double left = left_min; left <= left_max + 1e-9; left += wheel_resolution_) {
+      for (double right = right_min; right <= right_max + 1e-9; right += wheel_resolution_) {
+        ++n_test;
+        const auto cand = wheel_kinematics(left, right);
+        if (cand.first < 0.0 || cand.first > max_linear_velocity_ ||
+            std::abs(cand.second) > max_angular_velocity_) {
+          ++n_vel;
           continue;
         }
-        if (v > max_linear_velocity_ ||
-            std::abs(candidate.second) > max_angular_velocity_) {
-          ++rejected_velocity;
-          continue;
-        }
+
         double x = pose_.x, y = pose_.y, yaw = pose_.yaw;
-        double simulated_left = wheel_left_, simulated_right = wheel_right_;
-        double collision_distance = 10.0;
-        bool safe = true;
-        double accumulated_dist = 0.0;
-        for (double t = 0.0; t < adaptive_predict_time; t += dt_) {
-          simulated_left += std::clamp(
-            left - simulated_left, -wheel_acceleration * dt_, wheel_acceleration * dt_);
-          simulated_right += std::clamp(
-            right - simulated_right, -wheel_acceleration * dt_, wheel_acceleration * dt_);
-          const auto simulated = wheel_kinematics(simulated_left, simulated_right);
-          if (std::abs(simulated.second) > 1e-6) {
-            x += (simulated.first / simulated.second) *
-              (std::sin(yaw + simulated.second * dt_) - std::sin(yaw));
-            y -= (simulated.first / simulated.second) *
-              (std::cos(yaw + simulated.second * dt_) - std::cos(yaw));
+        double sl = wheel_left_, sr = wheel_right_;
+        double arc = 0.0, collision_dist = 10.0, min_clear = 3.0;
+        bool hit = false;
+        int steps = 0;
+        for (double t = 0.0; t < horizon; t += dt_, ++steps) {
+          sl += std::clamp(left - sl, -wa * dt_, wa * dt_);
+          sr += std::clamp(right - sr, -wa * dt_, wa * dt_);
+          const auto s = wheel_kinematics(sl, sr);
+          if (std::abs(s.second) > 1e-6) {
+            x += (s.first / s.second) * (std::sin(yaw + s.second * dt_) - std::sin(yaw));
+            y -= (s.first / s.second) * (std::cos(yaw + s.second * dt_) - std::cos(yaw));
           } else {
-            x += simulated.first * std::cos(yaw) * dt_;
-            y += simulated.first * std::sin(yaw) * dt_;
+            x += s.first * std::cos(yaw) * dt_;
+            y += s.first * std::sin(yaw) * dt_;
           }
-          yaw += simulated.second * dt_;
-          accumulated_dist += std::abs(simulated.first) * dt_;
-          const double margin = robot_radius_ + safety_margin_;
-          if (x < map_origin_x_ + margin ||
-              x > map_origin_x_ + map_size_ - margin ||
-              y < map_origin_y_ + margin ||
-              y > map_origin_y_ + map_height_ - margin) {
-            collision_distance = accumulated_dist;
-            if (collision_distance < 0.55) {
-              safe = false;
-              ++rejected_boundary;
-            }
+          yaw += s.second * dt_;
+          arc += std::abs(s.first) * dt_;
+          const double tt = (steps + 1) * dt_;
+
+          if (x < map_origin_x_ + clearance_limit ||
+              x > map_origin_x_ + map_size_ - clearance_limit ||
+              y < map_origin_y_ + clearance_limit ||
+              y > map_origin_y_ + map_height_ - clearance_limit) {
+            collision_dist = arc;
+            hit = true;
             break;
           }
-          for (const auto & obstacle : sensed) {
-            if (distance(pose_.x, pose_.y, obstacle.x, obstacle.y) < robot_radius_) continue;
-            if (distance(x, y, obstacle.x, obstacle.y) <=
-                robot_radius_ + obstacle.radius + safety_margin_) {
-              collision_distance = accumulated_dist;
-              if (collision_distance < 0.55) {
-                safe = false;
-                ++rejected_obstacle;
-              }
+          for (const auto & o : sensed) {
+            const double ox = o.x + o.vx * tt;   // mozgo akadaly elorejelzese
+            const double oy = o.y + o.vy * tt;
+            // Python-egyezes: allo akadalynal (fal) szuk static margo, mozgonal teljes safety_margin.
+            const bool moving = std::hypot(o.vx, o.vy) > 0.0;
+            const double margin = moving ? safety_margin_ : static_safety_margin_;
+            const double clear = distance(x, y, ox, oy) - (robot_radius_ + margin + o.radius);
+            min_clear = std::min(min_clear, clear);
+            if (clear <= 0.0) {
+              collision_dist = arc;
+              hit = true;
               break;
             }
           }
-          if (!safe || collision_distance < 10.0) break;
+          if (hit) break;
         }
-        if (!safe) continue;
-        if (std::abs(candidate.first) >
-          std::sqrt(2.0 * acceleration_limit_ * collision_distance)) {
-          ++rejected_braking;
+
+        // 1) Python-fele fekezesi feltetel: |v| <= sqrt(2 a d)
+        if (cand.first > std::sqrt(2.0 * acceleration_limit_ * collision_dist) + 1e-9) {
+          ++n_brake;
           continue;
         }
+        // 2) utkozesi ido: ne hajtson gyorsan az akadalynak, inkabb lassitson / iveljen
+        if (hit && cand.first > 1e-3 && collision_dist < cand.first * min_ttc_) {
+          ++n_ttc;
+          continue;
+        }
+
         const double goal_heading = std::atan2(target_y - y, target_x - x);
-        const double heading_score =
-          (M_PI - std::abs(angle_error(goal_heading - yaw))) / M_PI;
-        const double distance_score = collision_distance;
-        const double velocity_score =
-          1.0 - (std::abs(v_target - candidate.first) / v_max_robot);
-        const double score = alpha_ * heading_score + beta_ * distance_score +
-          gamma_ * velocity_score;
+        const double heading_score = (M_PI - std::abs(angle_error(goal_heading - yaw))) / M_PI;
+        const double clear_score = std::clamp(min_clear / 1.0, 0.0, 1.0);
+        const double v_target = std::min(max_linear_velocity_, std::max(0.08, goal_dist * 1.4));
+        const double vel_score = 1.0 - std::abs(v_target - cand.first) / max_linear_velocity_;
+        const double score = alpha_ * heading_score + beta_ * clear_score + gamma_ * vel_score;
         if (score > best_score) {
           best_score = score;
           best_left = left;
           best_right = right;
-          found_candidate = true;
+          found = true;
         }
       }
     }
     RCLCPP_INFO_THROTTLE(
       get_logger(), *get_clock(), 2000,
-      "DWA jeloltek: teszt=%zu, sebesseg=%zu, hatar=%zu, akadaly=%zu, fekezes=%zu, elfogadott=%s",
-      tested_candidates, rejected_velocity, rejected_boundary, rejected_obstacle,
-      rejected_braking, found_candidate ? "igen" : "nem");
-    if (!found_candidate) {
-      const double recovery_speed = std::min(max_linear_velocity_, 0.08);
-      const double recovery_step = recovery_speed * dt_;
-      const double recovery_x = pose_.x + recovery_step * std::cos(pose_.yaw);
-      const double recovery_y = pose_.y + recovery_step * std::sin(pose_.yaw);
-      const double boundary_margin = robot_radius_ + safety_margin_;
-      bool recovery_safe =
-        recovery_x >= map_origin_x_ + boundary_margin &&
-        recovery_x <= map_origin_x_ + map_size_ - boundary_margin &&
-        recovery_y >= map_origin_y_ + boundary_margin &&
-        recovery_y <= map_origin_y_ + map_height_ - boundary_margin;
-      for (const auto & obstacle : sensed) {
-        if (distance(pose_.x, pose_.y, obstacle.x, obstacle.y) < robot_radius_) continue;
-        if (distance(recovery_x, recovery_y, obstacle.x, obstacle.y) <=
-            robot_radius_ + obstacle.radius + safety_margin_) {
-          recovery_safe = false;
-          break;
-        }
-      }
-      if (recovery_safe) {
-        const double recovery_wheel = std::min(
-          wheel_max_, recovery_speed / wheel_radius_);
-        wheel_left_ = recovery_wheel;
-        wheel_right_ = recovery_wheel;
-        RCLCPP_WARN_THROTTLE(
-          get_logger(), *get_clock(), 2000,
-          "DWA nem talalt jeloltet; biztonsagos lassu elorehaladas indul.");
-        return wheel_kinematics(wheel_left_, wheel_right_);
-      }
-      const double reverse_speed = std::min(max_linear_velocity_, 0.04);
-      const double reverse_step = reverse_speed * dt_;
-      const double reverse_x = pose_.x - reverse_step * std::cos(pose_.yaw);
-      const double reverse_y = pose_.y - reverse_step * std::sin(pose_.yaw);
-      bool reverse_safe =
-        reverse_x >= map_origin_x_ + boundary_margin &&
-        reverse_x <= map_origin_x_ + map_size_ - boundary_margin &&
-        reverse_y >= map_origin_y_ + boundary_margin &&
-        reverse_y <= map_origin_y_ + map_height_ - boundary_margin;
-      for (const auto & obstacle : sensed) {
-        if (distance(pose_.x, pose_.y, obstacle.x, obstacle.y) < robot_radius_) continue;
-        if (distance(reverse_x, reverse_y, obstacle.x, obstacle.y) <=
-            robot_radius_ + obstacle.radius + safety_margin_) {
-          reverse_safe = false;
-          break;
-        }
-      }
-      if (reverse_safe) {
-        const double reverse_wheel = std::min(
-          wheel_max_, reverse_speed / wheel_radius_);
-        wheel_left_ = -reverse_wheel;
-        wheel_right_ = -reverse_wheel;
-        RCLCPP_WARN_THROTTLE(
-          get_logger(), *get_clock(), 2000,
-          "DWA nem talalt eloremeno jeloltet; lassu hatramenet indul.");
-        return wheel_kinematics(wheel_left_, wheel_right_);
-      }
-      const double target_heading = std::atan2(target_y - pose_.y, target_x - pose_.x);
-      const double turn_error = angle_error(target_heading - pose_.yaw);
-      wheel_left_ = 0.0;
-      wheel_right_ = 0.0;
-      const double turn_command = std::abs(turn_error) > 0.15
-        ? std::clamp(turn_error, -max_angular_velocity_, max_angular_velocity_)
-        : 0.5 * max_angular_velocity_;
-      return {0.0, turn_command};
+      "DWA: teszt=%zu sebesseg=%zu fekezes=%zu ttc=%zu elfogadott=%s",
+      n_test, n_vel, n_brake, n_ttc, found ? "igen" : "nem");
+
+    if (found) {
+      blocked_cycles_ = 0;
+      wheel_left_ = best_left;
+      wheel_right_ = best_right;
+      return wheel_kinematics(wheel_left_, wheel_right_);
     }
-    wheel_left_ = best_left;
-    wheel_right_ = best_right;
-    return wheel_kinematics(wheel_left_, wheel_right_);
+
+    // Fallback: az akadalytol ELFELE fordul (nem a cel fele), a forgasirany stabil marad.
+    ++blocked_cycles_;
+    wheel_left_ = 0.0;
+    wheel_right_ = 0.0;
+    const Obstacle * nearest = nullptr;
+    double nd = 1.2;
+    for (const auto & o : sensed) {
+      const double d = distance(pose_.x, pose_.y, o.x, o.y);
+      if (d < nd) { nd = d; nearest = &o; }
+    }
+    if (nearest) {
+      const double side = angle_error(
+        std::atan2(nearest->y - pose_.y, nearest->x - pose_.x) - pose_.yaw);
+      if (std::abs(side) > 0.15) recovery_dir_ = side > 0.0 ? -1 : 1;
+    }
+    return {0.0, recovery_dir_ * 0.6 * max_angular_velocity_};
   }
+
+  // ------------------------------------------------------------ vizualizacio
   visualization_msgs::msg::Marker make_marker(
     int id, int type, double x, double y, double z,
     double scale, float r, float g, float b) const {
@@ -514,13 +586,13 @@ private:
     marker.lifetime = rclcpp::Duration::from_seconds(0.4);
     return marker;
   }
+
   void publish_debug(const std::vector<std::pair<double, double>> & path,
                      double target_x, double target_y,
                      double velocity, double angular_velocity) {
     visualization_msgs::msg::MarkerArray markers;
-    auto goal = make_marker(0, visualization_msgs::msg::Marker::SPHERE,
-                            target_x, target_y, 0.35, 0.45, 0.1, 1.0, 0.2);
-    markers.markers.push_back(goal);
+    markers.markers.push_back(make_marker(
+      0, visualization_msgs::msg::Marker::SPHERE, target_x, target_y, 0.35, 0.45, 0.1, 1.0, 0.2));
     auto goal_ring = make_marker(3, visualization_msgs::msg::Marker::CYLINDER,
                                  target_x, target_y, 0.03, 1.0, 0.1, 1.0, 0.2);
     goal_ring.scale.z = 0.04;
@@ -556,12 +628,12 @@ private:
       safety.color.a = 0.25;
       markers.markers.push_back(safety);
     }
-    int sensed_id = 100;
-    for (const auto & obstacle : obstacles()) {
-      auto marker = make_marker(sensed_id++,
-                                visualization_msgs::msg::Marker::SPHERE,
+    int sensed_id = 1000;
+    for (const auto & obstacle : sensed_cache_) {
+      const bool moving = std::hypot(obstacle.vx, obstacle.vy) > 0.0;
+      auto marker = make_marker(sensed_id++, visualization_msgs::msg::Marker::SPHERE,
                                 obstacle.x, obstacle.y, 0.16, 0.10,
-                                1.0, 0.75, 0.05);
+                                moving ? 1.0f : 1.0f, moving ? 0.1f : 0.75f, moving ? 0.1f : 0.05f);
       marker.color.a = 0.85;
       markers.markers.push_back(marker);
     }
@@ -579,7 +651,7 @@ private:
     }
     markers.markers.push_back(trajectory);
     auto robot = make_marker(5, visualization_msgs::msg::Marker::CYLINDER,
-                             pose_.x, pose_.y, 0.04, 0.58, 0.2, 0.7, 1.0);
+                             pose_.x, pose_.y, 0.04, 2.0 * robot_radius_, 0.2, 0.7, 1.0);
     robot.scale.z = 0.05;
     robot.color.a = 0.35;
     markers.markers.push_back(robot);
@@ -595,6 +667,16 @@ private:
     markers.markers.push_back(heading);
     marker_pub_->publish(markers);
   }
+
+  // ---------------------------------------------------------------- vezerles
+  void stop_robot() {
+    last_linear_velocity_ = 0.0;
+    last_angular_velocity_ = 0.0;
+    wheel_left_ = 0.0;
+    wheel_right_ = 0.0;
+    cmd_pub_->publish(geometry_msgs::msg::Twist{});
+  }
+
   void control() {
     if (!have_odom_) return;
     publish_map();
@@ -602,66 +684,54 @@ private:
       publish_debug({}, pose_.x, pose_.y, 0.0, 0.0);
       return;
     }
+    // Egyszer, ciklusonkent: a sebessegbecslo ettol fugg.
+    sensed_cache_ = obstacles();
+    const auto & sensed_obstacles = sensed_cache_;
     if (!has_goal_) {
       cmd_pub_->publish(geometry_msgs::msg::Twist{});
       publish_debug({}, pose_.x, pose_.y, 0.0, 0.0);
       return;
     }
-    const auto sensed_obstacles = obstacles();
-    static std::vector<std::pair<double, double>> cached_path;
-    static std::size_t waypoint_index = 0;
-    static double last_astar_goal_x = std::numeric_limits<double>::quiet_NaN();
-    static double last_astar_goal_y = std::numeric_limits<double>::quiet_NaN();
-    const bool goal_changed =
-      !std::isfinite(last_astar_goal_x) ||
-      distance(last_astar_goal_x, last_astar_goal_y, goal_x_, goal_y_) > 1e-6;
-    if (cached_path.empty() || goal_changed) {
-      cached_path = astar(sensed_obstacles);
-      waypoint_index = 0;
-      last_astar_goal_x = goal_x_;
-      last_astar_goal_y = goal_y_;
+
+    // Munkamegosztas: az A* CSAK a statikus terkepen, egyszer tervez (uj cel eseten).
+    // Az akadalyok (fal-szegelyek, mozgo hengerek) elkeruleset a DWA vegzi a LiDAR alapjan.
+    // Kivetel: ha a robot a terv szerinti pontjatol >1.2 m-re kerul (pl. lesodrodas),
+    // ujra tervez - szinten csak a statikus terkepen.
+    if (current_path_.empty() || need_replan_ ||
+        (waypoint_index_ < current_path_.size() &&
+         distance(pose_.x, pose_.y, current_path_[waypoint_index_].first,
+                  current_path_[waypoint_index_].second) > 1.2)) {
+      current_path_ = astar({}, false);
+      waypoint_index_ = 0;
+      need_replan_ = false;
+      RCLCPP_INFO(get_logger(), "A* (statikus terkep) utvonal: %zu pont", current_path_.size());
     }
-    const auto & path = cached_path;
-    nav_msgs::msg::Path path_msg; path_msg.header.frame_id = "odom";
+    const auto path = current_path_;
+
+    nav_msgs::msg::Path path_msg;
+    path_msg.header.frame_id = "odom";
     path_msg.header.stamp = now();
     for (const auto & point : path) {
       geometry_msgs::msg::PoseStamped pose;
-      pose.header = path_msg.header; pose.pose.position.x = point.first;
-      pose.pose.position.y = point.second; pose.pose.orientation.w = 1.0;
+      pose.header = path_msg.header;
+      pose.pose.position.x = point.first;
+      pose.pose.position.y = point.second;
+      pose.pose.orientation.w = 1.0;
       path_msg.poses.push_back(pose);
     }
     path_pub_->publish(path_msg);
+    update_gazebo_path(path);
+
     geometry_msgs::msg::Twist command;
     if (path.empty()) {
-      last_linear_velocity_ = 0.0;
-      last_angular_velocity_ = 0.0;
-      cmd_pub_->publish(command);
-      RCLCPP_WARN_THROTTLE(
-        get_logger(), *get_clock(), 5000,
-        "Az A* nem talalt elerheto utvonalat; a robot megall.");
+      stop_robot();
+      RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 5000,
+                           "Az A* nem talalt elerheto utvonalat; a robot megall.");
       publish_debug({}, goal_x_, goal_y_, 0.0, 0.0);
       return;
     }
-    while (waypoint_index + 1 < path.size()) {
-      const auto & current_waypoint = path[waypoint_index];
-      const auto & next_waypoint = path[waypoint_index + 1];
-      const double to_current_x = current_waypoint.first - pose_.x;
-      const double to_current_y = current_waypoint.second - pose_.y;
-      const double direction_x = next_waypoint.first - current_waypoint.first;
-      const double direction_y = next_waypoint.second - current_waypoint.second;
-      const bool passed_waypoint =
-        to_current_x * direction_x + to_current_y * direction_y < 0.0;
-      if (distance(pose_.x, pose_.y, current_waypoint.first, current_waypoint.second) <= 0.20 ||
-          passed_waypoint) {
-        ++waypoint_index;
-      } else {
-        break;
-      }
-    }
     if (distance(pose_.x, pose_.y, goal_x_, goal_y_) < 0.3) {
-      last_linear_velocity_ = 0.0;
-      last_angular_velocity_ = 0.0;
-      cmd_pub_->publish(command);
+      stop_robot();
       return;
     }
     const double boundary_margin = robot_radius_ + safety_margin_;
@@ -669,64 +739,99 @@ private:
         pose_.x > map_origin_x_ + map_size_ - boundary_margin ||
         pose_.y < map_origin_y_ + boundary_margin ||
         pose_.y > map_origin_y_ + map_height_ - boundary_margin) {
-      last_linear_velocity_ = 0.0;
-      last_angular_velocity_ = 0.0;
-      cmd_pub_->publish(command);
-      RCLCPP_WARN_THROTTLE(
-        get_logger(), *get_clock(), 5000,
-        "A robot a palya biztonsagi hataran kivul van; sebesseg nullazva.");
+      stop_robot();
+      RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 5000,
+                           "A robot a palya biztonsagi hataran kivul van; sebesseg nullazva.");
       publish_debug(path, pose_.x, pose_.y, 0.0, 0.0);
       return;
     }
-    std::size_t nearest_index = waypoint_index;
-    double nearest_distance = distance(
-      pose_.x, pose_.y, path[nearest_index].first, path[nearest_index].second);
-    for (std::size_t index = waypoint_index + 1; index < path.size(); ++index) {
-      const double candidate_distance = distance(
-        pose_.x, pose_.y, path[index].first, path[index].second);
-      if (candidate_distance < nearest_distance) {
-        nearest_distance = candidate_distance;
-        nearest_index = index;
+
+    // Waypoint-koveto: a legkozelebbi pont indexe csak elore lephet (8 pontos ablak),
+    // a DWA celja az innen szamitott 0.45 m-es ivhosszu elorenezo pont.
+    {
+      const std::size_t window_end = std::min(path.size(), waypoint_index_ + 8);
+      double best_d = std::numeric_limits<double>::infinity();
+      std::size_t closest = waypoint_index_;
+      for (std::size_t i = waypoint_index_; i < window_end; ++i) {
+        const double d = distance(pose_.x, pose_.y, path[i].first, path[i].second);
+        if (d < best_d) { best_d = d; closest = i; }
+      }
+      waypoint_index_ = std::max(waypoint_index_, closest);
+    }
+    std::size_t target_index = path.size() - 1;
+    {
+      double accumulated = 0.0;
+      for (std::size_t i = waypoint_index_; i + 1 < path.size(); ++i) {
+        accumulated += distance(path[i].first, path[i].second, path[i + 1].first, path[i + 1].second);
+        if (accumulated >= 0.45) { target_index = i + 1; break; }
       }
     }
-    waypoint_index = std::max(waypoint_index, nearest_index);
-    std::size_t target_index = waypoint_index;
-    if (nearest_distance <= 0.60) {
-      while (target_index + 1 < path.size() &&
-             distance(pose_.x, pose_.y, path[target_index].first, path[target_index].second) < 0.30) {
-        ++target_index;
-      }
-    }
-    double target_x = path[target_index].first;
-    double target_y = path[target_index].second;
+    double target_x = path[target_index].first, target_y = path[target_index].second;
+
+    // Legkozelebbi erzekelt akadaly (a helyben forgatas csak szabad terben engedelyezett).
+    double nearest_obstacle = std::numeric_limits<double>::infinity();
+    for (const auto & o : sensed_obstacles)
+      nearest_obstacle = std::min(nearest_obstacle, distance(pose_.x, pose_.y, o.x, o.y));
+
     const double target_heading = std::atan2(target_y - pose_.y, target_x - pose_.x);
+    const double heading_error = angle_error(target_heading - pose_.yaw);
+    if (std::abs(heading_error) > 0.95 && nearest_obstacle > 0.85) {
+      wheel_left_ = 0.0;
+      wheel_right_ = 0.0;
+      command.angular.z = std::clamp(heading_error, -max_angular_velocity_, max_angular_velocity_);
+      publish_debug(path, target_x, target_y, 0.0, command.angular.z);
+      cmd_pub_->publish(command);
+      return;
+    }
+
     const auto velocity = dwa(target_x, target_y, sensed_obstacles);
     RCLCPP_INFO_THROTTLE(
       get_logger(), *get_clock(), 2000,
-      "Frontier vezerles: cel=(%.2f, %.2f), waypoint=(%.2f, %.2f), waypoint_tav=%.2f, ut=%zu pont, cmd=(%.2f, %.2f)",
-      goal_x_, goal_y_, target_x, target_y,
-      distance(pose_.x, pose_.y, target_x, target_y), path.size(),
+      "Vezerles: cel=(%.2f, %.2f), waypoint=(%.2f, %.2f), ut=%zu pont, akadaly_tav=%.2f, "
+      "cmd=(%.2f, %.2f)",
+      goal_x_, goal_y_, target_x, target_y, path.size(), nearest_obstacle,
       velocity.first, velocity.second);
-    command.linear.x = std::clamp(velocity.first, -max_linear_velocity_, max_linear_velocity_);
+    command.linear.x = std::clamp(velocity.first, 0.0, max_linear_velocity_);
     command.angular.z = std::clamp(velocity.second, -max_angular_velocity_, max_angular_velocity_);
+    last_linear_velocity_ = command.linear.x;
+    last_angular_velocity_ = command.angular.z;
     publish_debug(path, target_x, target_y, command.linear.x, command.angular.z);
     cmd_pub_->publish(command);
   }
 
+  // ------------------------------------------------------------------- tagok
   std::string cmd_topic_, odom_topic_, scan_topic_, goal_topic_, path_topic_;
-  double goal_x_, goal_y_, map_size_, map_height_, map_origin_x_, map_origin_y_;
-  double initial_pose_x_, initial_pose_y_;
-  double resolution_, robot_radius_;
-  double max_linear_velocity_, max_angular_velocity_;
+  double goal_x_{0.0}, goal_y_{0.0}, map_size_{8.2}, map_height_{5.2};
+  double map_origin_x_{0.0}, map_origin_y_{0.0};
+  double initial_pose_x_{0.0}, initial_pose_y_{0.0};
+  double resolution_{0.2}, robot_radius_{0.22};
+  double max_linear_velocity_{0.26}, max_angular_velocity_{1.0};
   std::vector<double> known_obstacle_x_, known_obstacle_y_, known_obstacle_radius_;
-  Pose pose_; sensor_msgs::msg::LaserScan::ConstSharedPtr scan_;
+  Pose pose_;
+  sensor_msgs::msg::LaserScan::ConstSharedPtr scan_;
   bool have_odom_{false}, have_scan_{false}, has_goal_{false};
   double wheel_radius_{0.033}, wheel_base_{0.08}, wheel_max_{15.0};
-  double wheel_resolution_{1.0}, acceleration_limit_{2.0};
-  double predict_time_{3.0}, safety_margin_{0.15};
+  double wheel_resolution_{0.5}, acceleration_limit_{2.0};
+  double predict_time_{2.5}, safety_margin_{0.08}, min_ttc_{1.0};
   double alpha_{5.0}, beta_{2.0}, gamma_{3.0}, dt_{0.1};
   double wheel_left_{0.0}, wheel_right_{0.0};
   double last_linear_velocity_{0.0}, last_angular_velocity_{0.0};
+  std::vector<Track> tracks_;
+  std::vector<Obstacle> sensed_cache_;
+  double last_track_time_{0.0};
+  double sensed_until_{0.0};
+  int recovery_dir_{1};
+  int blocked_cycles_{0};
+  double static_safety_margin_{0.03};
+  std::vector<std::pair<double, double>> current_path_;
+  std::size_t waypoint_index_{0};
+  bool need_replan_{true};
+  bool gazebo_path_debug_{true};
+  std::string gazebo_world_{"dwa_world"};
+  std::vector<std::pair<double, double>> last_debug_path_;
+  double last_debug_time_{-100.0};
+  std::atomic<bool> debug_busy_{false};
+  std::thread debug_thread_;
   rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_pub_;
   rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr path_pub_;
   rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr map_pub_;

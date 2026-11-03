@@ -1,10 +1,12 @@
 import math
+import subprocess
 
 import rclpy
 from geometry_msgs.msg import PoseStamped, Twist
 from nav_msgs.msg import Odometry, Path
 from rclpy.node import Node
 from sensor_msgs.msg import LaserScan
+from std_msgs.msg import Bool
 
 from .astar import Grid, astar
 from .dwa import choose_velocity
@@ -21,8 +23,11 @@ class AStarDwaNode(Node):
         self.goal = (float(self.get_parameter("goal_x").value),
                      float(self.get_parameter("goal_y").value))
         self.pose, self.scan, self.path = None, None, []
+        self.goal_received = False
+        self.sim_active = False
         self.cmd_pub = self.create_publisher(Twist, "/cmd_vel", 10)
         self.path_pub = self.create_publisher(Path, "/astar_path", 10)
+        self.sim_active_pub = self.create_publisher(Bool, "/sim_active", 10)
         self.create_subscription(Odometry, "/odom", self.odom_callback, 10)
         self.create_subscription(LaserScan, "/scan", self.scan_callback, 10)
         self.create_subscription(PoseStamped, "/goal_pose", self.goal_callback, 10)
@@ -40,7 +45,42 @@ class AStarDwaNode(Node):
 
     def goal_callback(self, message):
         self.goal = (message.pose.position.x, message.pose.position.y)
+        self.goal_received = True
         self.path = []
+        self._publish_sim_active(False)
+
+    def _publish_sim_active(self, value):
+        message = Bool()
+        message.data = value
+        self.sim_active_pub.publish(message)
+
+    def spawn_path_visual(self, path_points, waypoints, world_name="dwa_world"):
+        visuals = []
+        for index, (x, y) in enumerate(path_points[::2]):
+            visuals.append(
+                f'<visual name="path_{index}"><pose>{x:.3f} {y:.3f} 0.02 0 0 0</pose>'
+                '<geometry><sphere><radius>0.025</radius></sphere></geometry>'
+                '<material><diffuse>0 0.8 1 1</diffuse></material></visual>'
+            )
+        for index, (x, y) in enumerate(waypoints):
+            visuals.append(
+                f'<visual name="waypoint_{index}"><pose>{x:.3f} {y:.3f} 0.05 0 0 0</pose>'
+                '<geometry><sphere><radius>0.06</radius></sphere></geometry>'
+                '<material><diffuse>0 1 0 1</diffuse></material></visual>'
+            )
+        sdf_xml = (
+            '<sdf version="1.8"><model name="debug_path"><static>true</static>'
+            '<link name="link">' + ''.join(visuals) + '</link></model></sdf>'
+        )
+        subprocess.run(
+            ["gz", "service", "-s", f"/world/{world_name}/remove",
+             "--reqtype", "gz.msgs.Entity", "--reptype", "gz.msgs.Boolean",
+             "--timeout", "1000", "--req", 'name: "debug_path"'],
+            check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.Popen(
+            ["ros2", "run", "ros_gz_sim", "create", "-world", world_name,
+             "-string", sdf_xml, "-name", "debug_path"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     def obstacles(self):
         result = []
@@ -78,8 +118,23 @@ class AStarDwaNode(Node):
 
     def plan_and_control(self):
         if self.pose is None or self.scan is None:
+            self.cmd_pub.publish(Twist())
+            self._publish_sim_active(False)
             return
-        self.path = self.build_plan()
+        if not self.goal_received:
+            self.cmd_pub.publish(Twist())
+            self._publish_sim_active(False)
+            return
+
+        if not self.path:
+            self.path = self.build_plan()
+            if not self.path:
+                self.cmd_pub.publish(Twist())
+                self._publish_sim_active(False)
+                return
+            self.spawn_path_visual(self.path, self.path[::2])
+            self._publish_sim_active(True)
+
         self.publish_path()
         if math.hypot(self.goal[0] - self.pose[0], self.goal[1] - self.pose[1]) < 0.3:
             self.cmd_pub.publish(Twist())

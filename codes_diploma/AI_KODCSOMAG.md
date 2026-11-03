@@ -11542,6 +11542,10 @@ colcon build --symlink-install --packages-select astar_dwa_controller
 
 ### Legujabb A* LiDAR-frissites
 
+Az A* statikus inflacioja a falak sarkainak nagyobb tavolsagara `+0.35 m`
+extra biztonsagi erteket hasznal. Ez a frissites a zold globalis utvonalat
+nemcsak a falak oldalatol, hanem a sarkoktol is tavolabb tartja.
+
 Az `astar()` keresesi akadalylistaja most egyesiti a `planning_obstacles()`
 statikus akadalyait es a control ciklus aktualis `sensed_obstacles` LiDAR-
 pontjait. Az A* igy az ujratervezeskor nemcsak a kezdeti statikus terkepet,
@@ -11582,4 +11586,143 @@ szamara.
     nyultunk.
 
 A jelenlegi C++ fajl diagnosztikaja hibamentes.
+
+### 2026-11-03 ellenorzott friss runtime
+
+Friss inditas utan egyetlen fo launch futott:
+
+- egy Gazebo szerver es egy Gazebo GUI;
+- egy `parameter_bridge`;
+- egy `astar_dwa_node`;
+- egy `moving_obstacle` node.
+
+Az ellenorzott topic-allapot:
+
+```text
+/odom: Publisher count: 1, Subscription count: 1
+/scan: Publisher count: 1, Subscription count: 1
+/astar_path: aktiv
+```
+
+A tesztcel `(6.5, 4.2)` volt az `odom`-hoz igazított vilagkoordinataban. A robot
+az elso szakaszokon `0.38 m/s` koruli sebesseggel haladt, majd az utolso minta
+szerint a Gazebo lokalıs odometriaja `(5.423, 3.308)` volt. A vezerlo ehhez
+hozzaadja az `(0.8, 0.8)` kezdopozicio-offsetet, ezert a vezerlesi koordinata
+`(6.223, 4.108)` lett. Ez a celhoz korulbelul `0.29 m` tavolsag, igy a jelenlegi
+`0.30 m` cel-tolerancia alapjan a vezerlo helyesen nullazta a sebesseget.
+
+A futas kozben a DWA kezdeti diagnosztikaja `akadaly=0`, `hatar=0`,
+`elfogadott=igen` volt. A cel elotti megallast nem masodik Gazebo-peldany,
+dupla `/odom`, vagy A*-utvonalhiany okozta; a vegso megallas a vezerloben
+definialt cel-tolerancia kovetkezmenye. A `debug_path` Gazebo-modell letrehozasa
+is lefutott; az elso eltavolıtasi kiserletnel megjeleno "entity not found" uzenet
+csak azt jelezte, hogy korabbi debug-modell meg nem letezett.
+
+Az ellenorzeshez hasznalt fo parancsok:
+
+```bash
+colcon build --symlink-install --packages-select astar_dwa_controller
+ros2 launch dwa_gazebo_sim simulation.launch.py software_rendering:=true
+ros2 topic info /odom
+ros2 topic info /scan
+ros2 topic echo /odom --once
+```
+
+A forrasdiagnosztika tovabbra is hibamentes. A C++ fordítás a Windows-meghajton
+lassan fejezodott be, ezert a futtatas soran kulonosen fontos volt a binaris
+es a launch egyetlen peldanyanak ellenorzese.
+
+### 2026-11-03 dinamikus akadaly- es gridellenorzes
+
+A `moving_obstacle_node.py` cel-elofizetese `Pose` tipusrol `PoseStamped` tipusra
+lett javitva, mert a `/goal_pose` topic tenylegesen `geometry_msgs/msg/PoseStamped`
+uzenetet kuld. A node igy csak a cel uzenet utan es a `/sim_active=true` jelzes
+utan novelheti a `self.time` erteket.
+
+A javitott futasban az A* `resolution=0.20 m` mellett `41 x 26` cellas racson
+40 pontos utvonalat talalt. Ez nem tul nagy grid, ezert a felbontas durvitasat
+nem alkalmaztuk: a nagyobb cella a statikus falsarkok korul kevesebb geometriai
+pontossagot adna. A robot a `6.30, 2.50` waypointig eljutott; a vegso saroknal
+a DWA diagnosztikaja `akadaly=53-54` volt, tehat a fennmarado elakadas lokalis
+LiDAR-ellenorzes, nem A*-utvonalhiany.
+
+### 2026-11-03 DWA+A waypoint- és célkövetési frissítés
+
+Az `astar_dwa_node.cpp` most tartós `current_path_`, `waypoint_index_` és
+`need_replan_` tagokat használ. Az A* csak új cél vagy üres útvonal esetén fut
+újra, a kezdő blokkolt cellát pedig a keresés előtt felszabadítja. A waypoint-
+követés a Python `DWA+A.py` logikájához igazodva legfeljebb nyolc ponton belül
+keresi a legközelebbi előrehaladást, majd `0.45 m` összegzett ívhossz alapján
+választ lookahead célpontot. A helyben forgatás küszöbe `0.85` radián.
+
+Az aktuális `rosbot.yaml` `robot_radius=0.22` és `safety_margin=0.08` értékeket
+használ; a C++ hardcoded biztonsági margó-felülírása megszűnt.
+
+### 2026-11-03 dinamikus LiDAR-regresszió javítása
+
+A DWA lokális `obstacles()` feldolgozása többé nem dobja el a statikus falak
+környezetében mért LiDAR-pontokat. A korábbi geometriai közelség alapú szűrés
+a fal mellett haladó mozgó akadály pontjait is eltávolíthatta, ezért a DWA nem
+látta időben a hengert. A globális A* továbbra is kizárólag a YAML ismert
+statikus akadályait használja; a lokális DWA minden érvényes LiDAR-pontot a
+clearance-vizsgálatba ad.
+
+A mozgó akadályok helyzete és sebessége nincs hardcode-olva a C++ vezérlőben
+vagy a YAML-ben. A DWA a mozgó akadályokat ugyanúgy a valós szenzoros adatból
+kezeli, mint bármely más lokális akadályt; a predikció kizárólag az aktuális
+LiDAR-bemenetre támaszkodhat.
+
+A Gazebo `debug_path` modellje csak vizuális elemeket tartalmaz, collision elemet
+nem, ezért a waypoint-gömbök nem lehetnek LiDAR-akadályok. A DWA LiDAR-feldolgozása
+most csak a statikus fal közvetlen visszaverődési pontjait szűri ki
+`static_radius + 0.05 m` távolságon belül; a fal mellett mozgó akadályok pontjai
+megmaradnak a lokális akadályvizsgálathoz.
+
+### 2026-11-03 szembejövő akadály kikerülése
+
+A DWA most külön kezeli az ütközésig megtett ívhosszt és az oldaltávolságot.
+Az oldaltávolság csak a pályák pontozásában szerepel, ezért egy biztonságos,
+akadálytól oldalra ívelő pálya nem kerül elutasításra pusztán a clearance miatt.
+Ha minden jelölt ív blokkolt és a legközelebbi akadály szemből érkezik, a vezérlő
+nem álló helyben várakozik, hanem `0.08 m/s` előremenettel az akadálytól elfelé
+fordul. A `control()` csak akkor enged helyben forgatást, ha a legközelebbi
+LiDAR-akadály távolabb van `0.85 m`-nél és a heading hiba legalább `0.95 rad`.
+
+### 2026-11-03 RViz-célküldéses indulás
+
+Az `astar_dwa_controller/config/rosbot.yaml` alapértelmezett célkoordinátái
+`goal_x=0.0` és `goal_y=0.0`. A node ezért induláskor nem állítja be a
+`has_goal_` állapotot, hanem nullás sebességgel várakozik. A mozgás csak az
+RViz-ből érkező `2D Goal Pose` `/goal_pose` üzenet után indul.
+
+### Gazebo 3D A* debug-path vizualizacio
+
+A C++ `astar_dwa_node` most a friss A* utvonalbol egyetlen `debug_path` Gazebo
+modellt spawnol: a ritkitott utvonal kek, a waypointok zold, es csak
+`<visual>` elemeket tartalmaz, collision nelkul. Ezert a Gazebo-ban lathato
+utvonal nem valik LiDAR-akadallya.
+
+### Kovetkezo runtime teszt - bal also sarok
+
+Biztonsagos bal also sarok cel az `odom` keretben:
+
+```bash
+ros2 topic pub --once /goal_pose geometry_msgs/msg/PoseStamped \
+    "{header: {frame_id: odom}, pose: {position: {x: 0.7, y: 0.7, z: 0.0}, orientation: {w: 1.0}}}"
+```
+
+A jelenlegi C++ fo launch az A* utvonalat `/astar_path` es
+`/astar_dwa_markers` topicokon RViz-be rajzolja. Gazebo 3D-ben a `debug_path`
+modell csak a Python `planner_node.py` agon van implementalva; a C++ fo launch
+nem spawnol kulon visual-only SDF utvonalmodellt.
+
+Az indítási sorrendben a cél csak akkor küldhető, amikor a vezérlő már
+feliratkozott a `/goal_pose` topicra. Ezt a `ros2 topic info /goal_pose`
+paranccsal kell ellenőrizni. A `/clock` topicnak pontosan egy Gazebo bridge-
+publisherrel kell rendelkeznie; több bridge idő-visszalépést okoz RViz-ben.
+
+A stabil indítás ellenőrzött sorrendje: régi ROS/Gazebo/RViz processzek
+leállítása, egyetlen `simulation.launch.py` indítása, `/clock` és `/odom`
+ellenőrzése `Publisher count: 1` értékkel, majd csak ezután az RViz indítása.
+Így a TF-buffer nem kap két különböző vagy visszalépő szimulációs időt.
 
