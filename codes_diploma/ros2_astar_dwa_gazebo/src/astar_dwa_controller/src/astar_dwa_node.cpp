@@ -22,6 +22,7 @@
 #include "nav_msgs/msg/occupancy_grid.hpp"
 #include "nav_msgs/msg/path.hpp"
 #include "rclcpp/rclcpp.hpp"
+#include "rclcpp/create_timer.hpp"
 #include "sensor_msgs/msg/laser_scan.hpp"
 #include "tf2_ros/transform_broadcaster.h"
 #include "visualization_msgs/msg/marker_array.hpp"
@@ -66,6 +67,10 @@ public:
     safety_margin_ = declare_parameter("safety_margin", 0.08);
     min_ttc_ = declare_parameter("min_ttc", 1.0);
     static_safety_margin_ = declare_parameter("static_safety_margin", 0.03);
+    lookahead_distance_ = declare_parameter("lookahead_distance", 0.25);
+    // Az A* a DWA-nal nagyobb biztonsagi margoval tervez: igy nem vezet szuk reseken (pl. a lila es
+    // a sarga fal kozott), ahol a DWA a kanyart mar nem tudja biztonsagosan bevenni.
+    planning_margin_ = declare_parameter("planning_margin", 0.30);
     gazebo_path_debug_ = declare_parameter("gazebo_path_debug", true);
     gazebo_world_ = declare_parameter("gazebo_world", std::string("dwa_world"));
     alpha_ = declare_parameter("alpha", 5.0);
@@ -93,10 +98,12 @@ public:
         blocked_cycles_ = 0;
         need_replan_ = true;
         RCLCPP_INFO(get_logger(), "Uj cel: x=%.2f m, y=%.2f m", goal_x_, goal_y_); });
-    timer_ = create_wall_timer(
-      std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::duration<double>(period)),
-      [this]() { control(); });
+    // FONTOS: a vezerles a node orajaval (use_sim_time=true eseten a Gazebo szimulacios ideje)
+    // jar, NEM a falorajaval. Lassu szimulacional (real-time factor < 1, pl. WSL szoftveres
+    // renderelés) a falora-idozito a szimulacios idohoz kepest tobbszor tuzelne, igy a
+    // sebessegbecslo (dt) es a DWA gyorsulasi modellje (dt_=0.1) elcsuszna.
+    timer_ = rclcpp::create_timer(
+      this, get_clock(), rclcpp::Duration::from_seconds(period), [this]() { control(); });
     RCLCPP_INFO(get_logger(), "Robotfuggetlen A* + DWA C++ node elindult");
   }
 
@@ -222,6 +229,20 @@ private:
     return result;
   }
 
+  // Szabad-e a (ax,ay)->(bx,by) egyenes a statikus terkepen (a robot testevel egyutt)?
+  bool line_free(double ax, double ay, double bx, double by,
+                 const std::vector<Obstacle> & statics) const {
+    const double len = distance(ax, ay, bx, by);
+    const int n = std::max(1, static_cast<int>(std::ceil(len / 0.05)));
+    for (int k = 0; k <= n; ++k) {
+      const double t = static_cast<double>(k) / n;
+      const double x = ax + (bx - ax) * t, y = ay + (by - ay) * t;
+      for (const auto & o : statics)
+        if (distance(x, y, o.x, o.y) < o.radius + robot_radius_ - 0.02) return false;
+    }
+    return true;
+  }
+
   // LiDAR-pontok vilagkoordinatan + klaszterezes + sebessegbecsles.
   // Ciklusonkent EGYSZER hivando (a vezerles a sensed_cache_-t hasznalja tovabb).
   std::vector<Obstacle> obstacles() {
@@ -309,7 +330,7 @@ private:
 
     auto inflate = [&](const Obstacle & obstacle) {
       const auto center = cell(obstacle.x, obstacle.y);
-      const double inflation = robot_radius_ + obstacle.radius + safety_margin_;
+      const double inflation = robot_radius_ + obstacle.radius + planning_margin_;
       const int radius = static_cast<int>(std::ceil(inflation / resolution_));
       for (int r = center.first - radius; r <= center.first + radius; ++r)
         for (int c = center.second - radius; c <= center.second + radius; ++c)
@@ -354,6 +375,18 @@ private:
     }
     // A robot sajat cellaja sosem lehet blokkolt (kulonben az A* azonnal elbukik).
     blocked[index(start.first, start.second)] = false;
+    // Ha a robot egy felfujt (biztonsagi) zona szelen all, a szomszedos cellak is blokkoltak lehetnek,
+    // es az A* nem tudna elindulni. A 3x3 kornyezetet felszabaditjuk, kiveve a falak valodi testet.
+    for (int dr = -1; dr <= 1; ++dr)
+      for (int dc = -1; dc <= 1; ++dc) {
+        const int rr = start.first + dr, cc = start.second + dc;
+        if (!inside(rr, cc)) continue;
+        const auto p = world(rr, cc);
+        bool hard = false;
+        for (const auto & o : statics)
+          if (distance(p.first, p.second, o.x, o.y) < o.radius + 0.12) { hard = true; break; }
+        if (!hard) blocked[index(rr, cc)] = false;
+      }
 
     struct Entry {
       double f, g; int r, c;
@@ -410,7 +443,7 @@ private:
     const int width = static_cast<int>(map.info.width);
     const int height = static_cast<int>(map.info.height);
     for (const auto & obstacle : planning_obstacles()) {
-      const double inflation = obstacle.radius + robot_radius_ + safety_margin_;
+      const double inflation = obstacle.radius + robot_radius_ + planning_margin_;
       const int radius = static_cast<int>(std::ceil(inflation / resolution_));
       const int cc = static_cast<int>(std::floor((obstacle.x - map_origin_x_) / resolution_));
       const int cr = static_cast<int>(std::floor((obstacle.y - map_origin_y_) / resolution_));
@@ -446,6 +479,15 @@ private:
     const double goal_dist = distance(pose_.x, pose_.y, target_x, target_y);
     const double horizon = std::clamp(goal_dist * 2.0, 0.8, predict_time_);
 
+    // Ha a robot mar a margon belul van (pl. egy kikerules utan), az az akadaly nem tilthat le
+    // MINDEN elore pályat: csak az szamit utkozesnek, ha a palya a jelenleginel ROSSZABB
+    // szabad tavolsagra visz. Igy a robot ki tud mozogni a fal / henger kozeleebol, nem ragad be.
+    std::vector<double> init_clear(sensed.size(), 0.0);
+    for (std::size_t j = 0; j < sensed.size(); ++j) {
+      const bool mv = std::hypot(sensed[j].vx, sensed[j].vy) > 0.0;
+      init_clear[j] = distance(pose_.x, pose_.y, sensed[j].x, sensed[j].y) -
+                      (robot_radius_ + (mv ? safety_margin_ : static_safety_margin_) + sensed[j].radius);
+    }
     double best_score = -std::numeric_limits<double>::infinity();
     double best_left = 0.0, best_right = 0.0;
     bool found = false;
@@ -489,7 +531,8 @@ private:
             hit = true;
             break;
           }
-          for (const auto & o : sensed) {
+          for (std::size_t j = 0; j < sensed.size(); ++j) {
+            const auto & o = sensed[j];
             const double ox = o.x + o.vx * tt;   // mozgo akadaly elorejelzese
             const double oy = o.y + o.vy * tt;
             // Python-egyezes: allo akadalynal (fal) szuk static margo, mozgonal teljes safety_margin.
@@ -497,7 +540,7 @@ private:
             const double margin = moving ? safety_margin_ : static_safety_margin_;
             const double clear = distance(x, y, ox, oy) - (robot_radius_ + margin + o.radius);
             min_clear = std::min(min_clear, clear);
-            if (clear <= 0.0) {
+            if (clear <= 0.0 && clear < init_clear[j] - 0.005) {
               collision_dist = arc;
               hit = true;
               break;
@@ -543,6 +586,10 @@ private:
       return wheel_kinematics(wheel_left_, wheel_right_);
     }
 
+    RCLCPP_WARN_THROTTLE(
+      get_logger(), *get_clock(), 2000,
+      "DWA: nincs elfogadhato jelolt (fekezes=%zu ttc=%zu), blokkolt ciklusok=%d",
+      n_brake, n_ttc, blocked_cycles_ + 1);
     // Fallback: az akadalytol ELFELE fordul (nem a cel fele), a forgasirany stabil marad.
     ++blocked_cycles_;
     wheel_left_ = 0.0;
@@ -622,7 +669,7 @@ private:
       markers.markers.push_back(marker);
       auto safety = make_marker(id++, visualization_msgs::msg::Marker::CYLINDER,
                                 obstacle.x, obstacle.y, 0.02,
-                                2.0 * (obstacle.radius + robot_radius_ + safety_margin_),
+                                2.0 * (obstacle.radius + robot_radius_ + planning_margin_),
                                 1.0, 0.35, 0.05);
       safety.scale.z = 0.02;
       safety.color.a = 0.25;
@@ -701,9 +748,13 @@ private:
         (waypoint_index_ < current_path_.size() &&
          distance(pose_.x, pose_.y, current_path_[waypoint_index_].first,
                   current_path_[waypoint_index_].second) > 1.2)) {
-      current_path_ = astar({}, false);
-      waypoint_index_ = 0;
+      auto new_path = astar({}, false);
+      if (!new_path.empty() || current_path_.empty()) {
+        current_path_ = std::move(new_path);
+        waypoint_index_ = 0;
+      }
       need_replan_ = false;
+      last_replan_time_ = now().seconds();
       RCLCPP_INFO(get_logger(), "A* (statikus terkep) utvonal: %zu pont", current_path_.size());
     }
     const auto path = current_path_;
@@ -746,25 +797,40 @@ private:
       return;
     }
 
-    // Waypoint-koveto: a legkozelebbi pont indexe csak elore lephet (8 pontos ablak),
-    // a DWA celja az innen szamitott 0.45 m-es ivhosszu elorenezo pont.
+    // Waypoint-koveto: a legkozelebbi LATHATO pont indexe csak elore lephet (8 pontos ablak).
+    // Lathato = a robotbol egyenesen, a statikus falakon at nelkul elerheto. Igy a fal tuloldalan
+    // levo pont nem "kozelebbi", a kerulo nem ugorhato at. Ha egyik sem lathato, a robot a
+    // jelenlegi poziciojabol ujratervez (csak a statikus terkepen, max. 1 s-onkent).
+    const auto statics = planning_obstacles();
     {
       const std::size_t window_end = std::min(path.size(), waypoint_index_ + 8);
       double best_d = std::numeric_limits<double>::infinity();
       std::size_t closest = waypoint_index_;
+      bool found_visible = false;
       for (std::size_t i = waypoint_index_; i < window_end; ++i) {
+        if (!line_free(pose_.x, pose_.y, path[i].first, path[i].second, statics)) continue;
         const double d = distance(pose_.x, pose_.y, path[i].first, path[i].second);
-        if (d < best_d) { best_d = d; closest = i; }
+        if (d < best_d) { best_d = d; closest = i; found_visible = true; }
       }
-      waypoint_index_ = std::max(waypoint_index_, closest);
+      if (found_visible) {
+        waypoint_index_ = std::max(waypoint_index_, closest);
+      } else if (now().seconds() - last_replan_time_ > 1.0) {
+        need_replan_ = true;
+        RCLCPP_INFO(get_logger(), "Nincs lathato waypoint az utvonalon, ujratervezes a jelenlegi poziciobol.");
+      }
     }
     std::size_t target_index = path.size() - 1;
     {
       double accumulated = 0.0;
       for (std::size_t i = waypoint_index_; i + 1 < path.size(); ++i) {
         accumulated += distance(path[i].first, path[i].second, path[i + 1].first, path[i + 1].second);
-        if (accumulated >= 0.45) { target_index = i + 1; break; }
+        if (accumulated >= lookahead_distance_) { target_index = i + 1; break; }
       }
+      // A celpont se legyen fal mogott: ha nem lathato, lepjunk vissza az utolso lathatoig.
+      while (target_index > waypoint_index_ &&
+             !line_free(pose_.x, pose_.y, path[target_index].first, path[target_index].second,
+                        statics))
+        --target_index;
     }
     double target_x = path[target_index].first, target_y = path[target_index].second;
 
@@ -823,6 +889,9 @@ private:
   int recovery_dir_{1};
   int blocked_cycles_{0};
   double static_safety_margin_{0.03};
+  double planning_margin_{0.30};
+  double lookahead_distance_{0.25};
+  double last_replan_time_{-100.0};
   std::vector<std::pair<double, double>> current_path_;
   std::size_t waypoint_index_{0};
   bool need_replan_{true};

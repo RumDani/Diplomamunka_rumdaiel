@@ -523,6 +523,7 @@ CMakeFiles/astar_dwa_node.dir/src/astar_dwa_node.cpp.o: /mnt/c/Users/Rum\ Dánie
   /usr/include/c++/13/bits/exception.h \
   /usr/include/c++/13/bits/exception_defines.h \
   /usr/include/c++/13/bits/exception_ptr.h \
+  /usr/include/c++/13/bits/fstream.tcc \
   /usr/include/c++/13/bits/functexcept.h \
   /usr/include/c++/13/bits/functional_hash.h \
   /usr/include/c++/13/bits/hash_bytes.h \
@@ -634,6 +635,7 @@ CMakeFiles/astar_dwa_node.dir/src/astar_dwa_node.cpp.o: /mnt/c/Users/Rum\ Dánie
   /usr/include/c++/13/ext/numeric_traits.h \
   /usr/include/c++/13/ext/string_conversions.h \
   /usr/include/c++/13/ext/type_traits.h \
+  /usr/include/c++/13/fstream \
   /usr/include/c++/13/functional \
   /usr/include/c++/13/future \
   /usr/include/c++/13/initializer_list \
@@ -812,8 +814,10 @@ CMakeFiles/astar_dwa_node.dir/src/astar_dwa_node.cpp.o: /mnt/c/Users/Rum\ Dánie
   /usr/include/x86_64-linux-gnu/bits/wctype-wchar.h \
   /usr/include/x86_64-linux-gnu/bits/wordsize.h \
   /usr/include/x86_64-linux-gnu/c++/13/bits/atomic_word.h \
+  /usr/include/x86_64-linux-gnu/c++/13/bits/basic_file.h \
   /usr/include/x86_64-linux-gnu/c++/13/bits/c++allocator.h \
   /usr/include/x86_64-linux-gnu/c++/13/bits/c++config.h \
+  /usr/include/x86_64-linux-gnu/c++/13/bits/c++io.h \
   /usr/include/x86_64-linux-gnu/c++/13/bits/c++locale.h \
   /usr/include/x86_64-linux-gnu/c++/13/bits/cpu_defines.h \
   /usr/include/x86_64-linux-gnu/c++/13/bits/ctype_base.h \
@@ -862,6 +866,8 @@ CMakeFiles/astar_dwa_node.dir/src/astar_dwa_node.cpp.o: /mnt/c/Users/Rum\ Dánie
 /usr/lib/gcc/x86_64-linux-gnu/13/include/stdarg.h:
 
 /usr/include/x86_64-linux-gnu/c++/13/bits/cpu_defines.h:
+
+/usr/include/x86_64-linux-gnu/c++/13/bits/c++io.h:
 
 /usr/include/x86_64-linux-gnu/bits/wordsize.h:
 
@@ -1205,6 +1211,8 @@ CMakeFiles/astar_dwa_node.dir/src/astar_dwa_node.cpp.o: /mnt/c/Users/Rum\ Dánie
 
 /usr/include/c++/13/bits/move.h:
 
+/usr/include/c++/13/bits/memoryfwd.h:
+
 /opt/ros/jazzy/include/rclcpp/rclcpp/node_interfaces/get_node_timers_interface.hpp:
 
 /opt/ros/jazzy/include/rclcpp/rclcpp/node_interfaces/get_node_parameters_interface.hpp:
@@ -1276,6 +1284,8 @@ CMakeFiles/astar_dwa_node.dir/src/astar_dwa_node.cpp.o: /mnt/c/Users/Rum\ Dánie
 /opt/ros/jazzy/include/rmw/rmw/events_statuses/incompatible_qos.h:
 
 /opt/ros/jazzy/include/rclcpp/rclcpp/exceptions.hpp:
+
+/usr/include/x86_64-linux-gnu/c++/13/bits/basic_file.h:
 
 /opt/ros/jazzy/include/rclcpp/rclcpp/expand_topic_or_service_name.hpp:
 
@@ -1543,8 +1553,6 @@ CMakeFiles/astar_dwa_node.dir/src/astar_dwa_node.cpp.o: /mnt/c/Users/Rum\ Dánie
 
 /usr/include/c++/13/bits/deque.tcc:
 
-/opt/ros/jazzy/include/geometry_msgs/geometry_msgs/msg/detail/pose_with_covariance__struct.hpp:
-
 /opt/ros/jazzy/include/builtin_interfaces/builtin_interfaces/msg/detail/time__traits.hpp:
 
 /usr/include/x86_64-linux-gnu/bits/fp-logb.h:
@@ -1764,6 +1772,8 @@ CMakeFiles/astar_dwa_node.dir/src/astar_dwa_node.cpp.o: /mnt/c/Users/Rum\ Dánie
 /opt/ros/jazzy/include/nav_msgs/nav_msgs/msg/detail/odometry__builder.hpp:
 
 /opt/ros/jazzy/include/rclcpp/rclcpp/executors/static_single_threaded_executor.hpp:
+
+/usr/include/c++/13/fstream:
 
 /opt/ros/jazzy/include/rcl/rcl/arguments.h:
 
@@ -2481,6 +2491,10 @@ CMakeFiles/astar_dwa_node.dir/src/astar_dwa_node.cpp.o: /mnt/c/Users/Rum\ Dánie
 
 /usr/include/c++/13/bits/exception_ptr.h:
 
+/opt/ros/jazzy/include/geometry_msgs/geometry_msgs/msg/detail/pose_with_covariance__struct.hpp:
+
+/usr/include/c++/13/bits/fstream.tcc:
+
 /usr/include/c++/13/bits/functexcept.h:
 
 /usr/include/c++/13/bits/functional_hash.h:
@@ -2508,5 +2522,3 @@ CMakeFiles/astar_dwa_node.dir/src/astar_dwa_node.cpp.o: /mnt/c/Users/Rum\ Dánie
 /opt/ros/jazzy/include/rmw/rmw/events_statuses/matched.h:
 
 /usr/include/c++/13/bits/memory_resource.h:
-
-/usr/include/c++/13/bits/memoryfwd.h:
