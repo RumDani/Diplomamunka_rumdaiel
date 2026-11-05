@@ -210,6 +210,19 @@ astar_dwa_node/fast:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/astar_dwa_node.dir/build.make CMakeFiles/astar_dwa_node.dir/build
 .PHONY : astar_dwa_node/fast
 
+#=============================================================================
+# Target rules for targets named test_path_tracking
+
+# Build rule for target.
+test_path_tracking: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 test_path_tracking
+.PHONY : test_path_tracking
+
+# fast build rule for target.
+test_path_tracking/fast:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_path_tracking.dir/build.make CMakeFiles/test_path_tracking.dir/build
+.PHONY : test_path_tracking/fast
+
 src/astar_dwa_node.o: src/astar_dwa_node.cpp.o
 .PHONY : src/astar_dwa_node.o
 
@@ -234,6 +247,30 @@ src/astar_dwa_node.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/astar_dwa_node.dir/build.make CMakeFiles/astar_dwa_node.dir/src/astar_dwa_node.cpp.s
 .PHONY : src/astar_dwa_node.cpp.s
 
+test/test_path_tracking.o: test/test_path_tracking.cpp.o
+.PHONY : test/test_path_tracking.o
+
+# target to build an object file
+test/test_path_tracking.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_path_tracking.dir/build.make CMakeFiles/test_path_tracking.dir/test/test_path_tracking.cpp.o
+.PHONY : test/test_path_tracking.cpp.o
+
+test/test_path_tracking.i: test/test_path_tracking.cpp.i
+.PHONY : test/test_path_tracking.i
+
+# target to preprocess a source file
+test/test_path_tracking.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_path_tracking.dir/build.make CMakeFiles/test_path_tracking.dir/test/test_path_tracking.cpp.i
+.PHONY : test/test_path_tracking.cpp.i
+
+test/test_path_tracking.s: test/test_path_tracking.cpp.s
+.PHONY : test/test_path_tracking.s
+
+# target to generate assembly for a file
+test/test_path_tracking.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_path_tracking.dir/build.make CMakeFiles/test_path_tracking.dir/test/test_path_tracking.cpp.s
+.PHONY : test/test_path_tracking.cpp.s
+
 # Help Target
 help:
 	@echo "The following are some of the valid targets for this Makefile:"
@@ -250,9 +287,13 @@ help:
 	@echo "... astar_dwa_controller_uninstall"
 	@echo "... uninstall"
 	@echo "... astar_dwa_node"
+	@echo "... test_path_tracking"
 	@echo "... src/astar_dwa_node.o"
 	@echo "... src/astar_dwa_node.i"
 	@echo "... src/astar_dwa_node.s"
+	@echo "... test/test_path_tracking.o"
+	@echo "... test/test_path_tracking.i"
+	@echo "... test/test_path_tracking.s"
 .PHONY : help
 
 
