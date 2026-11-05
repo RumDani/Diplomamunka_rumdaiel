@@ -177,7 +177,7 @@ A tesztelt célpozíció `(6,5; 4,2) m`.
 Az RViz-ben az A* útvonal zöld, a kiválasztott DWA-trajektória kék, a
 statikus akadályok pirosak, azok robotmérettel növelt biztonsági zónája
 halványsárga, a LiDAR által érzékelt pontok pedig sárgák. A vezérlő alapértelmezett
-maximális lineáris sebessége `0,26 m/s`; ez a `rosbot.yaml` paraméterben
+maximális lineáris sebessége `0,22 m/s`; ez a `rosbot.yaml` paraméterben
 állítható.
 
 ## Visszateres az utvonalra akadalykerules utan
@@ -189,6 +189,11 @@ A `path_distance_bias: 6.0` az oldalirányú eltérést, a
 Ezek pontszám/méter értelmű súlyok, nem méterben megadott toleranciák.
 Nem merev útvonalkényszerek: a robot továbbra is kitérhet akadály elől.
 Mindkét érték nullázásával összehasonlítható a korábbi pontozás.
+
+Az összevezetett konfiguráció megőrzi a távoli hangolást: `robot_radius=0.24 m`,
+`planning_margin=0.15 m`, `lookahead_distance=0.40 m`, `predict_time=2.0 s`,
+valamint `alpha=5`, `beta=3`, `gamma=2`. A repóban szereplő korábbi lefordított
+bináris nem igazolja az összevezetett forrás működését: újra kell fordítani.
 
 Újrafordítás és regressziós teszt a ROS2 workspace gyökeréből:
 

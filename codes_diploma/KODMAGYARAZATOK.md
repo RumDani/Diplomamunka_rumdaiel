@@ -1280,9 +1280,9 @@ egyenes és egy átlós lépés költsége `1 + 1 + 1.414 = 3.414` cellaköltsé
 Átlós sarokvágás csak akkor engedélyezett, ha a két oldalsó cella is szabad.
 
 A DWA kerék-szögsebességeket mintavételez a gyorsuláskorlátos dinamikus
-ablakban. A YAML szerint az előremeneti sebesség felső határa `0.26 m/s`,
+ablakban. A YAML szerint az előremeneti sebesség felső határa `0.22 m/s`,
 a szögsebességé `1.0 rad/s`. Az előrejelzés `0.1 s` lépéssel, a helyi
-célpont távolságától függő, `0.8...2.5 s` időtávon fut. Ütközés észlelésekor
+célpont távolságától függő, `0.8...2.0 s` időtávon fut. Ütközés észlelésekor
 a fékezhetőség és az ütközésig hátralévő idő feltétele dönti el az elfogadást;
 nem minden későbbi ütközés jelent automatikus kiesést.
 
@@ -2200,12 +2200,12 @@ továbbra is a statikus akadálymodellt használja, a Python-szimulátor logiká
 ### DWA biztonsági változás
 
 A DWA előremenő és helyben forduló jelölteket vizsgál, `0.1 s` lépéssel,
-a helyi cél távolságától függő `0.8...2.5 s` időtávon. A LiDAR-pontok sugara
-`0 m`; a robot sugara `0.22 m`, a statikus tartalék `0.03 m`, a mozgó
-akadályoké `0.08 m`. Például álló ponttól `0.36 m` távolságban a szabad tér
-`0.36 - (0.22 + 0.03 + 0) = 0.11 m`: először a test és a tartalék együttes
+a helyi cél távolságától függő `0.8...2.0 s` időtávon. A LiDAR-pontok sugara
+`0 m`; a YAML szerinti robotsugár `0.24 m`, a statikus tartalék `0.04 m`, a mozgó
+akadályoké `0.10 m`. Például álló ponttól `0.36 m` távolságban a szabad tér
+`0.36 - (0.24 + 0.04 + 0) = 0.08 m`: először a test és a tartalék együttes
 sugarát számoljuk ki, majd ezt levonjuk a középpontok távolságából. Ebben a
-példában nincs ütközés. Mozgó pontnál ugyanott `0.06 m` maradna.
+példában nincs ütközés. Mozgó pontnál ugyanott `0.02 m` maradna.
 
 Az ütközésjelzés a kezdeti szabad távolsághoz is viszonyít, így a már
 biztonsági margón belül lévő robot nem minden mozdulatát tiltja le. Az
@@ -2273,11 +2273,14 @@ halmozódik fel.
 
 ### A DWA működési egyezése
 
-Az `astar_dwa_node.cpp` DWA-része a Python `robotconfig` fő paramétereit
-használja: keréksugár `0,033 m`, keréktávolság `0,08 m`, maximális
-keréksebesség `15 rad/s`, keréksebesség-lépés `1 rad/s`, gyorsulási korlát
-`2 m/s²`, `dt=0,1 s`, előrejelzési idő `3 s`, biztonsági ráhagyás `0,15 m`,
-valamint `Alfa=5`, `Beta=2`, `Gamma=3`.
+Az `astar_dwa_node.cpp` DWA-része a Python-változattal közös kinematikai
+alapokat használ, de a paraméterezése nem mindenben azonos. A jelenlegi
+ROS2 YAML szerint a keréksugár `0,033 m`, a keréktávolság `0,08 m`, a
+maximális keréksebesség `15 rad/s`, a mintavételi lépés `0,5 rad/s`, a
+gyorsulási korlát `1,8 m/s²`, `dt=0,1 s`, a maximális előrejelzési idő `2 s`.
+A biztonsági ráhagyás mozgó akadálynál `0,10 m`, állónál `0,04 m`; a
+jutalomsúlyok `alpha=5`, `beta=3`, `gamma=2`. A két új távolságbüntetés
+részleteit a 14. fejezet tartalmazza.
 
 Egy bal és jobb keréksebességből a Python- és ROS-kód azonos módon számolja:
 
@@ -2442,12 +2445,12 @@ A külön `min_ttc` vizsgálat az ütközésig szükséges minimális időt elle
 
 Az adaptív időtáv `clamp(goal_dist * 2.0, 0.8, predict_time_)`: a helyi
 célpont méterben mért távolságát egy `2 s/m` tényező szorozza, majd a kód
-`0.8 s` és a konfigurált `2.5 s` közé szorítja. `0.3 m` céltávolságnál
+`0.8 s` és a YAML-ben konfigurált `2.0 s` közé szorítja. `0.3 m` céltávolságnál
 `0.6 s` adódna, ezért `0.8 s` lesz az időtáv. A sebességpont célsebességhez
 viszonyít, az új útvonalközelségi tag ettől különálló büntetés.
 
 Az A* akadályinflációjában a robot sugara, az akadály sugara és a
-`planning_margin` szerepel. A `control()` alapértéken `0.25 m` ívhosszú
+`planning_margin` szerepel. A `control()` a YAML alapján `0.40 m` ívhosszú
 előretekintést használ; a diszkrét pontok miatt a kiválasztott waypoint ennél
 távolabb is lehet. A `line_free()` a statikus akadályokon átvezető közvetlen
 célpontot visszalépteti. A jelenlegi `obstacles()` a statikus falpontokat is
@@ -2507,7 +2510,10 @@ szöghibát vonja le a pi értékéből, majd pi-vel oszt; egysége nincs. A
 `clear_score` a legkisebb megmaradt biztonsági távolságot `1 m`-hez viszonyítja
 és 0 és 1 közé szorítja. A `vel_score` a jelölt sebesség és a célsebesség
 abszolút különbségét osztja a maximális lineáris sebességgel, majd ezt kivonja
-egyből. Az `alpha=5`, `beta=2`, `gamma=3` dimenzió nélküli súlyok.
+egyből. A súlyok dimenzió nélküliek: a forrásbeli alapértékek `alpha=5`,
+`beta=2`, `gamma=3`; az összevezetett YAML ezeket `5`, `3`, `2` értékekre
+állítja. Az alábbi regressziós számpélda a forrásbeli alapértékeket használja,
+nem a távoli hangolás mérési eredményét mutatja.
 
 A `path_distance` a végpont és a helyi A* vonallánc legkisebb távolsága
 méterben. A `target_distance` a végpont és a helyi cél távolsága méterben.
@@ -2620,3 +2626,21 @@ kilépési kóddal áll le. A `CMakeLists.txt` `BUILD_TESTING` esetén önálló
 `test_path_tracking` futtatható programként fordítja, és `path_tracking`
 néven regisztrálja a CTest-ben; külön ROS2- vagy tesztkönyvtár nem kell a
 teszt forrásának közvetlen C++17 fordításához.
+
+### A távoli hangolás összevezetése
+
+Az összevezetés megőrzi a távoli statikus akadálypontokat és a következő
+YAML-értékeket: `robot_radius=0.24 m`, `safety_margin=0.10 m`,
+`static_safety_margin=0.04 m`, `planning_margin=0.15 m`,
+`lookahead_distance=0.40 m`, `max_linear_velocity=0.22 m/s`,
+`acceleration_limit=1.8 m/s²`, `predict_time=2.0 s`, `min_ttc=0.8 s`,
+valamint `alpha=5`, `beta=3`, `gamma=2`. Ezek mellé kerül a két új
+útvonalkövetési súly: `path_distance_bias=6.0`, `goal_distance_bias=2.0`.
+A `planning_margin` csak egyszer szerepel a konfigurációban.
+
+Az útvonaltávolság-számítás, a DWA-ból történő hívása és az eltérés naplózása
+megmarad. A hívási lánc nem változik. A távoli commitban lévő build-binárisokat
+az összevezetés megőrzi, de azok nem az új közös forrásból készültek: indítás
+előtt új `colcon build` szükséges. A felhasználó kérésére az összevezetés után
+sem futott teszt; a diff ellenőrzése nem helyettesíti a fordítást vagy a
+Gazebo-próbát.

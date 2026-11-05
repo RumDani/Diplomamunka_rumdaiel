@@ -252,7 +252,7 @@ digraph AStarCurrentCode {
         ros_odom [label="/odom Odometry\nx, y, yaw\n+ initial_pose (0.8, 0.8)", fillcolor="#ccfbf1", color="#0f766e"]
         ros_grid [label="astar_dwa_node\n8.2 x 5.2 m-es statikus Grid\nkör alakú akadályinfláció", fillcolor="#ccfbf1", color="#0f766e"]
         ros_astar [label="A* globális útvonal\nstatikus pályán, Grid cellákból\nworld pontok", fillcolor="#ccfbf1", color="#0f766e"]
-        ros_waypoint [label="control(): látható waypoint\n8 pontos monoton keresési ablak\n0.25 m ívhosszú előretekintés", fillcolor="#ccfbf1", color="#0f766e"]
+        ros_waypoint [label="control(): látható waypoint\n8 pontos monoton keresési ablak\nYAML: 0.40 m ívhosszú előretekintés", fillcolor="#ccfbf1", color="#0f766e"]
         ros_obstacles [label="obstacles(): LiDAR világpontok\nklaszterezés + vx/vy becslés\nciklusonként egy sensed_cache_", fillcolor="#ccfbf1", color="#0f766e"]
         ros_dwa [label="dwa(): keréksebesség-rollout\ngyorsuláskorlát + mozgó akadály\nfékezhetőség + min_ttc ellenőrzés", fillcolor="#ccfbf1", color="#0f766e"]
         ros_tracking [label="path_tracking::tracking_cost()\nrollout-végpont távolsága a közeli\nA* szakaszoktól és a helyi céltól", fillcolor="#ccfbf1", color="#0f766e"]
