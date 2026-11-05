@@ -64,6 +64,7 @@ CMAKE_BINARY_DIR = "/mnt/c/Users/Rum Dániel/Desktop/Diplomamunka/codes_diploma/
 
 # The main recursive "all" target.
 all: CMakeFiles/astar_dwa_node.dir/all
+all: CMakeFiles/test_path_tracking.dir/all
 .PHONY : all
 
 # The main recursive "preinstall" target.
@@ -74,6 +75,7 @@ preinstall:
 clean: CMakeFiles/uninstall.dir/clean
 clean: CMakeFiles/astar_dwa_controller_uninstall.dir/clean
 clean: CMakeFiles/astar_dwa_node.dir/clean
+clean: CMakeFiles/test_path_tracking.dir/clean
 .PHONY : clean
 
 #=============================================================================
@@ -153,6 +155,32 @@ astar_dwa_node: CMakeFiles/astar_dwa_node.dir/rule
 CMakeFiles/astar_dwa_node.dir/clean:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/astar_dwa_node.dir/build.make CMakeFiles/astar_dwa_node.dir/clean
 .PHONY : CMakeFiles/astar_dwa_node.dir/clean
+
+#=============================================================================
+# Target rules for target CMakeFiles/test_path_tracking.dir
+
+# All Build rule for target.
+CMakeFiles/test_path_tracking.dir/all:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_path_tracking.dir/build.make CMakeFiles/test_path_tracking.dir/depend
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_path_tracking.dir/build.make CMakeFiles/test_path_tracking.dir/build
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --progress-dir="/mnt/c/Users/Rum Dániel/Desktop/Diplomamunka/codes_diploma/ros2_astar_dwa_gazebo/build/astar_dwa_controller/CMakeFiles" --progress-num=3,4 "Built target test_path_tracking"
+.PHONY : CMakeFiles/test_path_tracking.dir/all
+
+# Build rule for subdir invocation for target.
+CMakeFiles/test_path_tracking.dir/rule: cmake_check_build_system
+	$(CMAKE_COMMAND) -E cmake_progress_start "/mnt/c/Users/Rum Dániel/Desktop/Diplomamunka/codes_diploma/ros2_astar_dwa_gazebo/build/astar_dwa_controller/CMakeFiles" 2
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 CMakeFiles/test_path_tracking.dir/all
+	$(CMAKE_COMMAND) -E cmake_progress_start "/mnt/c/Users/Rum Dániel/Desktop/Diplomamunka/codes_diploma/ros2_astar_dwa_gazebo/build/astar_dwa_controller/CMakeFiles" 0
+.PHONY : CMakeFiles/test_path_tracking.dir/rule
+
+# Convenience name for target.
+test_path_tracking: CMakeFiles/test_path_tracking.dir/rule
+.PHONY : test_path_tracking
+
+# clean rule for target.
+CMakeFiles/test_path_tracking.dir/clean:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/test_path_tracking.dir/build.make CMakeFiles/test_path_tracking.dir/clean
+.PHONY : CMakeFiles/test_path_tracking.dir/clean
 
 #=============================================================================
 # Special targets to cleanup operation of make.
