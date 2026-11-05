@@ -2833,9 +2833,9 @@ Mezői: `x,y,z,radius` méterben és `vx,vy` `m/s` egységben. Inaktív
 célkövetésnél az akadályok nem haladnak, a publikált sebesség nulla.
 Egyszerre csak egy akadálypozíció-frissítési sorozat van folyamatban.
 
-Az `odom()` a `/gazebo/odom` lokális helyéhez egyszer hozzáadja a régi
-SDF-ből kiolvasott `(0.8,0.8) m` spawnhelyet. A lokális `(0,0)` így
-`(0.8,0.8) m` lesz a világkoordinátás `/odom`-on. A dinamikus TF a modell
+Az `odom()` `odometry_is_world=true` esetén már nem ad spawneltolást:
+a `/gazebo/odom` tényleges Gazebo-világpozíciót közöl. A kerékből számított
+régi odometria külön, `/gazebo/wheel_odom`-on marad meg. A dinamikus TF a modell
 odometria-gyerekframe-jét használja. A `base_footprint → base_link` és
 `base_link → base_scan` statikus TF méreteit a launch a telepített
 TurtleBot modellből veszi át. Valódi roboton ezt a node-ot a bringup váltja.
@@ -3048,3 +3048,34 @@ A `/astar_path`, `/astar_map` és `/astar_dwa_markers` rétegek szintén aktíva
 A kézi `2D Goal Pose` céladás és az `autostart=false` alapérték megmarad.
 Az útvonalrajzolás, scan megjelenítés és folyamatos vezérlés Gazebo-beli
 futása itt nem lett tesztelve; a szintaxis- és diffellenőrzés nem pótolja ezt.
+
+## 24. Világpozíció és tényleges RViz-cél elkülönítése
+
+A kapott napló végén a cél `(6.8,3.8) m`, az odometriai pozíció
+`(6.735,3.723) m`: a különbség komponensei `0.065 m` és `0.077 m`,
+négyzetösszegük gyöke körülbelül `0.101 m`. Ez az odometriában a végpont
+közelségét jelzi, nem bizonyítja a Gazebo-beli tényleges célbaérést.
+A `default_goal=(6.5,4.2)` csak az induló mintacél volt, nem a fogadott
+RViz-üzenet bizonyítéka.
+
+A `python_world.write_world_with_pose_odometry(world_file, model_file)`
+a régi világ és a telepített TurtleBot geometriáját ideiglenes SDF-be
+másolja, és `OdometryPublisher` plugint ad hozzá. Az a Gazebo `worldPose`
+állapotából közöl `/world_pose_odom` adatot. A `DiffDrive` eredeti, kerékből
+integrált `/odom` topica megmarad. A bridge az előbbit `/gazebo/odom`-ra,
+az utóbbit `/gazebo/wheel_odom`-ra köti. Ez nem teleportálás: a meghajtás
+továbbra is fizikai `/cmd_vel`. Valódi robotnál nem indul ez a Gazebo-adapter.
+
+Az adapter legfeljebb `0.2 s` időbélyeg-eltérésű kerék- és világmintákat
+hasonlít össze; `0.15 m` fölött figyelmeztet. Ez a küszöb méterben mért
+helyzetkülönbség, nem cél- vagy biztonsági tolerancia. Az új forrásból
+nem szabad újra hozzáadni a spawnhelyet, különben kettős eltolás keletkezne.
+
+A vezérlő `RViz goal` sorban a fogadott és TF-fel alakított célt, `Planned
+goal` sorban a tényleges útvonalvégpontot naplózza. A kattintott cél az
+`/accepted_goal` topicon és külön narancs jelöléssel is megjelenik. Ugyanazon
+szabad cellán belül az út és waypointlista utolsó pontja a kért koordináta,
+nem csak a cellaközéppont. `Goal reached` külön jelzi a megállási feltételt.
+A módosított fájlok Pylance-szintaxisellenőrzése sikeres; a kapott napló
+még a korábbi kerékodometriás változaté. A fizikai célbaérés és a csúszás
+mértéke új Gazebo-próbával igazolható, itt futtatás nem történt.

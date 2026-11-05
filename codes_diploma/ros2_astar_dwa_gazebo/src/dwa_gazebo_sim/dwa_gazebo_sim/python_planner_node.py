@@ -62,6 +62,7 @@ class PythonPlannerNode(Node):
             raise ValueError("obstacle_source must be scan or tracked")
         self.planner = load_planner_class()(self.grid, config=self.config, diagonal=True)
         self.pending_goal = self.default_goal if self.declare_parameter("autostart", False).value else None
+        self.requested_goal = None
         self.active = False
         self.odom_stamp = self.obstacle_stamp = None
         self.obstacles = []
@@ -73,6 +74,7 @@ class PythonPlannerNode(Node):
         self.path_pub = self.create_publisher(Path, "/astar_path", 10)
         latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
         self.map_pub = self.create_publisher(OccupancyGrid, "/astar_map", latched)
+        self.goal_pub = self.create_publisher(PoseStamped, "/accepted_goal", latched)
         self.marker_pub = self.create_publisher(MarkerArray, "/astar_dwa_markers", 10)
         self.active_pub = self.create_publisher(Bool, "/controller_active", latched)
         self.done_pub = self.create_publisher(Header, "/control_done", 10)
@@ -96,7 +98,7 @@ class PythonPlannerNode(Node):
             self.gazebo_path = GazeboPathDisplay(self)
         self.get_logger().info(
             f"python-original-planner: grid={self.grid.width}x{self.grid.height}, "
-            f"resolution={self.grid.resolution}, start={self.start}, goal={self.default_goal}; "
+            f"resolution={self.grid.resolution}, start={self.start}, default_goal={self.default_goal}; "
             f"map_source={self.map_source}, obstacles={self.obstacle_source}, external_ticks={self.external_clock}"
         )
 
@@ -162,6 +164,7 @@ class PythonPlannerNode(Node):
         self.map_dirty = True
         self.map_frame, self.map_ready = message.header.frame_id, True
         self.active = False
+        self.requested_goal = None
         self.odom_stamp = self.obstacle_stamp = None
         self.planner.path.clear()
         self.planner.waypoints.clear()
@@ -175,6 +178,7 @@ class PythonPlannerNode(Node):
             self.get_logger().warning("Waiting for /map before accepting an RViz goal.")
             return
         target = (message.pose.position.x, message.pose.position.y)
+        received = target
         if not all(math.isfinite(value) for value in target):
             self.get_logger().error("Goal coordinates must be finite.")
             return
@@ -187,6 +191,9 @@ class PythonPlannerNode(Node):
         if not self.grid.is_free(*self.grid.world_to_grid(*target)):
             self.get_logger().error("Goal is outside the free map; check occupancy, inflation and TF.")
             return
+        self.get_logger().info(
+            f"RViz goal: received={received} frame={message.header.frame_id}; "
+            f"accepted={target} planning_frame={self.map_frame}")
         self.pending_goal = target
         self.plan_pending_goal()
 
@@ -202,6 +209,22 @@ class PythonPlannerNode(Node):
                 (self.state.x, self.state.y), target, heuristic=get_heuristic("euclidean"),
                 smooth=True, samples_per_curve=8
             ))
+            if self.active:
+                self.requested_goal = target
+                endpoint = self.planner.path[-1]
+                if self.grid.world_to_grid(*endpoint) == self.grid.world_to_grid(*target):
+                    self.planner.path[-1] = target
+                    self.planner.bezier_path[-1] = target
+                    self.planner.waypoints[-1] = target
+                goal_message = PoseStamped()
+                goal_message.header.frame_id = self.map_frame
+                goal_message.header.stamp = self.get_clock().now().to_msg()
+                goal_message.pose.position.x, goal_message.pose.position.y = target
+                goal_message.pose.orientation.w = 1.0
+                self.goal_pub.publish(goal_message)
+                self.get_logger().info(
+                    f"Planned goal: requested={target} endpoint={self.planner.path[-1]} "
+                    f"waypoints={len(self.planner.waypoints)} frame={self.map_frame}")
         except (ValueError, RuntimeError) as error:
             self.active = False
             self.get_logger().error(f"Global planner failed: {error}")
@@ -310,6 +333,10 @@ class PythonPlannerNode(Node):
             command = Twist()
             command.linear.x, command.angular.z = float(ghost.v), float(ghost.w)
             self.active = result is not None and not result["finished"]
+            if not self.active and result is not None and result["finished"]:
+                self.get_logger().info(
+                    f"Goal reached: requested={self.requested_goal}, "
+                    f"endpoint={self.planner.waypoints[-1]}, pose=({state.x:.3f},{state.y:.3f})")
             self.cmd_pub.publish(command if self.active else Twist())
             self.active_pub.publish(Bool(data=self.active))
             self.publish_scene()
@@ -368,6 +395,16 @@ class PythonPlannerNode(Node):
             target.scale.x = target.scale.y = target.scale.z = 0.12
             target.color.g, target.color.a = 1.0, 1.0
             markers.markers.append(target)
+        if self.requested_goal is not None:
+            goal = Marker()
+            goal.header, goal.ns, goal.id = path.header, "python_reference", 2
+            goal.type, goal.action = Marker.CYLINDER, Marker.ADD
+            goal.pose.position.x, goal.pose.position.y = self.requested_goal
+            goal.pose.position.z, goal.pose.orientation.w = 0.02, 1.0
+            goal.scale.x = goal.scale.y = 0.2
+            goal.scale.z = 0.025
+            goal.color.r, goal.color.g, goal.color.a = 1.0, 0.4, 1.0
+            markers.markers.append(goal)
         self.marker_pub.publish(markers)
 
 

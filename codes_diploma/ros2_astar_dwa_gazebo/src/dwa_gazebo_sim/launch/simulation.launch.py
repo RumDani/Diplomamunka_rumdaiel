@@ -11,6 +11,8 @@ from launch_ros.actions import Node
 
 
 def start_reference(context):
+    from dwa_gazebo_sim.python_world import write_world_with_pose_odometry
+
     package_share = get_package_share_directory("dwa_gazebo_sim")
     model_root = os.path.join(get_package_share_directory("turtlebot3_gazebo"), "models")
     world_path = os.path.join(package_share, "worlds", "dwa_world.sdf")
@@ -30,28 +32,32 @@ def start_reference(context):
         raise RuntimeError("The reference expects an unrotated TurtleBot LiDAR")
     base_pose = [float(value) for value in model.findtext(
         ".//joint[@name='base_joint']/pose", "0 0 0.01 0 0 0").split()]
+    runtime_world = write_world_with_pose_odometry(
+        world_path, os.path.join(model_root, "turtlebot3_waffle", "model.sdf"))
     return [
         SetEnvironmentVariable("GZ_SIM_RESOURCE_PATH", os.pathsep.join(
             [model_root, os.environ.get("GZ_SIM_RESOURCE_PATH", "")])),
-        ExecuteProcess(cmd=["gz", "sim", "-r", "-v", LaunchConfiguration("verbose"), world_path], output="screen"),
+        ExecuteProcess(cmd=["gz", "sim", "-r", "-v", LaunchConfiguration("verbose"), runtime_world], output="screen"),
         Node(
             package="ros_gz_bridge", executable="parameter_bridge", output="screen",
             arguments=[
                 "/cmd_vel@geometry_msgs/msg/Twist]gz.msgs.Twist",
                 "/odom@nav_msgs/msg/Odometry[gz.msgs.Odometry",
+                "/world_pose_odom@nav_msgs/msg/Odometry[gz.msgs.Odometry",
                 "/scan@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan",
                 "/clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock",
                 "/world/dwa_world/set_pose@ros_gz_interfaces/srv/SetEntityPose",
                 "/world/dwa_world/create@ros_gz_interfaces/srv/SpawnEntity",
                 "/world/dwa_world/remove@ros_gz_interfaces/srv/DeleteEntity",
             ],
-            remappings=[("/odom", "/gazebo/odom")],
+            remappings=[("/odom", "/gazebo/wheel_odom"), ("/world_pose_odom", "/gazebo/odom")],
             parameters=[{"use_sim_time": True}],
         ),
         Node(
             package="dwa_gazebo_sim", executable="python_planner_node", output="screen",
             parameters=[{"use_sim_time": True, "external_control_ticks": False,
                          "gazebo_runtime": True,
+                         "odometry_is_world": True,
                          "world_file": world_path, "r_kerek": wheel_radius, "b": wheel_base,
                          "rob_radius": robot_radius, "map_inflation_radius": robot_radius + 0.03,
                          "static_safety_margin": 0.03, "w_kerek_max": 0.26 / wheel_radius,

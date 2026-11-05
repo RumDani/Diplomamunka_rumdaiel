@@ -74,6 +74,7 @@ export ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST
 ros2 node list
 ros2 topic info /clock
 ros2 topic info /gazebo/odom
+ros2 topic info /gazebo/wheel_odom
 ros2 topic info /odom
 ros2 topic info /cmd_vel
 ros2 topic info /scan
@@ -83,11 +84,14 @@ ros2 param get /astar_dwa_node autostart
 ros2 param get /astar_dwa_node obstacle_source
 ros2 param get /astar_dwa_node external_control_ticks
 ros2 param get /astar_dwa_node gazebo_runtime
+ros2 param get /astar_dwa_node odometry_is_world
 ros2 service type /world/dwa_world/create
 ros2 service type /world/dwa_world/remove
 # Mindegyik felsorolt adat-topicnak csak egy aktiv publishere legyen.
 # A /goal_pose topicnal Subscription count: 1; autostart: false.
 # obstacle_source: tracked; external_control_ticks: false.
 # gazebo_runtime: true; create: SpawnEntity; remove: DeleteEntity.
+# odometry_is_world: true; indulo sor: odometry=Gazebo-world.
+# Celnaplo: RViz goal, Planned goal, Goal reached. A default_goal csak mintacel.
 # Utvonalrajz visszajelzese: Gazebo global path visible: ... points.
 ```

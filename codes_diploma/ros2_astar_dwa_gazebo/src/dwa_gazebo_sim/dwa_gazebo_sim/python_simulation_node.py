@@ -19,6 +19,8 @@ from .python_reference import create_gazebo_scene
 class GazeboSimulationAdapter:
     def __init__(self, node):
         self.node = node
+        self.odometry_is_world = node.declare_parameter("odometry_is_world", False).value
+        self.wheel_pose = None
         if not node.has_parameter("world_file"):
             node.declare_parameter("world_file", "")
         world_file = node.get_parameter("world_file").value
@@ -31,6 +33,7 @@ class GazeboSimulationAdapter:
         latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
         node.create_subscription(Bool, "/controller_active", self.set_active, latched)
         node.create_subscription(Odometry, "/gazebo/odom", self.odom, 10)
+        node.create_subscription(Odometry, "/gazebo/wheel_odom", self.wheel_odom, 10)
         self.tf = TransformBroadcaster(node)
         self.static_tf = StaticTransformBroadcaster(node)
         self.odom_child = node.declare_parameter("odom_child_frame", "base_footprint").value
@@ -46,17 +49,34 @@ class GazeboSimulationAdapter:
         self.static_tf.sendTransform([laser] if self.odom_child == "base_link" else [base, laser])
         self.pose_client = node.create_client(SetEntityPose, "/world/dwa_world/set_pose")
         node.create_timer(0.10, self.tick)
-        node.get_logger().info("python-turtlebot-continuous: embedded Gazebo adapter; no physics stepping")
+        node.get_logger().info(
+            f"python-turtlebot-continuous: odometry={'Gazebo-world' if self.odometry_is_world else 'wheel-local'}; "
+            "embedded adapter; physical cmd_vel control")
 
     def set_active(self, message):
         self.active = message.data
+
+    def wheel_odom(self, message):
+        self.wheel_pose = (message.pose.pose.position.x + self.start[0],
+                           message.pose.pose.position.y + self.start[1],
+                           message.header.stamp.sec + message.header.stamp.nanosec * 1e-9)
 
     def odom(self, message):
         mapped = copy.deepcopy(message)
         mapped.header.frame_id = "odom"
         mapped.child_frame_id = message.child_frame_id or self.odom_child
-        mapped.pose.pose.position.x += self.start[0]
-        mapped.pose.pose.position.y += self.start[1]
+        if not self.odometry_is_world:
+            mapped.pose.pose.position.x += self.start[0]
+            mapped.pose.pose.position.y += self.start[1]
+        stamp = message.header.stamp.sec + message.header.stamp.nanosec * 1e-9
+        if (self.odometry_is_world and self.wheel_pose is not None and
+            abs(stamp - self.wheel_pose[2]) <= 0.2):
+            error = ((mapped.pose.pose.position.x - self.wheel_pose[0]) ** 2 +
+                     (mapped.pose.pose.position.y - self.wheel_pose[1]) ** 2) ** 0.5
+            if error > 0.15:
+                self.node.get_logger().warning(
+                    f"Wheel/world odometry mismatch: {error:.3f} m; using Gazebo world pose.",
+                    throttle_duration_sec=2.0)
         self.odom_pub.publish(mapped)
         transform = TransformStamped()
         transform.header, transform.child_frame_id = mapped.header, mapped.child_frame_id
