@@ -1,15 +1,13 @@
 """Draw a non-colliding global path on the Gazebo floor without blocking control."""
 
-from concurrent.futures import ThreadPoolExecutor
 import math
-import os
-import subprocess
-import tempfile
+import time
 import xml.etree.ElementTree as ET
 
 import rclpy
 from nav_msgs.msg import Path
 from rclpy.node import Node
+from ros_gz_interfaces.srv import DeleteEntity, SpawnEntity
 
 
 def path_sdf(points):
@@ -34,13 +32,15 @@ def path_sdf(points):
     return ET.tostring(sdf, encoding="unicode")
 
 
-class GazeboPathNode(Node):
-    def __init__(self):
-        super().__init__("gazebo_global_path")
-        self.latest = self.drawn = self.pending = self.future = None
-        self.worker = ThreadPoolExecutor(max_workers=1)
-        self.create_subscription(Path, "/astar_path", self.path, 10)
-        self.create_timer(1.0, self.tick)
+class GazeboPathDisplay:
+    def __init__(self, node):
+        self.node = node
+        self.latest = self.drawn = self.pending = None
+        self.busy, self.generation, self.deadline = False, 0, 0.0
+        self.spawn = node.create_client(SpawnEntity, "/world/dwa_world/create")
+        self.delete = node.create_client(DeleteEntity, "/world/dwa_world/remove")
+        node.create_subscription(Path, "/astar_path", self.path, 10)
+        node.create_timer(0.5, self.tick)
 
     def path(self, message):
         if message.header.frame_id != "odom":
@@ -50,47 +50,63 @@ class GazeboPathNode(Node):
             self.latest = points
 
     def tick(self):
-        if self.future is not None:
-            if not self.future.done():
+        if self.busy:
+            if time.monotonic() > self.deadline:
+                self.generation += 1
+                self.busy = False
+                self.node.get_logger().warning("Gazebo path service timed out.", throttle_duration_sec=5.0)
+            return
+        if self.latest is None or self.latest == self.drawn:
+            return
+        if not self.spawn.service_is_ready() or not self.delete.service_is_ready():
+            self.node.get_logger().warning("Waiting for Gazebo create/remove bridge.", throttle_duration_sec=5.0)
+            return
+        self.pending = self.latest
+        self.busy, self.deadline = True, time.monotonic() + 10.0
+        self.generation += 1
+        generation = self.generation
+        request = DeleteEntity.Request()
+        request.entity.name, request.entity.type = "python_global_path", request.entity.MODEL
+        future = self.delete.call_async(request)
+
+        def deleted(result):
+            if generation != self.generation:
                 return
             try:
-                self.future.result()
-                self.drawn = self.pending
+                result.result()
+                if len(self.pending) < 2:
+                    self.drawn, self.busy = self.pending, False
+                    return
+                create = SpawnEntity.Request()
+                create.entity_factory.name = "python_global_path"
+                create.entity_factory.sdf = path_sdf(self.pending)
+                create.entity_factory.pose.orientation.w = 1.0
+                self.spawn.call_async(create).add_done_callback(created)
             except Exception as error:
-                self.get_logger().warning(f"Gazebo path drawing failed: {error}", throttle_duration_sec=5.0)
-            self.future = None
-        if self.latest is not None and self.latest != self.drawn:
-            self.pending = self.latest
-            self.future = self.worker.submit(self.draw, self.pending)
+                failed(error)
 
-    @staticmethod
-    def draw(points):
-        subprocess.run([
-            "gz", "service", "-s", "/world/dwa_world/remove", "--reqtype", "gz.msgs.Entity",
-            "--reptype", "gz.msgs.Boolean", "--timeout", "2000",
-            "--req", 'name: "python_global_path" type: MODEL',
-        ], capture_output=True, timeout=4, check=False)
-        if len(points) < 2:
-            return
-        filename = None
-        try:
-            with tempfile.NamedTemporaryFile(mode="w", suffix=".sdf", delete=False) as handle:
-                filename = handle.name
-                handle.write(path_sdf(points))
-            result = subprocess.run([
-                "gz", "service", "-s", "/world/dwa_world/create", "--reqtype", "gz.msgs.EntityFactory",
-                "--reptype", "gz.msgs.Boolean", "--timeout", "3000",
-                "--req", f'sdf_filename: "{filename}"',
-            ], capture_output=True, text=True, timeout=5, check=True)
-            if "data: true" not in result.stdout:
-                raise RuntimeError(result.stderr or result.stdout or "No Gazebo creation response")
-        finally:
-            if filename is not None:
-                os.unlink(filename)
+        def created(result):
+            if generation != self.generation:
+                return
+            try:
+                if not result.result().success:
+                    raise RuntimeError("Gazebo rejected the path model")
+                self.drawn, self.busy = self.pending, False
+                self.node.get_logger().info(f"Gazebo global path visible: {len(self.drawn)} points")
+            except Exception as error:
+                failed(error)
 
-    def destroy_node(self):
-        self.worker.shutdown(wait=False, cancel_futures=True)
-        return super().destroy_node()
+        def failed(error):
+            self.busy = False
+            self.node.get_logger().warning(f"Gazebo path drawing failed: {error}", throttle_duration_sec=5.0)
+
+        future.add_done_callback(deleted)
+
+
+class GazeboPathNode(Node):
+    def __init__(self):
+        super().__init__("gazebo_global_path")
+        self.display = GazeboPathDisplay(self)
 
 
 def main(args=None):

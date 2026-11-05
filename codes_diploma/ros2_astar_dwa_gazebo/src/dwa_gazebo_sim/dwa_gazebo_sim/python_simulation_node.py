@@ -16,24 +16,26 @@ from tf2_ros import StaticTransformBroadcaster, TransformBroadcaster
 from .python_reference import create_gazebo_scene
 
 
-class PythonSimulationNode(Node):
-    def __init__(self):
-        super().__init__("python_simulation")
-        world_file = self.declare_parameter("world_file", "").value
+class GazeboSimulationAdapter:
+    def __init__(self, node):
+        self.node = node
+        if not node.has_parameter("world_file"):
+            node.declare_parameter("world_file", "")
+        world_file = node.get_parameter("world_file").value
         _, self.start, _, _, _, self.obstacles = create_gazebo_scene(world_file)
         self.active = self.busy = False
         self.applied = copy.deepcopy(self.obstacles)
-        self.last_time = self.get_clock().now().nanoseconds * 1e-9
-        self.odom_pub = self.create_publisher(Odometry, "/odom", 10)
-        self.obstacle_pub = self.create_publisher(PointCloud2, "/tracked_obstacles", 10)
+        self.last_time = node.get_clock().now().nanoseconds * 1e-9
+        self.odom_pub = node.create_publisher(Odometry, "/odom", 10)
+        self.obstacle_pub = node.create_publisher(PointCloud2, "/tracked_obstacles", 10)
         latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
-        self.create_subscription(Bool, "/controller_active", self.set_active, latched)
-        self.create_subscription(Odometry, "/gazebo/odom", self.odom, 10)
-        self.tf = TransformBroadcaster(self)
-        self.static_tf = StaticTransformBroadcaster(self)
-        self.odom_child = self.declare_parameter("odom_child_frame", "base_footprint").value
-        base_z = float(self.declare_parameter("base_link_z", 0.01).value)
-        laser_pose = self.declare_parameter("laser_pose", [-0.064, 0.0, 0.121]).value
+        node.create_subscription(Bool, "/controller_active", self.set_active, latched)
+        node.create_subscription(Odometry, "/gazebo/odom", self.odom, 10)
+        self.tf = TransformBroadcaster(node)
+        self.static_tf = StaticTransformBroadcaster(node)
+        self.odom_child = node.declare_parameter("odom_child_frame", "base_footprint").value
+        base_z = float(node.declare_parameter("base_link_z", 0.01).value)
+        laser_pose = node.declare_parameter("laser_pose", [-0.064, 0.0, 0.121]).value
         base = TransformStamped()
         base.header.frame_id, base.child_frame_id = self.odom_child, "base_link"
         base.transform.translation.z, base.transform.rotation.w = base_z, 1.0
@@ -42,9 +44,9 @@ class PythonSimulationNode(Node):
         laser.transform.translation.x, laser.transform.translation.y, laser.transform.translation.z = laser_pose
         laser.transform.rotation.w = 1.0
         self.static_tf.sendTransform([laser] if self.odom_child == "base_link" else [base, laser])
-        self.pose_client = self.create_client(SetEntityPose, "/world/dwa_world/set_pose")
-        self.create_timer(0.10, self.tick)
-        self.get_logger().info("python-turtlebot-continuous: Gazebo runs without pause/step commands")
+        self.pose_client = node.create_client(SetEntityPose, "/world/dwa_world/set_pose")
+        node.create_timer(0.10, self.tick)
+        node.get_logger().info("python-turtlebot-continuous: embedded Gazebo adapter; no physics stepping")
 
     def set_active(self, message):
         self.active = message.data
@@ -65,7 +67,7 @@ class PythonSimulationNode(Node):
         self.tf.sendTransform(transform)
 
     def tick(self):
-        now = self.get_clock().now().nanoseconds * 1e-9
+        now = self.node.get_clock().now().nanoseconds * 1e-9
         dt, self.last_time = max(0.0, now - self.last_time), now
         if self.active:
             for obstacle in self.obstacles:
@@ -73,7 +75,7 @@ class PythonSimulationNode(Node):
         if not self.busy and self.pose_client.service_is_ready():
             self.busy = True
             self.move_obstacle(0, copy.deepcopy(self.obstacles))
-        header = Header(stamp=self.get_clock().now().to_msg(), frame_id="odom")
+        header = Header(stamp=self.node.get_clock().now().to_msg(), frame_id="odom")
         fields = [PointField(name=name, offset=4 * index, datatype=PointField.FLOAT32, count=1)
                   for index, name in enumerate(("x", "y", "z", "radius", "vx", "vy"))]
         self.obstacle_pub.publish(point_cloud2.create_cloud(header, fields, [
@@ -99,12 +101,18 @@ class PythonSimulationNode(Node):
                     raise RuntimeError("Gazebo rejected an obstacle pose")
             except Exception as error:
                 self.busy = False
-                self.get_logger().error(f"Obstacle service failed: {error}", throttle_duration_sec=2.0)
+                self.node.get_logger().error(f"Obstacle service failed: {error}", throttle_duration_sec=2.0)
                 return
             self.applied[index] = obstacle
             self.move_obstacle(index + 1, snapshot)
 
         future.add_done_callback(complete)
+
+
+class PythonSimulationNode(Node):
+    def __init__(self):
+        super().__init__("python_simulation")
+        self.adapter = GazeboSimulationAdapter(self)
 
 
 def main(args=None):

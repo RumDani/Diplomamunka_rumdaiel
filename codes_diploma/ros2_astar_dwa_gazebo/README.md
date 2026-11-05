@@ -41,6 +41,7 @@ chmod 700 "$XDG_RUNTIME_DIR"
 ros2 launch dwa_gazebo_sim simulation.launch.py software_rendering:=true autostart:=false
 # A regi dwa_world.sdf es TurtleBot Waffle folyamatosan fut.
 # Indulo jelzesek: python-original-planner es python-turtlebot-continuous.
+# Egy sajat vezerlo node indul; a Gazebo-adapter es az utrajzolo azon belul fut.
 # Celadas utan a zold globalis ut a Gazebo talajan is megjelenik.
 ```
 
@@ -81,7 +82,12 @@ ros2 topic info /goal_pose
 ros2 param get /astar_dwa_node autostart
 ros2 param get /astar_dwa_node obstacle_source
 ros2 param get /astar_dwa_node external_control_ticks
+ros2 param get /astar_dwa_node gazebo_runtime
+ros2 service type /world/dwa_world/create
+ros2 service type /world/dwa_world/remove
 # Mindegyik felsorolt adat-topicnak csak egy aktiv publishere legyen.
 # A /goal_pose topicnal Subscription count: 1; autostart: false.
 # obstacle_source: tracked; external_control_ticks: false.
+# gazebo_runtime: true; create: SpawnEntity; remove: DeleteEntity.
+# Utvonalrajz visszajelzese: Gazebo global path visible: ... points.
 ```

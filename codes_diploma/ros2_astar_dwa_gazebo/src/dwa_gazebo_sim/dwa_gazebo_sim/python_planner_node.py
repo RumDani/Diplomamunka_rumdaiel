@@ -2,6 +2,7 @@
 
 import copy
 import math
+import time
 
 import rclpy
 from geometry_msgs.msg import PoseStamped, Twist
@@ -88,6 +89,11 @@ class PythonPlannerNode(Node):
         self.display_clock = Clock(clock_type=ClockType.STEADY_TIME)
         self.create_timer(0.5, self.publish_scene, clock=self.display_clock,
                   callback_group=self.control_group)
+        if self.declare_parameter("gazebo_runtime", False).value:
+            from .gazebo_path_node import GazeboPathDisplay
+            from .python_simulation_node import GazeboSimulationAdapter
+            self.gazebo_adapter = GazeboSimulationAdapter(self)
+            self.gazebo_path = GazeboPathDisplay(self)
         self.get_logger().info(
             f"python-original-planner: grid={self.grid.width}x{self.grid.height}, "
             f"resolution={self.grid.resolution}, start={self.start}, goal={self.default_goal}; "
@@ -268,6 +274,7 @@ class PythonPlannerNode(Node):
             self.plan_local()
 
     def plan_local(self):
+        compute_start = time.perf_counter()
         now = self.get_clock().now().nanoseconds * 1e-9
         if not self.active or self.odom_stamp is None or self.obstacle_stamp is None:
             self.cmd_pub.publish(Twist())
@@ -276,6 +283,7 @@ class PythonPlannerNode(Node):
             self.cmd_pub.publish(Twist())
             self.get_logger().warning("Stale odometry/obstacles: stopping.", throttle_duration_sec=2.0)
             return
+        previous_waypoint = self.planner.waypoint_index
         try:
             state = copy.copy(self.state)
             sample_stamp = min(state.odom_stamp, self.obstacle_stamp)
@@ -292,9 +300,11 @@ class PythonPlannerNode(Node):
             left, right = (0.0, 0.0) if pair is None else pair[2:4]
             update(ghost, self.config, left, right, self.config.dt)
             age = self.get_clock().now().nanoseconds * 1e-9 - sample_stamp
+            compute_ms = 1000.0 * (time.perf_counter() - compute_start)
             if not self.external_clock and age > max(0.5, 3 * self.config.dt):
+                self.planner.waypoint_index = previous_waypoint
                 self.cmd_pub.publish(Twist())
-                self.get_logger().warning("Planner exceeded sensor freshness deadline; stopping.",
+                self.get_logger().warning(f"Planner deadline: compute={compute_ms:.0f} ms, sample_age={age:.3f} s; stopping.",
                                           throttle_duration_sec=2.0)
                 return
             command = Twist()
@@ -307,9 +317,11 @@ class PythonPlannerNode(Node):
                 f"Python waypoint={self.planner.waypoint_index}/{len(self.planner.waypoints)} "
                 f"target={result['target'] if result is not None else None} "
                 f"pose=({state.x:.3f},{state.y:.3f}) "
-                f"cmd=({ghost.v:.3f},{ghost.w:.3f})", throttle_duration_sec=2.0,
+                f"cmd=({ghost.v:.3f},{ghost.w:.3f}) compute_ms={compute_ms:.0f} sample_age={age:.3f}",
+                throttle_duration_sec=2.0,
             )
         except Exception as error:
+            self.planner.waypoint_index = previous_waypoint
             self.active = False
             self.cmd_pub.publish(Twist())
             self.active_pub.publish(Bool(data=False))

@@ -2810,6 +2810,11 @@ elérhetővé teszi. A robotjelölés a konfigurált `base_frame` TF-jéhez köt
 
 ## 19. PythonSimulationNode: folyamatos TurtleBot-világ illesztése
 
+Az alapértelmezett launch már nem külön node-ként indítja: a
+`GazeboSimulationAdapter(node)` a `PythonPlannerNode` beágyazott komponense.
+A `PythonSimulationNode` csak opcionális, önálló wrapper maradt. A normál
+szimuláció így egy saját vezérlő node-ból és a ros_gz_bridge-ből áll.
+
 **Fájl:** `dwa_gazebo_sim/python_simulation_node.py`.
 **Futtatható név:** `python_simulation_node`. **ROS node-név:** `python_simulation`.
 
@@ -2907,7 +2912,8 @@ nem a két fizikai mozgás bitre azonosnak állítása.
 ## 22. Indítás, mentett térkép és ellenőrzési korlátok
 
 A `simulation.launch.py` a régi TurtleBot-világot folyamatosan, a `ros_gz_bridge`
-illesztőt, a Python-tervezőt, a szimulációs adaptert és az útvonalrajzolót indítja. A régi C++
+illesztőt és egy Python-vezérlő node-ot indít; az adapter és a rajzoló annak
+komponensei. A régi C++
 node és a régi `moving_obstacle_node` nem indul. A bridge a Gazebo
 odometriáját `/gazebo/odom`-ra köti; a világkoordinátás `/odom`-ot a
 szimulációs node adja. A normál referenciafutásban a LiDAR-követő sem indul,
@@ -3007,19 +3013,33 @@ időbélyegével dolgozik. A számítás végén a felhasznált minta kora szám
 nem egy időközben érkezett új mérésé. Lejárt minta továbbra is megállást
 eredményez; a folyamatos fizika nem jelenti e biztonsági feltétel kikapcsolását.
 
-**GazeboPathNode:** `gazebo_path_node.py`, futtatható név `gazebo_path_node`,
-ROS node-név `gazebo_global_path`. A `/astar_path` változását figyeli, és
+**GazeboPathDisplay:** `gazebo_path_node.py`, a vezérlő beágyazott komponense.
+A `GazeboPathNode` csak opcionális, önálló wrapper; a launch nem indítja.
+A `/astar_path` változását figyeli, és
 `path_sdf(points)` segítségével vékony zöld szakaszokat készít a talajra.
 Például `(1,1)` és `(2,1) m` között a hossz `1 m`, a középpont `(1.5,1) m`,
 a szög nulla. A hossz a koordinátakülönbségek négyzetösszegének gyöke;
 a középpont koordinátánként a két végpont átlaga. Az SDF csak `visual`
 elemeket tartalmaz, ütközési alakzatot nem; a vonal középmagassága `0.015 m`.
 
-A `tick()` egy munkaszálra adja a rajzolást. A `draw()` a Gazebo `remove`
-és `create` szolgáltatásait a `gz service` CLI-vel hívja, határidővel.
-Nem a vezérlő callbackjében vár rájuk. Azonos útvonal nem épül újra minden
-üzenetnél; üres útvonal törli a korábbi rajzot. Hiba naplózást és ismételt
-próbát eredményez. Csak `odom` keretű, véges koordinátájú utat rajzol.
+A `tick()` közvetlen aszinkron `DeleteEntity` és `SpawnEntity` ROS-hívást
+indít. Az SDF a `SpawnEntity.Request.entity_factory.sdf` mezőben érkezik,
+nem ideiglenes fájl vagy külön `gz service` folyamat közvetíti. A bridge
+mindkét szolgáltatást beköti. Azonos útvonal nem épül újra minden üzenetnél;
+üres útvonal törli a rajzot. Tíz másodperces határidő vagy hiba naplózást
+és újrapróbálást eredményez; generációazonosító szűri a késői válaszokat.
+Csak `odom` keretű, véges koordinátájú utat rajzol. A sikerüzenet
+`Gazebo global path visible: ... points`; a célbaérést ez nem bizonyítja.
+
+A helyi döntés előtt a vezérlő elmenti a `waypoint_index` értékét. Ha
+számolás után a mintát lejártnak ítéli és eldobja a parancsot, visszaállítja
+az indexet; ezt tervezési kivételnél is megteszi. Így egy ki nem adott
+parancs önmagában nem lépteti előre a waypointkövetést. A `compute_ms`
+a számítás másodpercben mért falióra-idejének ezerszerese: `0.12 s` esetén
+`120 ms`. A `sample_age` a szimulációs aktuális idő és a felhasznált minta
+időbélyegének különbsége másodpercben. Ezek mérési mezők, nem már lefutott
+Gazebo-próba eredményei. A fizikai robot mozgása továbbra sem lesz
+bitre azonos a változatlan Python kinematikai szimulációjával.
 
 Az RViz-ben a `/scan` LaserScan réteg aktív és Best Effort QoS-t használ.
 Korábban a saját modellből a szenzor, az indítóból a scan-bridge hiányzott. Most

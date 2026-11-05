@@ -42,6 +42,8 @@ def start_reference(context):
                 "/scan@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan",
                 "/clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock",
                 "/world/dwa_world/set_pose@ros_gz_interfaces/srv/SetEntityPose",
+                "/world/dwa_world/create@ros_gz_interfaces/srv/SpawnEntity",
+                "/world/dwa_world/remove@ros_gz_interfaces/srv/DeleteEntity",
             ],
             remappings=[("/odom", "/gazebo/odom")],
             parameters=[{"use_sim_time": True}],
@@ -49,19 +51,16 @@ def start_reference(context):
         Node(
             package="dwa_gazebo_sim", executable="python_planner_node", output="screen",
             parameters=[{"use_sim_time": True, "external_control_ticks": False,
+                         "gazebo_runtime": True,
                          "world_file": world_path, "r_kerek": wheel_radius, "b": wheel_base,
                          "rob_radius": robot_radius, "map_inflation_radius": robot_radius + 0.03,
                          "static_safety_margin": 0.03, "w_kerek_max": 0.26 / wheel_radius,
                          "a_max": float(drive.findtext("max_linear_acceleration", "1.0")),
+                         "laser_pose": laser_pose[:3], "base_link_z": base_pose[2],
+                         "odom_child_frame": drive.findtext("child_frame_id", "base_footprint"),
                          "obstacle_source": "tracked",
                          "autostart": LaunchConfiguration("autostart").perform(context).lower() == "true"}],
         ),
-        Node(package="dwa_gazebo_sim", executable="python_simulation_node", output="screen",
-               parameters=[{"use_sim_time": True, "world_file": world_path,
-                          "laser_pose": laser_pose[:3], "base_link_z": base_pose[2],
-                          "odom_child_frame": drive.findtext("child_frame_id", "base_footprint")}]),
-           Node(package="dwa_gazebo_sim", executable="gazebo_path_node", output="screen",
-               parameters=[{"use_sim_time": True}]),
     ]
 
 
