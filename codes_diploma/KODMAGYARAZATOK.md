@@ -2651,6 +2651,34 @@ Gazebo-próbát.
 
 ## 16. Visszatérési elsőbbség az egyszerű súlyozás helyett
 
+Aktuális kiegészítés: az `avoiding_obstacle_` állapot közeli mozgó vagy nem
+ismert statikus pontnál felfüggeszti a visszatérést. A `control()` a kis
+sebességű, ismert falhoz `wall.radius + 0.08 m`-nél közelebbi pontokat ebből
+kizárja. A fenyegetési távolság a robot és akadály sugara, biztonsági margó,
+valamint az összesített sebesség és `predict_time_` szorzatának összege:
+például `0.24+0+0.10+(0.22+0.20)*2=1.18 m`. A sebességek `m/s`, a horizont
+`s`, a sugarak és az eredmény `m` egységűek. Ez konzervatív közelségvizsgálat,
+nem pontos ütközési idő. Az utolsó fenyegetés után `0.6 s` késleltetés marad.
+Kerüléskor nincs rögzített cél vagy oldaleltérés-büntetés, a teljes horizont
+és a normál DWA választás működik. Utána `2*0.10=0.20 m` eltérés fölött
+rögzülhet a cél; `0.10 m` útvonaltávolság vagy célponttávolság feloldja.
+
+A `path_tracking.hpp` `rejoin_command(distance, heading_error, max_linear,
+max_angular)` sebességpárt ad: szögsebessége a radiánban mért hiba kétszerese,
+a határhoz szorítva; előremenete `min(max_linear, 1.5*distance)*cos(error)`,
+nemnegatív koszinusszal, `1.2 rad` abszolút hiba fölött nulla. Az `1.5`
+tényező `1/s` értelmű: `0.05 m` és nulla hiba esetén `0.075 m/s` adódik.
+A `command_error(linear, angular, reference, max_linear, max_angular)` a két
+sebesség referenciaeltérését saját maximummal osztja, majd négyzeteiket
+összeadja: dimenzió nélküli, a kisebb jobb. Szabad rögzített célfolyosón ezt
+minimalizálja a DWA az ütközésszűrésen átjutott jelöltek között; a referencia
+és a fékezés pontos kerékmintái is szerepelnek. Blokkolt cél esetén a normál
+pontozás marad. A hívások továbbra is `control()` -> `dwa()` -> rollout/szűrés
+-> referenciahiba vagy normál pontozás -> `/cmd_vel`. A napló `kerules`
+mezője jelzi az új fázist, az induló jelzés `avoidance-first-rejoin`.
+A tesztforrás módosult, futtatás nem történt a felhasználó kérésére;
+diffellenőrzés és szerkesztődiagnosztika nem igazolja a Gazebo-célbaérést.
+
 Az `astar_dwa_node.cpp` DWA-ja már nem csak a végpont távolságát bünteti.
 A `returning_to_path_` mód a `path_return_tolerance=0.10 m` kétszerese fölött
 bekapcsol, a tolerancián belül kikapcsol; közben megtartja az állapotát.

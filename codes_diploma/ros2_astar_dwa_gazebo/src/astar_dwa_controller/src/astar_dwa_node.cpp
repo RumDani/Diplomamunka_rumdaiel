@@ -104,7 +104,7 @@ public:
         RCLCPP_INFO(get_logger(), "Uj cel: x=%.2f m, y=%.2f m", goal_x_, goal_y_); });
     timer_ = rclcpp::create_timer(
       this, get_clock(), rclcpp::Duration::from_seconds(period), [this]() { control(); });
-    RCLCPP_INFO(get_logger(), "A* + DWA: fixed-waypoint-rejoin (rogzitett visszateresi celpont)");
+    RCLCPP_INFO(get_logger(), "A* + DWA: avoidance-first-rejoin (kerules eloszor, utana visszateres)");
   }
 
   ~AStarDwaNode() override {
@@ -468,10 +468,11 @@ private:
     const std::size_t last = std::min(target_index + 1, current_path_.size() - 1);
     const double initial_path_error = path_tracking::distance_to_path(
       current_path_, first, last, pose_.x, pose_.y);
-    if (rejoin_active_) returning_to_path_ = true;
+    if (avoiding_obstacle_) returning_to_path_ = false;
+    else if (rejoin_active_) returning_to_path_ = true;
     else if (initial_path_error <= path_return_tolerance_) returning_to_path_ = false;
     else if (initial_path_error > 2.0 * path_return_tolerance_) returning_to_path_ = true;
-    const double horizon = returning_to_path_ ? predict_time_ :
+    const double horizon = returning_to_path_ || avoiding_obstacle_ ? predict_time_ :
       std::clamp(goal_dist * 2.0, 0.8, predict_time_);
     const double max_travel = max_linear_velocity_ * horizon;
     const double return_heading = std::atan2(target_y - pose_.y, target_x - pose_.x);
@@ -608,7 +609,7 @@ private:
           continue;
         }
 
-        const double goal_heading = returning_to_path_ ? return_heading :
+        const double goal_heading = returning_to_path_ || avoiding_obstacle_ ? return_heading :
           std::atan2(target_y - y, target_x - x);
         const double heading_score = (M_PI - std::abs(angle_error(goal_heading - yaw))) / M_PI;
         const double clear_score = std::clamp(min_clear / 1.0, 0.0, 1.0);
@@ -616,7 +617,7 @@ private:
         const double vel_score = 1.0 - std::abs(v_target - cand.first) / max_linear_velocity_;
         const double tracking_cost = path_tracking::tracking_cost(
           current_path_, first, last, x, y, target_x, target_y,
-          path_distance_bias_, goal_distance_bias_);
+          avoiding_obstacle_ ? 0.0 : path_distance_bias_, goal_distance_bias_);
         const double final_path_error = path_tracking::distance_to_path(current_path_, first, last, x, y);
         const double progress = path_tracking::return_progress(
           initial_path_error, final_path_error, max_travel);
@@ -643,11 +644,12 @@ private:
       get_logger(), *get_clock(), 2000,
       "DWA: teszt=%zu sebesseg=%zu fekezes=%zu ttc=%zu utkozes=%zu elfogadott=%s "
       "visszateres=%s visszatero_jelolt=%zu valasztott_visszatero=%s elteres=%.3f->%.3f m "
-      "rogzitett_cel=%s cel_index=%zu iranykovetes=%s referencia=(%.3f,%.3f)",
+      "rogzitett_cel=%s cel_index=%zu iranykovetes=%s referencia=(%.3f,%.3f) kerules=%s",
       n_test, n_vel, n_brake, n_ttc, n_collision, found ? "igen" : "nem",
       returning_to_path_ ? "igen" : "nem", n_returning, best_returning ? "igen" : "nem",
       initial_path_error, best_path_error, rejoin_active_ ? "igen" : "nem", target_index,
-      rejoin_control ? "igen" : "nem", reference.first, reference.second);
+      rejoin_control ? "igen" : "nem", reference.first, reference.second,
+      avoiding_obstacle_ ? "igen" : "nem");
 
     if (found) {
       blocked_cycles_ = 0;
@@ -864,8 +866,36 @@ private:
     }
 
     const auto statics = planning_obstacles();
-    if (rejoin_active_ && distance(pose_.x, pose_.y,
-        path[rejoin_index_].first, path[rejoin_index_].second) <= path_return_tolerance_) {
+    bool obstacle_threat = false;
+    for (const auto & obstacle : sensed_obstacles) {
+      const double speed = std::hypot(obstacle.vx, obstacle.vy);
+      bool known_static = false;
+      if (speed < 0.06) {
+        for (const auto & wall : statics) {
+          if (distance(obstacle.x, obstacle.y, wall.x, wall.y) < wall.radius + 0.08) {
+            known_static = true;
+            break;
+          }
+        }
+      }
+      if (known_static) continue;
+      const double reach = robot_radius_ + safety_margin_ + obstacle.radius +
+        (max_linear_velocity_ + speed) * predict_time_;
+      if (distance(pose_.x, pose_.y, obstacle.x, obstacle.y) < reach) {
+        obstacle_threat = true;
+        break;
+      }
+    }
+    if (obstacle_threat) last_obstacle_threat_time_ = now().seconds();
+    avoiding_obstacle_ = now().seconds() - last_obstacle_threat_time_ < 0.6;
+    if (avoiding_obstacle_) {
+      rejoin_active_ = false;
+      returning_to_path_ = false;
+    }
+    if (rejoin_active_ && (distance(pose_.x, pose_.y,
+        path[rejoin_index_].first, path[rejoin_index_].second) <= path_return_tolerance_ ||
+        path_tracking::distance_to_path(path, waypoint_index_ > 0 ? waypoint_index_ - 1 : 0,
+          std::min(rejoin_index_ + 1, path.size() - 1), pose_.x, pose_.y) <= path_return_tolerance_)) {
       rejoin_active_ = false;
       returning_to_path_ = false;
     }
@@ -885,7 +915,7 @@ private:
           const double lateral_error = path_tracking::distance_to_path(
             path, closest > 0 ? closest - 1 : 0, std::min(closest + 1, path.size() - 1),
             pose_.x, pose_.y);
-          if (lateral_error > path_return_tolerance_) {
+          if (!avoiding_obstacle_ && lateral_error > 2.0 * path_return_tolerance_) {
             rejoin_active_ = true;
             rejoin_index_ = closest;
           }
@@ -961,6 +991,8 @@ private:
   bool returning_to_path_{false};
   bool rejoin_active_{false};
   std::size_t rejoin_index_{0};
+  bool avoiding_obstacle_{false};
+  double last_obstacle_threat_time_{-100.0};
   double wheel_left_{0.0}, wheel_right_{0.0};
   double last_linear_velocity_{0.0}, last_angular_velocity_{0.0};
   std::vector<Track> tracks_;

@@ -256,7 +256,7 @@ digraph AStarCurrentCode {
         ros_obstacles [label="obstacles(): LiDAR világpontok\nklaszterezés + vx/vy becslés\nciklusonként egy sensed_cache_", fillcolor="#ccfbf1", color="#0f766e"]
         ros_dwa [label="dwa(): visszatérés be: >0.20 m; ki: <=0.10 m\naktív: teljes predict_time, rögzített célirány\nLiDAR + statikus falak; jelzett ütközés kizárva", fillcolor="#ccfbf1", color="#0f766e"]
         ros_tracking [label="path_tracking::tracking_cost()\nrollout-végpont távolsága a közeli\nA* szakaszoktól és a helyi céltól", fillcolor="#ccfbf1", color="#0f766e"]
-        ros_select [label="return_progress() + is_returning()\nprefer_candidate(): aktív módban visszatérő az első\nosztályon belül: pontszám + közelítési jutalom\nnincs jelölt: akadálytól elfordulás", fillcolor="#ccfbf1", color="#0f766e"]
+        ros_select [label="kerules=igen: DWA, visszatérés nélkül\nveszélymentes 0.6 s után: visszatérés lehetséges\nszabad rögzített cél: rejoin_command() + command_error()\negyébként prefer_candidate(); nincs jelölt: forgás", fillcolor="#ccfbf1", color="#0f766e"]
         ros_cmd [label="/cmd_vel Twist\nROSbot vagy Gazebo meghajtás", shape=parallelogram, fillcolor="#99f6e4", color="#0f766e"]
         ros_markers [label="/astar_dwa_markers MarkerArray\nA* útvonal, cél, biztonsági zónák,\nLiDAR-pontok, DWA trajektória", shape=parallelogram, fillcolor="#99f6e4", color="#0f766e"]
         ros_map [label="/astar_map OccupancyGrid\nismert térkép + inflált akadálycellák", shape=parallelogram, fillcolor="#99f6e4", color="#0f766e"]

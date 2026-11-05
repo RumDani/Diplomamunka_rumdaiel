@@ -56,8 +56,8 @@ inline bool prefer_candidate(bool returning, double score, bool best_returning, 
 inline std::pair<double, double> rejoin_command(double target_distance, double heading_error,
                                                double max_linear, double max_angular) {
   const double angular = std::clamp(2.0 * heading_error, -max_angular, max_angular);
-  const double linear = std::abs(heading_error) >= 0.6 ? 0.0 :
-    std::min(max_linear, 0.8 * target_distance) * std::max(0.0, std::cos(heading_error));
+  const double linear = std::abs(heading_error) >= 1.2 ? 0.0 :
+    std::min(max_linear, 1.5 * target_distance) * std::max(0.0, std::cos(heading_error));
   return {linear, angular};
 }
 
