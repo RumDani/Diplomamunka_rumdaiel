@@ -15,7 +15,7 @@ Visualization Manager:
       Reference Frame: <Fixed Frame>
     - Class: rviz_default_plugins/Map
       Name: Known occupancy map
-      Enabled: false
+      Enabled: true
       Topic:
         Depth: 1
         Durability Policy: Transient Local
@@ -57,7 +57,7 @@ Visualization Manager:
         Value: /astar_path
       Color: 0; 255; 40
       Line Style: Billboards
-      Line Width: 0.3
+      Line Width: 0.05
     - Class: rviz_default_plugins/Odometry
       Name: Odometry
       Enabled: false
@@ -74,7 +74,7 @@ Visualization Manager:
       Shaft Radius: 0.04
     - Class: rviz_default_plugins/MarkerArray
       Name: A* and DWA internals
-      Enabled: false
+      Enabled: true
       Marker Topic: /astar_dwa_markers
   Enabled: true
   Global Options:

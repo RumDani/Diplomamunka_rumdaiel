@@ -297,22 +297,24 @@ digraph AStarCurrentCode {
         label="Aktuális Python ROS2-integráció - eredeti tervezőforrások változatlanul"
         style="rounded"
         color="#0f766e"
-        py_scene [label="python_reference.create_scene()\n30 x 20 cella; 0.2 m; 6 x 4 m\nstart (0.5,0.5), cél RViz-ből"]
-        py_world [label="python_world.write_world()\nPython-méretű robot és körakadályok\nGazebo szünetel a döntések között"]
-        py_sim [label="PythonSimulationNode\nakadálymozgatás + ControlWorld\n/gazebo/odom -> /odom + TF"]
+        py_scene [label="create_gazebo_scene(): régi SDF falai\n41 x 26 cella; 0.2 m; 8.2 x 5.2 m\nstart (0.8,0.8), cél RViz-ből"]
+        py_world [label="Régi dwa_world.sdf + TurtleBot Waffle\nfolyamatos gz sim -r\n/scan bridge + szenzor-TF"]
+        py_sim [label="PythonSimulationNode\nszimulációsidő-alapú akadálymozgatás\n/gazebo/odom -> /odom + TF; nincs pause/step"]
         py_plan [label="PythonPlannerNode\nAStarDWAPlanner.plan_global / plan_local\neredeti DWA és robotconfig"]
-        py_tick [label="/control_tick -> tervezés -> /control_done\negy válasz után 100 fizikai lépés"]
+        py_tick [label="Python-tervező saját időzítője\nexternal_control_ticks=false"]
+        py_floor_path [label="GazeboPathNode\n/astar_path -> zöld vizuális szakaszok\nGazebo talaján; külön munkaszál"]
         py_sensor [label="LidarObstacleNode - csak hardveres módban\n/scan + TF + ismert térkép\nPointCloud2: x,y,z,radius,vx,vy"]
         py_map [label="Mentett térkép: map_server + AMCL\n/map és map -> odom TF\nrobot bringup: odom, scan, TF"]
         py_rviz [label="RViz: 2D Goal Pose -> /goal_pose\n/astar_path, /astar_map, /astar_dwa_markers"]
         py_cmd [label="/cmd_vel Twist\nGazebo vagy valódi robot meghajtó"]
-        py_scene -> py_world
+        py_world -> py_scene [label="SDF geometria"]
         py_scene -> py_plan
         py_world -> py_sim
         py_sim -> py_plan [label="odom + tracked_obstacles"]
-        py_sim -> py_tick
-        py_tick -> py_sim [label="vezérlési válasz után lép"]
-        py_tick -> py_plan [label="csak szimulációban"]
+        py_tick -> py_plan [label="folyamatos vezérlés"]
+        py_plan -> py_floor_path [label="globális út"]
+        py_floor_path -> py_world [label="csak megjelenítés"]
+        py_world -> py_rviz [label="LiDAR /scan"]
         py_sensor -> py_plan [label="tracked_obstacles"]
         py_map -> py_plan
         py_map -> py_sensor

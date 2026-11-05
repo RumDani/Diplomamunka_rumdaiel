@@ -1,5 +1,6 @@
 """Gazebo-independent ROS2 adapter for the unchanged Python A* and DWA."""
 
+import copy
 import math
 
 import rclpy
@@ -7,6 +8,8 @@ from geometry_msgs.msg import PoseStamped, Twist
 from nav_msgs.msg import OccupancyGrid, Odometry, Path
 from rclpy.node import Node
 from rclpy.clock import Clock, ClockType
+from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
+from rclpy.executors import MultiThreadedExecutor
 from rclpy.qos import DurabilityPolicy, QoSProfile, qos_profile_sensor_data
 from rclpy.time import Time
 from sensor_msgs.msg import LaserScan, PointCloud2
@@ -18,7 +21,7 @@ from visualization_msgs.msg import Marker, MarkerArray
 from codes_diploma.robot import Obstacle, robotconfig, robotstate, update
 from codes_diploma.astar_project.grid_map import GridMap
 from codes_diploma.astar_project.astar_variants import get_heuristic
-from .python_reference import create_scene, load_planner_class
+from .python_reference import create_gazebo_scene, create_scene, load_planner_class
 
 
 class PythonPlannerNode(Node):
@@ -47,6 +50,10 @@ class PythonPlannerNode(Node):
         self.occupied_threshold = int(self.declare_parameter("occupied_threshold", 65).value)
         if self.inflation_radius < 0 or not 1 <= self.occupied_threshold <= 100:
             raise ValueError("Invalid map inflation or occupancy threshold")
+        world_file = self.declare_parameter("world_file", "").value
+        if world_file and self.map_source == "reference":
+            self.grid, self.start, self.default_goal, self.state, self.statics, _ = create_gazebo_scene(
+                world_file, inflation_radius=self.inflation_radius)
         if not self.map_ready:
             self.statics = []
         self.obstacle_source = self.declare_parameter("obstacle_source", "scan").value
@@ -58,6 +65,7 @@ class PythonPlannerNode(Node):
         self.odom_stamp = self.obstacle_stamp = None
         self.obstacles = []
         self.pending_tick = None
+        self.control_group = MutuallyExclusiveCallbackGroup()
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
         self.cmd_pub = self.create_publisher(Twist, "/cmd_vel", 10)
@@ -68,14 +76,18 @@ class PythonPlannerNode(Node):
         self.active_pub = self.create_publisher(Bool, "/controller_active", latched)
         self.done_pub = self.create_publisher(Header, "/control_done", 10)
         self.create_subscription(Odometry, "/odom", self.odom, 10)
-        self.create_subscription(OccupancyGrid, "/map", self.map_received, latched)
-        self.create_subscription(PoseStamped, "/goal_pose", self.goal, 10)
+        self.create_subscription(OccupancyGrid, "/map", self.map_received, latched,
+                     callback_group=self.control_group)
+        self.create_subscription(PoseStamped, "/goal_pose", self.goal, 10,
+                     callback_group=self.control_group)
         self.create_subscription(PointCloud2, "/tracked_obstacles", self.tracked, 10)
         self.create_subscription(LaserScan, "/scan", self.scan, qos_profile_sensor_data)
-        self.create_subscription(Header, "/control_tick", self.control_tick, 10)
-        self.create_timer(self.config.dt, self.timer)
+        self.create_subscription(Header, "/control_tick", self.control_tick, 10,
+                     callback_group=self.control_group)
+        self.create_timer(self.config.dt, self.timer, callback_group=self.control_group)
         self.display_clock = Clock(clock_type=ClockType.STEADY_TIME)
-        self.create_timer(0.5, self.publish_scene, clock=self.display_clock)
+        self.create_timer(0.5, self.publish_scene, clock=self.display_clock,
+                  callback_group=self.control_group)
         self.get_logger().info(
             f"python-original-planner: grid={self.grid.width}x{self.grid.height}, "
             f"resolution={self.grid.resolution}, start={self.start}, goal={self.default_goal}; "
@@ -91,17 +103,19 @@ class PythonPlannerNode(Node):
         offset_x, offset_y, offset_yaw = transform
         orientation = message.pose.pose.orientation
         x, y = message.pose.pose.position.x, message.pose.pose.position.y
-        self.state.x = offset_x + math.cos(offset_yaw) * x - math.sin(offset_yaw) * y
-        self.state.y = offset_y + math.sin(offset_yaw) * x + math.cos(offset_yaw) * y
-        self.state.irany = offset_yaw + math.atan2(
+        state = robotstate()
+        state.x = offset_x + math.cos(offset_yaw) * x - math.sin(offset_yaw) * y
+        state.y = offset_y + math.sin(offset_yaw) * x + math.cos(offset_yaw) * y
+        state.irany = offset_yaw + math.atan2(
             2.0 * (orientation.w * orientation.z + orientation.x * orientation.y),
             1.0 - 2.0 * (orientation.y ** 2 + orientation.z ** 2),
         )
-        self.state.v, self.state.w = message.twist.twist.linear.x, message.twist.twist.angular.z
-        self.state.w_L = (self.state.v - self.config.b * self.state.w) / self.config.r_kerek
-        self.state.w_R = (self.state.v + self.config.b * self.state.w) / self.config.r_kerek
-        self.odom_stamp = self.seconds(message.header.stamp)
-        self.plan_pending_goal()
+        state.v, state.w = message.twist.twist.linear.x, message.twist.twist.angular.z
+        state.w_L = (state.v - self.config.b * state.w) / self.config.r_kerek
+        state.w_R = (state.v + self.config.b * state.w) / self.config.r_kerek
+        state.odom_stamp = self.seconds(message.header.stamp)
+        self.state = state
+        self.odom_stamp = state.odom_stamp
 
     @staticmethod
     def seconds(stamp):
@@ -248,6 +262,7 @@ class PythonPlannerNode(Node):
         self.done_pub.publish(tick)
 
     def timer(self):
+        self.plan_pending_goal()
         self.publish_scene()
         if not self.external_clock:
             self.plan_local()
@@ -262,14 +277,22 @@ class PythonPlannerNode(Node):
             self.get_logger().warning("Stale odometry/obstacles: stopping.", throttle_duration_sec=2.0)
             return
         try:
-            result = self.planner.plan_local(self.state, self.statics + self.obstacles)
+            state = copy.copy(self.state)
+            sample_stamp = min(state.odom_stamp, self.obstacle_stamp)
+            visible = []
+            for obstacle in self.statics + self.obstacles:
+                dx, dy = obstacle.x - state.x, obstacle.y - state.y
+                angle = math.atan2(dy, dx) - state.irany
+                if math.hypot(dx, dy) <= 3.0 and abs(math.atan2(math.sin(angle), math.cos(angle))) <= math.pi / 2:
+                    visible.append(obstacle)
+            result = self.planner.plan_local(state, visible)
             pair = result["best_pair"] if result is not None else None
-            ghost = robotstate(x=self.state.x, y=self.state.y, irany=self.state.irany,
-                               w_L=self.state.w_L, w_R=self.state.w_R)
+            ghost = robotstate(x=state.x, y=state.y, irany=state.irany,
+                               w_L=state.w_L, w_R=state.w_R)
             left, right = (0.0, 0.0) if pair is None else pair[2:4]
             update(ghost, self.config, left, right, self.config.dt)
-            if not self.external_clock and self.get_clock().now().nanoseconds * 1e-9 - min(
-                    self.odom_stamp, self.obstacle_stamp) > max(0.5, 3 * self.config.dt):
+            age = self.get_clock().now().nanoseconds * 1e-9 - sample_stamp
+            if not self.external_clock and age > max(0.5, 3 * self.config.dt):
                 self.cmd_pub.publish(Twist())
                 self.get_logger().warning("Planner exceeded sensor freshness deadline; stopping.",
                                           throttle_duration_sec=2.0)
@@ -283,7 +306,7 @@ class PythonPlannerNode(Node):
             self.get_logger().info(
                 f"Python waypoint={self.planner.waypoint_index}/{len(self.planner.waypoints)} "
                 f"target={result['target'] if result is not None else None} "
-                f"pose=({self.state.x:.3f},{self.state.y:.3f}) "
+                f"pose=({state.x:.3f},{state.y:.3f}) "
                 f"cmd=({ghost.v:.3f},{ghost.w:.3f})", throttle_duration_sec=2.0,
             )
         except Exception as error:
@@ -339,9 +362,12 @@ class PythonPlannerNode(Node):
 def main(args=None):
     rclpy.init(args=args)
     node = PythonPlannerNode()
+    executor = MultiThreadedExecutor(num_threads=2)
+    executor.add_node(node)
     try:
-        rclpy.spin(node)
+        executor.spin()
     finally:
+        executor.shutdown()
         node.cmd_pub.publish(Twist())
         node.destroy_node()
         if rclpy.ok():

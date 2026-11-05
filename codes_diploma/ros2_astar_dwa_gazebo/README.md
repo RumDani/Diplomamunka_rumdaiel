@@ -3,7 +3,7 @@
 ```bash
 source /opt/ros/jazzy/setup.bash
 pkill -TERM -f 'ros2 launch dwa_gazebo_sim (simulation|visualization)\.launch\.py' 2>/dev/null || true
-pkill -TERM -f '/(python_planner_node|python_simulation_node|lidar_obstacle_node|moving_obstacle_node)( |$)' 2>/dev/null || true
+pkill -TERM -f '/(python_planner_node|python_simulation_node|lidar_obstacle_node|moving_obstacle_node|gazebo_path_node)( |$)' 2>/dev/null || true
 pkill -TERM -x astar_dwa_node 2>/dev/null || true
 pkill -TERM -x moving_obstacle 2>/dev/null || true
 pkill -TERM -f '/parameter_bridge( |$)' 2>/dev/null || true
@@ -26,7 +26,7 @@ source install/setup.bash
 ros2 pkg executables dwa_gazebo_sim
 ```
 
-## Terminal 1: Python-referencia szimulacio
+## Terminal 1: TurtleBot es folyamatos Gazebo
 
 ```bash
 source /opt/ros/jazzy/setup.bash
@@ -34,12 +34,14 @@ cd "/mnt/c/Users/Rum Dániel/Desktop/Diplomamunka/codes_diploma/ros2_astar_dwa_g
 source install/setup.bash
 export ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST
 export DISPLAY=:0
+export TURTLEBOT3_MODEL=waffle
 export XDG_RUNTIME_DIR=/tmp/gazebo-runtime
 mkdir -p "$XDG_RUNTIME_DIR"
 chmod 700 "$XDG_RUNTIME_DIR"
 ros2 launch dwa_gazebo_sim simulation.launch.py software_rendering:=true autostart:=false
-# A vilagot a python_simulation node lepteti; a Gazebo Play gomb nem kell.
-# Indulo jelzesek: python-original-planner es python-reference-lockstep.
+# A regi dwa_world.sdf es TurtleBot Waffle folyamatosan fut.
+# Indulo jelzesek: python-original-planner es python-turtlebot-continuous.
+# Celadas utan a zold globalis ut a Gazebo talajan is megjelenik.
 ```
 
 ## Terminal 2: RViz es celadas
@@ -57,8 +59,8 @@ mkdir -p "$XDG_RUNTIME_DIR"
 chmod 700 "$XDG_RUNTIME_DIR"
 ros2 launch dwa_gazebo_sim visualization.launch.py
 # Fixed Frame: odom. Celadas: 2D Goal Pose.
-# Palya: 6 x 4 m; start: (0.5, 0.5) m; Python mintacel: (5.5, 3.5) m.
-# Reteg: /astar_map, /astar_path, /astar_dwa_markers es TF.
+# Regi palya: 8.2 x 5.2 m; start: (0.8, 0.8) m; mintacel: (6.5, 4.2) m.
+# Reteg: /astar_map, /astar_path, /astar_dwa_markers, /scan es TF.
 ```
 
 ## Terminal 3: ellenorzes
@@ -73,6 +75,7 @@ ros2 topic info /clock
 ros2 topic info /gazebo/odom
 ros2 topic info /odom
 ros2 topic info /cmd_vel
+ros2 topic info /scan
 ros2 topic info /tracked_obstacles
 ros2 topic info /goal_pose
 ros2 param get /astar_dwa_node autostart
@@ -80,5 +83,5 @@ ros2 param get /astar_dwa_node obstacle_source
 ros2 param get /astar_dwa_node external_control_ticks
 # Mindegyik felsorolt adat-topicnak csak egy aktiv publishere legyen.
 # A /goal_pose topicnal Subscription count: 1; autostart: false.
-# obstacle_source: tracked; external_control_ticks: true.
+# obstacle_source: tracked; external_control_ticks: false.
 ```
