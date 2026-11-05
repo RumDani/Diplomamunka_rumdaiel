@@ -241,7 +241,7 @@ digraph AStarCurrentCode {
     return_neighbors -> movement [style=dashed, label="szabad szomszedok vissza az A*-nak", color="#15803d"]
 
     subgraph cluster_ros2 {
-        label="ROS 2 / Gazebo robotfüggetlen C++ integráció"
+        label="Korábbi C++ integráció - nem az alapértelmezett launch"
         fontname="Arial Bold"
         fontsize=14
         color="#0f766e"
@@ -291,6 +291,34 @@ digraph AStarCurrentCode {
         moving_obstacle -> ros_scan [style=dashed, label="LiDAR-ban megjelenik"]
         gazebo_gui -> ros_scan [style=dashed, label="szimulációs szenzorok"]
         ros_cmd -> gazebo_gui [style=dashed, label="modell mozgatása"]
+    }
+
+    subgraph cluster_python_ros {
+        label="Aktuális Python ROS2-integráció - eredeti tervezőforrások változatlanul"
+        style="rounded"
+        color="#0f766e"
+        py_scene [label="python_reference.create_scene()\n30 x 20 cella; 0.2 m; 6 x 4 m\nstart (0.5,0.5), cél RViz-ből"]
+        py_world [label="python_world.write_world()\nPython-méretű robot és körakadályok\nGazebo szünetel a döntések között"]
+        py_sim [label="PythonSimulationNode\nakadálymozgatás + ControlWorld\n/gazebo/odom -> /odom + TF"]
+        py_plan [label="PythonPlannerNode\nAStarDWAPlanner.plan_global / plan_local\neredeti DWA és robotconfig"]
+        py_tick [label="/control_tick -> tervezés -> /control_done\negy válasz után 100 fizikai lépés"]
+        py_sensor [label="LidarObstacleNode - csak hardveres módban\n/scan + TF + ismert térkép\nPointCloud2: x,y,z,radius,vx,vy"]
+        py_map [label="Mentett térkép: map_server + AMCL\n/map és map -> odom TF\nrobot bringup: odom, scan, TF"]
+        py_rviz [label="RViz: 2D Goal Pose -> /goal_pose\n/astar_path, /astar_map, /astar_dwa_markers"]
+        py_cmd [label="/cmd_vel Twist\nGazebo vagy valódi robot meghajtó"]
+        py_scene -> py_world
+        py_scene -> py_plan
+        py_world -> py_sim
+        py_sim -> py_plan [label="odom + tracked_obstacles"]
+        py_sim -> py_tick
+        py_tick -> py_sim [label="vezérlési válasz után lép"]
+        py_tick -> py_plan [label="csak szimulációban"]
+        py_sensor -> py_plan [label="tracked_obstacles"]
+        py_map -> py_plan
+        py_map -> py_sensor
+        py_rviz -> py_plan [label="kézi cél"]
+        py_plan -> py_rviz [label="tervezett út és jelölések"]
+        py_plan -> py_cmd
     }
 
     labelloc="t"

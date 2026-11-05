@@ -5,6 +5,9 @@
   <description>Robotfüggetlen C++ A* és DWA ROS 2 vezérlő.</description>
   <maintainer email="rumdaniel@todo.todo">rumdaniel</maintainer>
   <license>MIT</license>
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <buildtool_depend>ament_cmake_python</buildtool_depend>
+  <exec_depend>python3-numpy</exec_depend>
   <depend>rclcpp</depend>
   <depend>geometry_msgs</depend>
   <depend>nav_msgs</depend>

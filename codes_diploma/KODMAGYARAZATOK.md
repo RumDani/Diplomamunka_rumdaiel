@@ -2732,3 +2732,237 @@ független elsőbbséget rögzítik. A felhasználó kérésére teszt nem futot
 csak diffellenőrzés és szerkesztődiagnosztika történt. A kiválasztási
 elsőbbség nem teljes zárt hurkú célbaérési vagy fizikai ütközésmentességi
 bizonyítás. Újrafordítás és Gazebo-próba szükséges.
+
+## 17. Python-alapú ROS2-integráció: miért készültek új node-ok?
+
+Az alapértelmezett `simulation.launch.py` már nem a korábbi C++ vezérlőt
+indítja. A 12–16. fejezetek C++-os változatai megmaradtak korábbi
+implementációként, de nem ezek irányítják az új referencia-szimulációt.
+
+Az új megoldás közvetlenül a meglévő `DWA+A.py` `AStarDWAPlanner` osztályát,
+a `DWA.py` optimalizálását, a `robot.py` állapotmodelljét és az `astar_project`
+moduljait használja. Az eredeti `simulation.py`, `DWA+A.py`, `DWA.py`,
+`robot.py` és A*-források nem változtak. A ROS2 csak a bemeneteket és a
+kimeneteket illeszti. Ez csökkenti a Python és C++ közötti algoritmikus
+eltérést, de önmagában nem bizonyít jobb Gazebo-viselkedést.
+
+A feladatok szétválasztása azért fontos, mert a valódi roboton nincs
+Gazebo-világvezérlő és pontos szimulátoros akadályállapot. Ott a meghajtó
+adja az odometriát, a LiDAR-feldolgozás az akadályokat, az AMCL pedig a
+mentett térképen elfoglalt helyet. A tervező node közben ugyanaz maradhat.
+
+## 18. PythonPlannerNode: tervezés és vezérlés Gazebo-függőség nélkül
+
+**Fájl:** `dwa_gazebo_sim/python_planner_node.py`.
+**Futtatható név:** `python_planner_node`. **ROS node-név:** `astar_dwa_node`.
+
+A node azért jött létre, hogy az eredeti Python-tervezőnek szabványos
+ROS2-interfésze legyen. Nem hív Gazebo-szolgáltatást, nem mozgat akadályt,
+és nem írja felül a waypointválasztást új visszatérési szabályokkal.
+
+Fő bemenetei: `/odom` (`Odometry`), `/goal_pose` (`PoseStamped`),
+`/tracked_obstacles` (`PointCloud2`), illetve választhatóan `/scan`
+(`LaserScan`) és `/map` (`OccupancyGrid`). Kimenetei: `/cmd_vel` (`Twist`),
+`/astar_path` (`Path`), `/astar_map` (`OccupancyGrid`) és
+`/astar_dwa_markers` (`MarkerArray`). A robot és a célpont jelölése az utóbbi
+topicon jelenik meg; nem a korábbi C++ DWA-trajektória-megjelenítés fut.
+
+A `goal()` ellenőrzi a cél véges koordinátáit, TF-fel a tervezés keretébe
+alakítja, és csak szabad cellában fogadja el. A `plan_pending_goal()` az
+aktuális odometriapozícióból hívja a `plan_global()` metódust, a GUI-val
+egyező euklideszi heurisztikával, simítással és görbénként 8 mintával.
+Globális újratervezés előtt nulla sebességet és inaktív állapotot publikál,
+hogy a korábbi parancs ne maradjon érvényben a számítás alatt.
+Az `autostart` alapértéke hamis: az útvonal csak az RViz `2D Goal Pose`
+céljára készül el, majd a `/astar_path` topicon látszik.
+
+A `plan_local()` az eredeti `planner.plan_local(state, obstacles)` hívást
+használja. Visszatérése az eredeti eredményszótár: benne a `best_pair`
+`[v, w, w_L, w_R]`, a célpont és a `finished` állapot. A kiválasztott
+kerékparancsot a változatlan `robot.update()` egy másolt állapoton alakítja
+gyorsuláskorlátos következő sebességgé. Ezt küldi `Twist` üzenetként; a
+robot következő tényleges helyzetét már nem a másolatból, hanem odometriából
+olvassa vissza. Elfogadható pár nélkül az eredeti nulla kerékcél marad.
+
+A `timer()` valódi robotos módban a `config.dt` periódussal indít vezérlést.
+A referencia-szimuláció `external_control_ticks=true` beállításánál viszont
+a `/control_tick` kérésre számol, friss akadályüzenetet vár, majd
+`/control_done` választ küld. A bemeneteket időbélyeg alapján ellenőrzi;
+elavult mérésnél nulla sebességet küld. Hardveres módban számolás után is
+ellenőrzi a frissességet, így egy túl sokáig számoló ciklus nem adhat ki
+észrevétlenül régi állapotra épülő parancsot.
+
+A `map_source=reference` a Python-jelenet rácsát használja.
+`map_source=topic` esetén a `map_received()` a `/map` méretét, felbontását,
+origóját és foglaltsági adatait másolja `GridMap` objektumba. Az ismeretlen
+cellák nem járhatók; az alapértelmezett foglaltsági küszöb 65. A robot
+sugarához és statikus margójához igazított infláció a globális keresést
+védi. Új térkép megállítja a korábbi követést; új céladás szükséges.
+A jelenlegi adapter tengelyirányú térképorigót kezel, elforgatott origót
+elutasít. A `frame_transform()` kezeli a cél, odometria és akadályadat
+`map`/`odom` keretek közötti átalakítását. Hiányzó TF esetén vár és megáll.
+
+A `publish_scene()` az útvonalat, rácsot és jelöléseket publikálja. A
+megjelenítés külön, valós idejű időzítőt is kapott, ezért szüneteltetett
+Gazebo mellett is látszik a térkép. Ez nem indít vezérlést. A térképet csak
+változáskor küldi újra; a transient-local QoS a később indított RViz-nek is
+elérhetővé teszi. A robotjelölés a konfigurált `base_frame` TF-jéhez kötött.
+
+## 19. PythonSimulationNode: csak szimulációs idő és akadálymozgatás
+
+**Fájl:** `dwa_gazebo_sim/python_simulation_node.py`.
+**Futtatható név:** `python_simulation_node`. **ROS node-név:** `python_simulation`.
+
+Ez a node kizárólag Gazebohoz szükséges. Az eredeti Python-főciklus
+sorrendjét tartja: akadályok egy lépése, helyi tervezés, robot egy lépése.
+A világ a döntések között szünetel, ezért egy lassabb Python-számítás alatt
+nem halad tovább az akadály vagy a robot. A Gazebo `Play` gombját nem kell
+megnyomni; a lépéseket ez a node kéri.
+
+A `tick()` a szolgáltatások rendelkezésre állására és friss odometriára vár.
+Kezdetben nulla vezérlés mellett rövid bootstrap-lépéseket enged, hogy az
+odometria létrejöjjön. Aktív útvonalkövetésnél `Obstacle.move(dt)` frissíti a
+Python-akadályokat. A `move_obstacle()` a `/world/dwa_world/set_pose`
+szolgáltatással sorban beállítja a két Gazebo-modellt, és megvárja a választ.
+
+Ezután `/tracked_obstacles` üzenetben küldi a pozíciókat, sugarakat és
+sebességeket. A `PointCloud2` mezői: `x`, `y`, `z`, `radius`, `vx`, `vy`;
+pozíció és sugár méterben, sebesség `m/s` egységben értendő. A
+`/control_tick` és `/control_done` időbélyege egyezteti a döntést. A
+`request_step()` csak a válasz után kér új fizikai lépéseket a
+`/world/dwa_world/control` szolgáltatáson. A bootstrap vagy szolgáltatás
+hibája megállítja a léptetést; 120 s válaszhiányt külön jelez.
+
+Konkrét példa: a `robotconfig.dt=0.1 s`, a Gazebo fizikai lépése
+`PHYSICS_STEP=0.001 s`. A kért lépésszám a vezérlési idő és a fizikai idő
+hányadosa: `0.1/0.001=100`. A két idő másodpercben van, a hányados
+dimenzió nélküli egész darabszám. Az első akadály `vy=0.20 m/s` mellett
+egy lépésben `0.20*0.1=0.02 m`-t mozdul: `(2.4,0.4)` után `(2.4,0.42)`.
+
+A `odom()` a `/gazebo/odom` lokális helyzetéhez egyszer hozzáadja a
+kezdőhelyet, és `/odom`-on publikálja a térképi állapotot. Például a
+lokális `(0,0) m` az új referenciajelenet `(0.5,0.5) m` pontja. A hozzá
+tartozó `odom → base_link` TF-et is ez a node küldi. Valódi roboton ez a
+node nem indul; a robot meghajtója és bringupja adja az odometriát és TF-et.
+
+## 20. LidarObstacleNode: a valódi érzékelő illesztése
+
+**Fájl:** `dwa_gazebo_sim/lidar_obstacle_node.py`.
+**Futtatható név:** `lidar_obstacle_node`. **ROS node-név:** `lidar_obstacles`.
+
+Azért külön node, mert a szimulátor ismert akadályállapota nem áll
+rendelkezésre egy valódi LiDAR-on. Ez a node `/scan` mérést és TF-et fogad,
+és ugyanarra a `/tracked_obstacles` interfészre publikál, mint a szimulátor.
+A tervező így nem függ attól, honnan érkezett az akadályadat.
+
+A `scan()` a véges, tartományon belüli mérési pontokat a `tracking_frame`
+keretébe alakítja; az alapkeret `odom`, a távolsághatár `3 m`. A
+`transform_point()` a szenzor valódi TF-helyzetét használja, nem feltételez
+középre szerelt LiDAR-t. A szomszédos sugarak közeli pontjaiból klaszterek
+készülnek. A korábbi klaszter jósolt középpontjához történő legközelebbi
+illesztés ad egyszerű sebességbecslést, `0.02...0.5 s` mérési időközzel.
+Egy előző klaszter egy újhoz rendelhető; `0.35 m` fölötti eltérést nem illeszt.
+
+A sebesség az előző becslés 0,6-szorosának és az új elmozdulás/idő
+0,4-szeresének összege. Például az előző `vx=0 m/s`, a középpont
+`1.00 m`-ről `1.02 m`-re kerül `0.1 s` alatt: a nyers érték
+`(1.02-1.00)/0.1=0.2 m/s`, a simított érték `0.6*0+0.4*0.2=0.08 m/s`.
+Az elmozdulás méter, az idő másodperc; a súlyok dimenzió nélküliek.
+`0.06 m/s` alatt a node állónak veszi a klasztert. A `/map` ismert falával
+egyező klaszter sebességét szintén nullázza, hogy a fal ne váljon hamis
+mozgó akadállyá. A továbbított pontok sugara nulla, mert LiDAR-felületpontok,
+nem a teljes objektum középpontjai.
+
+Ez egyszerű követő, nem kész, validált személydetektor vagy biztonsági
+szenzorrendszer. Takarást, szétváló klasztert, zajt és hibás lokalizációt
+roboton tesztelni kell. Az interfész később fejlettebb követővel cserélhető:
+`start_tracker=false` mellett külső node adhat ugyanolyan akadályüzenetet.
+
+## 21. Python-referenciajelenet és Gazebo-világ
+
+A `python_reference.py` ROS-only jelenetmásolat. Nem importálja a Tkinteres
+`simulation.py` fájlt, és nem módosítja azt. A `load_planner_class()` a
+telepített, eredeti `DWA+A.py` osztályát tölti be. A `create_scene()` rácsot,
+startot, célt, kezdeti robotállapotot, statikus és mozgó akadálylistát ad vissza.
+
+A GUI alapértékei: `30×20` cella, `resolution=0.2 m`, origó `(0,0) m`,
+infláció `0.11 m`, kezdőcella `(2,2)`, célcella `(17,27)`. A felbontás egy
+négyzetrács oldalhossza: a pálya `30*0.2=6 m` széles és `20*0.2=4 m` magas.
+A cellaközéppont számítása az origóhoz hozzáadott `(index+0.5)*resolution`:
+a `(2,2)` cella `(0.5,0.5) m`, a `(17,27)` pedig `(5.5,3.5) m`.
+A sor az y-t, az oszlop az x-et határozza meg, nem fordítva.
+
+A `python_world.py` nem külön node, hanem strukturált XML-világgenerátor.
+A `write_world()` ugyanebből a jelenetből készít ideiglenes SDF-fájlt, és
+annak útvonalát adja a launchnak. Az `element()`, `inertial()` és
+`cylinder()` az XML-elemek, tömegadatok és közös ütközési/megjelenítési
+geometria segédfüggvényei. A statikus akadályok itt az eredeti modell
+`0.12 m` sugarú körakadályai, nem a korábbi C++ világ hosszú dobozfalai.
+
+A robot sugara a `robotconfig.rob_radius=0.10 m`, keréksugara `0.033 m`,
+fél keréktávolsága `b=0.08 m`; a Gazebo keréktávolsága ezért `2*b=0.16 m`.
+A két mozgó akadály kezdőállapota és sebessége is az eredetié. A második
+`(6.8,2.1) m` kezdőpontja szándékosan a 6 m-es pályán kívül van, ahogyan
+a Python-alapjelenetben; nem kerül önkényesen beljebb.
+
+A Gazebo fizikai kontaktusai és az odometria nem azonosak a Python
+kinematikai integrátorával. A cél a közös algoritmus, geometria és időlépés,
+nem a két fizikai mozgás bitre azonosnak állítása.
+
+## 22. Indítás, mentett térkép és ellenőrzési korlátok
+
+A `simulation.launch.py` a szüneteltetett Gazebót, a `ros_gz_bridge`
+illesztőt, a Python-tervezőt és a szimulációléptetőt indítja. A régi C++
+node és a régi `moving_obstacle_node` nem indul. A bridge a Gazebo
+odometriáját `/gazebo/odom`-ra köti; a világkoordinátás `/odom`-ot a
+szimulációs node adja. A normál referenciafutásban a LiDAR-követő sem indul,
+mert az akadálybemenet az ismert szimulációs állapot.
+
+A CMake telepítési része módosítás nélkül telepíti az eredeti `robot.py`,
+`DWA.py`, `DWA+A.py` és A*-modulokat, GUI importálása nélkül. A `setup.py`
+regisztrálja az új node-belépési pontokat. A csomagok függőségei között
+szerepelnek a Python-, TF-, PointCloud- és a hardveres lokalizációs csomagok.
+A buildben a korábbi C++ cél megmarad, de nem az fut az új szimulációban.
+
+A README kizárólag az indítás terminálblokkjait tartalmazza. A sorrend:
+régi szimuláció leállítása, frissítés és build, szimuláció, RViz, ellenőrzés.
+Az `autostart=false` marad az alapértelmezés. Az útvonal `/astar_path`-on,
+a térkép `/astar_map`-en jelenik meg. A szimuláció RViz Fixed Frame-je `odom`.
+
+Valódi robotnál a `robot_controller.launch.py` nem indít Gazebót vagy
+szimulációléptetőt. A tényleges robot méreteit, gyorsulását és kerékgeometriáját
+tartalmazó `params_file` kötelező. `map_source=topic` mellett a robot saját
+bringupja szolgáltatja az `/odom`, `/scan` és TF adatokat. A valódi meghajtó
+`/cmd_vel` interfészét és vészleállítását a robot rendszeréhez kell illeszteni.
+
+A felderítéshez később SLAM használható, majd a térkép például így menthető:
+
+```bash
+ros2 run nav2_map_server map_saver_cli -f ~/maps/palya
+```
+
+A mentett YAML és képfájl nem dinamikus akadálylista. A tartós falakat a
+map_server adja `/map`-en, az aktuális akadályokat továbbra is a LiDAR-követő.
+A mentett térképes indítás mintája:
+
+```bash
+ros2 launch dwa_gazebo_sim robot_controller.launch.py \
+    params_file:=/teljes/ut/robot.yaml map_yaml:=/teljes/ut/palya.yaml
+```
+
+Megadott `map_yaml` esetén a launch map_servert, AMCL-t és lifecycle-managert
+is indít. Meglévő lokalizáció esetén a `map_yaml` elhagyható: ilyenkor külső
+`/map` és `map → odom` TF kell. Valódi robotos RViz-ben Fixed Frame `map`,
+először `2D Pose Estimate`, utána `2D Goal Pose` szükséges. A `base_frame`
+paraméternek a robot tényleges TF-nevével kell egyeznie.
+
+Ellenőrzés: az eredeti Python-forrásokra futtatott `git diff --exit-code`
+nem mutatott módosítást; a `git diff --check` formai ellenőrzés tiszta.
+A Pylance szintaxisellenőrzése sikeres az öt új Python-modulra, a két
+launch-fájlra és a `setup.py`-ra. A helyi virtuális Python másik gép
+elérési útjára hivatkozik, ezért azzal nem készült sikeres parancssori fordítás.
+ROS2/Gazebo-futtatás és teszt a felhasználó kérésére nem történt. Nem
+igazolt még a célbaérés, a kontaktusfizika, a léptetési handshake futása,
+a LiDAR-követés pontossága vagy a valódi roboton tartható vezérlési idő.
+Ezek a célkörnyezetben ellenőrizendők, nem tekinthetők kész biztonsági
+tanúsításnak.
