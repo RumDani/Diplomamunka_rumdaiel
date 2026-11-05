@@ -54,5 +54,15 @@ int main() {
       "Without a return candidate normal avoidance remains available");
     require(path_tracking::prefer_candidate(true, 2.0, true, 1.0),
       "Use scores within the returning candidate class");
-  std::cout << "Path tracking regression checks passed\n";
+    const auto left_rejoin = path_tracking::rejoin_command(0.4, 1.0, 0.22, 1.0);
+    near(left_rejoin.first, 0.0, "Turn before driving across the path");
+    near(left_rejoin.second, 1.0, "Steer toward the fixed waypoint now");
+    const auto right_rejoin = path_tracking::rejoin_command(0.4, -1.0, 0.22, 1.0);
+    near(right_rejoin.second, -1.0, "Handle the opposite detour side");
+    require(path_tracking::command_error(0.0, 1.0, left_rejoin, 0.22, 1.0) <
+      path_tracking::command_error(0.22, 0.0, left_rejoin, 0.22, 1.0),
+      "Immediate steering must beat parallel forward motion");
+    near(path_tracking::rejoin_command(0.05, 0.0, 0.22, 1.0).first, 0.04,
+         "Slow down when approaching the fixed waypoint");
+    std::cout << "Path tracking regression checks passed\n";
 }

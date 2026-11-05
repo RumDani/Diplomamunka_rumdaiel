@@ -52,4 +52,20 @@ inline bool is_returning(double initial_distance, double final_distance,
 inline bool prefer_candidate(bool returning, double score, bool best_returning, double best_score) {
   return returning != best_returning ? returning : score > best_score;
 }
+
+inline std::pair<double, double> rejoin_command(double target_distance, double heading_error,
+                                               double max_linear, double max_angular) {
+  const double angular = std::clamp(2.0 * heading_error, -max_angular, max_angular);
+  const double linear = std::abs(heading_error) >= 0.6 ? 0.0 :
+    std::min(max_linear, 0.8 * target_distance) * std::max(0.0, std::cos(heading_error));
+  return {linear, angular};
+}
+
+inline double command_error(double linear, double angular,
+                             const std::pair<double, double> & reference,
+                             double max_linear, double max_angular) {
+  const double linear_error = (linear - reference.first) / std::max(max_linear, 1e-3);
+  const double angular_error = (angular - reference.second) / std::max(max_angular, 1e-3);
+  return linear_error * linear_error + angular_error * angular_error;
+}
 }

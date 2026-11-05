@@ -99,11 +99,12 @@ public:
         has_goal_ = true;
         blocked_cycles_ = 0;
         returning_to_path_ = false;
+        rejoin_active_ = false;
         need_replan_ = true;
         RCLCPP_INFO(get_logger(), "Uj cel: x=%.2f m, y=%.2f m", goal_x_, goal_y_); });
     timer_ = rclcpp::create_timer(
       this, get_clock(), rclcpp::Duration::from_seconds(period), [this]() { control(); });
-    RCLCPP_INFO(get_logger(), "Robotfuggetlen A* + DWA C++ node elindult (Stabilizalt verzio)");
+    RCLCPP_INFO(get_logger(), "A* + DWA: fixed-waypoint-rejoin (rogzitett visszateresi celpont)");
   }
 
   ~AStarDwaNode() override {
@@ -467,7 +468,8 @@ private:
     const std::size_t last = std::min(target_index + 1, current_path_.size() - 1);
     const double initial_path_error = path_tracking::distance_to_path(
       current_path_, first, last, pose_.x, pose_.y);
-    if (initial_path_error <= path_return_tolerance_) returning_to_path_ = false;
+    if (rejoin_active_) returning_to_path_ = true;
+    else if (initial_path_error <= path_return_tolerance_) returning_to_path_ = false;
     else if (initial_path_error > 2.0 * path_return_tolerance_) returning_to_path_ = true;
     const double horizon = returning_to_path_ ? predict_time_ :
       std::clamp(goal_dist * 2.0, 0.8, predict_time_);
@@ -486,6 +488,38 @@ private:
       init_clear[j] = distance(pose_.x, pose_.y, sensed[j].x, sensed[j].y) -
                       (robot_radius_ + (mv ? safety_margin_ : static_safety_margin_) + sensed[j].radius);
     }
+    const auto reference = path_tracking::rejoin_command(
+      goal_dist, angle_error(return_heading - pose_.yaw),
+      max_linear_velocity_, max_angular_velocity_);
+    bool rejoin_control = rejoin_active_ && line_free(pose_.x, pose_.y, target_x, target_y, statics);
+    const path_tracking::Path connector{{pose_.x, pose_.y}, {target_x, target_y}};
+    for (const auto & obstacle : sensed) {
+      if (!rejoin_control) break;
+      const bool moving = std::hypot(obstacle.vx, obstacle.vy) > 0.0;
+      const double clearance = robot_radius_ + obstacle.radius +
+        (moving ? safety_margin_ : static_safety_margin_);
+      for (double time = 0.0; time <= horizon; time += dt_) {
+        if (path_tracking::distance_to_path(connector, 0, 1,
+              obstacle.x + obstacle.vx * time, obstacle.y + obstacle.vy * time) <= clearance) {
+          rejoin_control = false;
+          break;
+        }
+      }
+    }
+    std::vector<double> left_samples, right_samples;
+    for (double left = left_min; left <= left_max + 1e-9; left += wheel_resolution_)
+      left_samples.push_back(left);
+    for (double right = right_min; right <= right_max + 1e-9; right += wheel_resolution_)
+      right_samples.push_back(right);
+    if (rejoin_active_) {
+      // Include the reference and braking commands exactly, not only the sampling lattice.
+      left_samples.push_back(std::clamp(
+        (reference.first - reference.second * wheel_base_) / wheel_radius_, left_min, left_max));
+      right_samples.push_back(std::clamp(
+        (reference.first + reference.second * wheel_base_) / wheel_radius_, right_min, right_max));
+      left_samples.push_back(std::clamp(0.0, left_min, left_max));
+      right_samples.push_back(std::clamp(0.0, right_min, right_max));
+    }
     double best_score = -std::numeric_limits<double>::infinity();
     double best_left = 0.0, best_right = 0.0;
     double best_path_error = initial_path_error;
@@ -494,8 +528,8 @@ private:
     std::size_t n_test = 0, n_vel = 0, n_ttc = 0, n_brake = 0;
     std::size_t n_collision = 0, n_returning = 0;
 
-    for (double left = left_min; left <= left_max + 1e-9; left += wheel_resolution_) {
-      for (double right = right_min; right <= right_max + 1e-9; right += wheel_resolution_) {
+    for (double left : left_samples) {
+      for (double right : right_samples) {
         ++n_test;
         const auto cand = wheel_kinematics(left, right);
         if (cand.first < 0.0 || cand.first > max_linear_velocity_ ||
@@ -589,10 +623,13 @@ private:
         const bool returning = returning_to_path_ && path_tracking::is_returning(
           initial_path_error, final_path_error, path_return_tolerance_, max_travel);
         if (returning) ++n_returning;
-        const double score = alpha_ * heading_score + beta_ * clear_score + gamma_ * vel_score -
+        const double score = rejoin_control ? -path_tracking::command_error(
+          cand.first, cand.second, reference, max_linear_velocity_, max_angular_velocity_) :
+          alpha_ * heading_score + beta_ * clear_score + gamma_ * vel_score -
           tracking_cost + (returning_to_path_ ? path_return_bias_ * progress : 0.0);
-        // A safe return takes priority; clearance reward must not preserve a parallel offset.
-        if (!found || path_tracking::prefer_candidate(returning, score, best_returning, best_score)) {
+        // A clear rejoin uses the current steering command, not a repeatedly postponed endpoint.
+        if (!found || (rejoin_control ? score > best_score :
+            path_tracking::prefer_candidate(returning, score, best_returning, best_score))) {
           best_score = score;
           best_left = left;
           best_right = right;
@@ -605,10 +642,12 @@ private:
     RCLCPP_INFO_THROTTLE(
       get_logger(), *get_clock(), 2000,
       "DWA: teszt=%zu sebesseg=%zu fekezes=%zu ttc=%zu utkozes=%zu elfogadott=%s "
-      "visszateres=%s visszatero_jelolt=%zu valasztott_visszatero=%s elteres=%.3f->%.3f m",
+      "visszateres=%s visszatero_jelolt=%zu valasztott_visszatero=%s elteres=%.3f->%.3f m "
+      "rogzitett_cel=%s cel_index=%zu iranykovetes=%s referencia=(%.3f,%.3f)",
       n_test, n_vel, n_brake, n_ttc, n_collision, found ? "igen" : "nem",
       returning_to_path_ ? "igen" : "nem", n_returning, best_returning ? "igen" : "nem",
-      initial_path_error, best_path_error);
+      initial_path_error, best_path_error, rejoin_active_ ? "igen" : "nem", target_index,
+      rejoin_control ? "igen" : "nem", reference.first, reference.second);
 
     if (found) {
       blocked_cycles_ = 0;
@@ -770,13 +809,15 @@ private:
     }
 
     if (current_path_.empty() || need_replan_ ||
-        (waypoint_index_ < current_path_.size() &&
+        (!rejoin_active_ && waypoint_index_ < current_path_.size() &&
          distance(pose_.x, pose_.y, current_path_[waypoint_index_].first,
                   current_path_[waypoint_index_].second) > 1.2)) {
       auto new_path = astar({}, false);
       if (!new_path.empty() || current_path_.empty()) {
         current_path_ = std::move(new_path);
         waypoint_index_ = 0;
+        rejoin_active_ = false;
+        returning_to_path_ = false;
       }
       need_replan_ = false;
       last_replan_time_ = now().seconds();
@@ -823,6 +864,11 @@ private:
     }
 
     const auto statics = planning_obstacles();
+    if (rejoin_active_ && distance(pose_.x, pose_.y,
+        path[rejoin_index_].first, path[rejoin_index_].second) <= path_return_tolerance_) {
+      rejoin_active_ = false;
+      returning_to_path_ = false;
+    }
     {
       const std::size_t window_end = std::min(path.size(), waypoint_index_ + 8);
       double best_d = std::numeric_limits<double>::infinity();
@@ -834,13 +880,22 @@ private:
         if (d < best_d) { best_d = d; closest = i; found_visible = true; }
       }
       if (found_visible) {
-        waypoint_index_ = std::max(waypoint_index_, closest);
+        if (!rejoin_active_) {
+          waypoint_index_ = std::max(waypoint_index_, closest);
+          const double lateral_error = path_tracking::distance_to_path(
+            path, closest > 0 ? closest - 1 : 0, std::min(closest + 1, path.size() - 1),
+            pose_.x, pose_.y);
+          if (lateral_error > path_return_tolerance_) {
+            rejoin_active_ = true;
+            rejoin_index_ = closest;
+          }
+        }
       } else if (now().seconds() - last_replan_time_ > 1.0) {
         need_replan_ = true;
       }
     }
-    std::size_t target_index = path.size() - 1;
-    {
+    std::size_t target_index = rejoin_active_ ? rejoin_index_ : path.size() - 1;
+    if (!rejoin_active_) {
       double accumulated = 0.0;
       for (std::size_t i = waypoint_index_; i + 1 < path.size(); ++i) {
         accumulated += distance(path[i].first, path[i].second, path[i + 1].first, path[i + 1].second);
@@ -859,7 +914,7 @@ private:
 
     const double target_heading = std::atan2(target_y - pose_.y, target_x - pose_.x);
     const double heading_error = angle_error(target_heading - pose_.yaw);
-    if (std::abs(heading_error) > 0.95 && nearest_obstacle > 0.85) {
+    if (!rejoin_active_ && std::abs(heading_error) > 0.95 && nearest_obstacle > 0.85) {
       wheel_left_ = 0.0;
       wheel_right_ = 0.0;
       command.angular.z = std::clamp(heading_error, -max_angular_velocity_, max_angular_velocity_);
@@ -904,6 +959,8 @@ private:
   double path_distance_bias_{6.0}, goal_distance_bias_{2.0};
   double path_return_bias_{8.0}, path_return_tolerance_{0.10};
   bool returning_to_path_{false};
+  bool rejoin_active_{false};
+  std::size_t rejoin_index_{0};
   double wheel_left_{0.0}, wheel_right_{0.0};
   double last_linear_velocity_{0.0}, last_angular_velocity_{0.0};
   std::vector<Track> tracks_;
