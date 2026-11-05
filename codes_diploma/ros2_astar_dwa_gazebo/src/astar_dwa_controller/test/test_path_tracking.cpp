@@ -38,5 +38,21 @@ int main() {
           "Reward approaching target, not merely aligning yaw");
   near(tracking_cost(straight, 0, 2, 0.8, 0.4, 1.0, 0.0, 0.0, 0.0), 0.0,
        "Zero biases preserve legacy scoring");
+    near(path_tracking::return_progress(0.4, 0.4, 0.44), 0.0,
+         "Parallel travel has no lateral progress");
+    require(path_tracking::is_returning(0.4, 0.35, 0.1, 0.44),
+      "A five-centimeter return is meaningful within this horizon");
+    require(!path_tracking::is_returning(0.4, 0.399, 0.1, 0.44),
+      "Numerical-scale improvement is not a return");
+    require(path_tracking::is_returning(0.11, 0.10, 0.1, 0.44),
+      "Reaching the tolerance counts as returning");
+    require(path_tracking::prefer_candidate(true, -10.0, false, 100.0),
+      "A safe meaningful return beats any parallel reward");
+    require(!path_tracking::prefer_candidate(false, 100.0, true, -10.0),
+      "Parallel motion cannot displace an existing safe return");
+    require(path_tracking::prefer_candidate(false, 2.0, false, 1.0),
+      "Without a return candidate normal avoidance remains available");
+    require(path_tracking::prefer_candidate(true, 2.0, true, 1.0),
+      "Use scores within the returning candidate class");
   std::cout << "Path tracking regression checks passed\n";
 }

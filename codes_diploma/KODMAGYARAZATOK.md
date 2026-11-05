@@ -2465,6 +2465,10 @@ colcon build --packages-select astar_dwa_controller dwa_gazebo_sim --symlink-ins
 
 ## 14. Visszatérés az A* útvonalra akadálykerülés után
 
+Az alábbi pontozás az első javítás leírása. A jelenlegi, kétlépcsős döntést,
+az új időtávot és a szigorított ütközésszűrést a 16. fejezet rögzíti;
+a korábbi fékezhetőség-alapú ütközéselfogadás már nem érvényes.
+
 ### A vezérlő célja és a hiba oka
 
 Az `astar_dwa_node.cpp` továbbra is a ROS2-integráció vezérlője. A módosítás a
@@ -2644,3 +2648,48 @@ az összevezetés megőrzi, de azok nem az új közös forrásból készültek: 
 előtt új `colcon build` szükséges. A felhasználó kérésére az összevezetés után
 sem futott teszt; a diff ellenőrzése nem helyettesíti a fordítást vagy a
 Gazebo-próbát.
+
+## 16. Visszatérési elsőbbség az egyszerű súlyozás helyett
+
+Az `astar_dwa_node.cpp` DWA-ja már nem csak a végpont távolságát bünteti.
+A `returning_to_path_` mód a `path_return_tolerance=0.10 m` kétszerese fölött
+bekapcsol, a tolerancián belül kikapcsol; közben megtartja az állapotát.
+Új cél nullázza. Aktív módban a teljes `predict_time_` fut, és a célirány
+a ciklus eleji robotpozícióból rögzített irány, nem a rollout végpontjából
+visszafelé mutató irány. A normál mód adaptív időtávja megmarad.
+
+A rollout az ismert statikus falakat és a LiDAR-akadályokat is ellenőrzi.
+A kezdeti biztonsági margón belül a nem romló kimozdulás kivétele megmarad.
+A fékezés/TTC után minden fennmaradó, ütközésnek jelzett jelölt is kiesik;
+ilyen félbeszakadt pálya végpontja nem pontozható visszatérésként.
+
+A `path_tracking.hpp` új `return_progress(initial_distance, final_distance,
+max_travel)` függvénye dimenzió nélküli arányt ad: a kezdeti hibából kivonja
+a végsőt, majd az adott idő alatt elérhető maximális úthosszal oszt, és
+`[-1,1]` közé szorít. Minden bemenet méterben értendő, az osztó legalább
+`0.001 m`. `0.22 m/s * 2 s = 0.44 m` elérhető út és `0.40 -> 0.35 m`
+eltérés esetén az arány `(0.40-0.35)/0.44=0.1136`. Aktív módban ezt a
+`path_return_bias=8` dimenzió nélküli súly szorozza: `0.9091` pont jutalom.
+
+Az `is_returning(initial_distance, final_distance, tolerance, max_travel)`
+logikai eredményt ad. A kezdő hiba a tolerancián túl legyen, és a végpont
+vagy érje el a toleranciát, vagy az arány legalább `0.05` legyen. A példában
+ez `0.05*0.44=0.022 m` javulás: `0.001 m` nem elég, `0.05 m` igen.
+A `prefer_candidate(returning, score, best_returning, best_score)` eltérő
+osztályoknál a visszatérőt, azonosaknál a nagyobb pontszámot választja.
+Aktív módban egy szűrésen átjutott visszatérő `-10` ponttal is megelőzhet
+egy párhuzamosat `100` ponttal. Visszatérő jelölt nélkül normál kerülés is
+választható; elfogadott jelölt nélkül megmarad a forgó fallback.
+
+Hívások: `control()` -> `dwa()` -> rollout/szűrés -> `tracking_cost()` +
+`return_progress()` + `is_returning()` -> `prefer_candidate()` -> `/cmd_vel`.
+A `DWA` napló `visszateres`, `visszatero_jelolt`, `valasztott_visszatero`
+és `elteres=kezdeti->josolt m` mezői a módot, jelöltszámot és jósolt eredményt
+mutatják; ez utóbbi nem két tényleges odometriamérés. A két távolságsúly
+nullázása már nem kapcsolja ki a visszatérési elsőbbséget.
+
+A `test_path_tracking.cpp` új esetei e három függvényt és a jelöltsorrendtől
+független elsőbbséget rögzítik. A felhasználó kérésére teszt nem futott;
+csak diffellenőrzés és szerkesztődiagnosztika történt. A kiválasztási
+elsőbbség nem teljes zárt hurkú célbaérési vagy fizikai ütközésmentességi
+bizonyítás. Újrafordítás és Gazebo-próba szükséges.

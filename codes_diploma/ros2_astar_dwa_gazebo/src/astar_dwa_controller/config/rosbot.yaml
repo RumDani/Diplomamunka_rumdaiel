@@ -39,3 +39,5 @@ astar_dwa_node:
     gamma: 2.0
     path_distance_bias: 6.0
     goal_distance_bias: 2.0
+    path_return_bias: 8.0
+    path_return_tolerance: 0.10
