@@ -104,7 +104,7 @@ public:
         RCLCPP_INFO(get_logger(), "Uj cel: x=%.2f m, y=%.2f m", goal_x_, goal_y_); });
     timer_ = rclcpp::create_timer(
       this, get_clock(), rclcpp::Duration::from_seconds(period), [this]() { control(); });
-    RCLCPP_INFO(get_logger(), "A* + DWA: avoidance-first-rejoin (kerules eloszor, utana visszateres)");
+    RCLCPP_INFO(get_logger(), "A* + DWA: cpa-rejoin (tavolodo akadaly nem tiltja a visszaterest)");
   }
 
   ~AStarDwaNode() override {
@@ -879,9 +879,12 @@ private:
         }
       }
       if (known_static) continue;
-      const double reach = robot_radius_ + safety_margin_ + obstacle.radius +
-        (max_linear_velocity_ + speed) * predict_time_;
-      if (distance(pose_.x, pose_.y, obstacle.x, obstacle.y) < reach) {
+      const double clearance = robot_radius_ + safety_margin_ + obstacle.radius;
+      if (path_tracking::collision_course(
+          obstacle.x - pose_.x, obstacle.y - pose_.y,
+          obstacle.vx - max_linear_velocity_ * std::cos(pose_.yaw),
+          obstacle.vy - max_linear_velocity_ * std::sin(pose_.yaw),
+          clearance, predict_time_)) {
         obstacle_threat = true;
         break;
       }

@@ -68,4 +68,16 @@ inline double command_error(double linear, double angular,
   const double angular_error = (angular - reference.second) / std::max(max_angular, 1e-3);
   return linear_error * linear_error + angular_error * angular_error;
 }
+
+inline bool collision_course(double relative_x, double relative_y,
+                              double relative_vx, double relative_vy,
+                              double clearance, double horizon) {
+  if (std::hypot(relative_x, relative_y) <= clearance) return true;
+  const double closing_dot = relative_x * relative_vx + relative_y * relative_vy;
+  const double speed_squared = relative_vx * relative_vx + relative_vy * relative_vy;
+  if (closing_dot >= 0.0 || speed_squared < 1e-9) return false;
+  const double closest_time = std::clamp(-closing_dot / speed_squared, 0.0, horizon);
+  return std::hypot(relative_x + relative_vx * closest_time,
+                    relative_y + relative_vy * closest_time) <= clearance;
+}
 }

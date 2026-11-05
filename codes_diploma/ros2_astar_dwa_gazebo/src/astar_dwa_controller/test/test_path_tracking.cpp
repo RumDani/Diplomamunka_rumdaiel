@@ -66,5 +66,15 @@ int main() {
          "Slow down when approaching the fixed waypoint");
       require(path_tracking::rejoin_command(0.4, 0.7, 0.22, 1.0).first > 0.1,
         "A moderate heading error must allow a moving return arc");
-    std::cout << "Path tracking regression checks passed\n";
+      require(path_tracking::collision_course(0.8, 0.0, -0.42, 0.0, 0.34, 2.0),
+        "A head-on obstacle must keep avoidance active");
+      require(!path_tracking::collision_course(-0.5, 0.0, -0.42, 0.0, 0.34, 2.0),
+        "A passed receding obstacle must release avoidance");
+      require(!path_tracking::collision_course(0.5, 0.6, -0.42, 0.0, 0.34, 2.0),
+        "A safe lateral pass must not suppress path rejoin");
+      require(path_tracking::collision_course(0.4, 0.6, -0.2, -0.3, 0.34, 2.0),
+        "A crossing obstacle must still be detected");
+      require(!path_tracking::collision_course(0.5, 0.0, 0.0, 0.0, 0.34, 2.0),
+        "Constant safe separation is not a closing threat");
+      std::cout << "Path tracking regression checks passed\n";
 }

@@ -2654,11 +2654,22 @@ Gazebo-próbát.
 Aktuális kiegészítés: az `avoiding_obstacle_` állapot közeli mozgó vagy nem
 ismert statikus pontnál felfüggeszti a visszatérést. A `control()` a kis
 sebességű, ismert falhoz `wall.radius + 0.08 m`-nél közelebbi pontokat ebből
-kizárja. A fenyegetési távolság a robot és akadály sugara, biztonsági margó,
-valamint az összesített sebesség és `predict_time_` szorzatának összege:
-például `0.24+0+0.10+(0.22+0.20)*2=1.18 m`. A sebességek `m/s`, a horizont
-`s`, a sugarak és az eredmény `m` egységűek. Ez konzervatív közelségvizsgálat,
-nem pontos ütközési idő. Az utolsó fenyegetés után `0.6 s` késleltetés marad.
+kizárja. A `collision_course(relative_x, relative_y, relative_vx, relative_vy,
+clearance, horizon)` logikai eredménnyel jelzi a becsült ütközési pályát.
+A relatív hely méterben, a relatív sebesség `m/s` egységben értendő; a kód
+az akadály sebességéből a robot jelenlegi irányú maximális sebességét vonja
+ki. A clearance a robot és akadály sugara plusz a biztonsági margó méterben,
+a horizon az előrejelzési idő másodpercben. Biztonságos kezdeti távolságnál
+nemnegatív hely-sebesség skalárszorzat távolodást jelent, tehát nincs veszély.
+Egyébként a legközelebbi időpont a negatív skalárszorzat osztva a relatív
+sebesség négyzetösszegével, `[0,horizon]` közé szorítva. Ekkorra előrevetíti
+a relatív helyet, és a távolságát a clearance-hez hasonlítja. Például
+`(0.8,0) m`, `(-0.42,0) m/s`, `2 s` horizont esetén az idő `1.905 s`, a
+távolság nulla: veszély. A már elhaladt `(-0.5,0) m` pont ugyanilyen
+sebességgel távolodik, ezért nem tiltja a visszatérést. Elhanyagolható
+relatív sebességnél nincs osztás; clearance-en belül mindig veszélyt jelez.
+Ez állandó sebességű becslés, nem zárt hurkú biztonsági bizonyítás. Az utolsó
+fenyegetés után `0.6 s` késleltetés marad.
 Kerüléskor nincs rögzített cél vagy oldaleltérés-büntetés, a teljes horizont
 és a normál DWA választás működik. Utána `2*0.10=0.20 m` eltérés fölött
 rögzülhet a cél; `0.10 m` útvonaltávolság vagy célponttávolság feloldja.
@@ -2675,7 +2686,7 @@ minimalizálja a DWA az ütközésszűrésen átjutott jelöltek között; a ref
 és a fékezés pontos kerékmintái is szerepelnek. Blokkolt cél esetén a normál
 pontozás marad. A hívások továbbra is `control()` -> `dwa()` -> rollout/szűrés
 -> referenciahiba vagy normál pontozás -> `/cmd_vel`. A napló `kerules`
-mezője jelzi az új fázist, az induló jelzés `avoidance-first-rejoin`.
+mezője jelzi az új fázist, az induló jelzés `cpa-rejoin`.
 A tesztforrás módosult, futtatás nem történt a felhasználó kérésére;
 diffellenőrzés és szerkesztődiagnosztika nem igazolja a Gazebo-célbaérést.
 
