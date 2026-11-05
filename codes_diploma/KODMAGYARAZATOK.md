@@ -1242,10 +1242,11 @@ cserélhető.
 
 ```text
 /scan + /odom
-    -> lokális akadályrács
-    -> A* (Grid cellák)
-    -> következő waypoint
-    -> DWA sebességvizsgálat
+    -> obstacles(): világkoordinátás LiDAR-pontok, sebességbecslés
+ismert statikus akadályok + /odom + /goal_pose
+    -> astar(): statikus Grid cellák -> világkoordinátás útvonal
+    -> control(): látható waypoint és előretekintési cél
+    -> dwa(): LiDAR-alapú sebességvizsgálat és útvonalközelségi pontozás
     -> /cmd_vel
 ```
 
@@ -1257,8 +1258,8 @@ interfész tehát: `LaserScan`, `Odometry`, `PoseStamped`, `Twist` és `Path`.
 
 Az `astar_dwa_controller/config/rosbot.yaml` tartalmazza a topic-neveket,
 a célt, a `map_size` értéket, a `resolution` cellaméretet és a
-`robot_radius` biztonsági sugarat. A C++ node lokális, négyzetes rácsot épít
-a robot körül. A rácskoordináta:
+`robot_radius` biztonsági sugarat. A C++ node rögzített, téglalap alakú rácsot
+épít a konfigurált térképorigótól. A rácskoordináta:
 
 ```text
 row = floor((y - origin_y) / resolution)
@@ -1278,18 +1279,18 @@ Egy átlós lépés költsége `sqrt(2)`, egyenes lépésé `1`. Például egy k
 egyenes és egy átlós lépés költsége `1 + 1 + 1.414 = 3.414` cellaköltség.
 Átlós sarokvágás csak akkor engedélyezett, ha a két oldalsó cella is szabad.
 
-A DWA a `v = 0...0.4 m/s` és `omega = -1.2...1.2 rad/s` mintapárokat
-vizsgálja. Minden pár 15 darab, egyenként `0.1 s` hosszú előrelépéssel
-szimulálódik. Ütközés esetén a pár kiesik. A pontszám:
+A DWA kerék-szögsebességeket mintavételez a gyorsuláskorlátos dinamikus
+ablakban. A YAML szerint az előremeneti sebesség felső határa `0.26 m/s`,
+a szögsebességé `1.0 rad/s`. Az előrejelzés `0.1 s` lépéssel, a helyi
+célpont távolságától függő, `0.8...2.5 s` időtávon fut. Ütközés észlelésekor
+a fékezhetőség és az ütközésig hátralévő idő feltétele dönti el az elfogadást;
+nem minden későbbi ütközés jelent automatikus kiesést.
 
-```text
-score = -goal_distance - 0.25 * |heading_error| + 0.15 * v
-```
-
-Ha egy jelölt 1 m-re van a céltól, a szögeltérés `0.2 rad`, a sebesség
-`0.4 m/s`, akkor a pontszám `-1 - 0.25*0.2 + 0.15*0.4 =
--1 - 0.05 + 0.06 = -0.99`. A nagyobb pontszámú biztonságos pár
-kerül a `/cmd_vel` üzenetbe.
+A pontozás célirány-, szabad tér- és sebességtagot, továbbá a globális
+útvonaltól és a helyi céltól mért távolság büntetését tartalmazza. A jelenlegi
+képletet, a változók egységeit és a behelyettesítési példát a dokumentum végén
+a 14. fejezet részletezi. A legnagyobb pontszámú elfogadott jelölt adja a
+`/cmd_vel` parancsot; elfogadható jelölt nélkül helyben elfordulás következik.
 
 ### 12.5. ROSbot átültethetőség
 
@@ -2187,33 +2188,30 @@ továbbra is a statikus akadálymodellt használja, a Python-szimulátor logiká
 
 - `obstacles()`: a LiDAR-pontokat szűri és `Obstacle{x, y, radius}` adatokká
   alakítja;
-- `astar(const std::vector<Obstacle>& sensed_obstacles)`: a statikus térképet
-  statikus akadályok alapján felépíti az A* rácsot; a LiDAR-listát a lokális
-  DWA kezeli;
-- `dwa(...)`: előrehaladó, helyben forduló és visszatolató sebességpárokat
-  vizsgál, majd a célhoz közelebb vivő biztonságos párost választja;
+- `astar(const std::vector<Obstacle>& sensed_obstacles, bool use_sensed)`:
+    a `control()` jelenleg `astar({}, false)` formában hívja, tehát csak a
+    statikus térképből építi a rácsot; a LiDAR-listát a lokális DWA kezeli;
+- `dwa(target_x, target_y, target_index, sensed)`: előrehaladó és helyben
+    forduló keréksebességpárokat vizsgál, a negatív lineáris sebességet kizárja;
+    az elfogadott jelölteket útvonalközelséggel is pontozza;
 - `control()`: egy ciklusban egyszer gyűjti a LiDAR-akadályokat, újratervez,
   kiválasztja a waypointot, majd publikálja a `/cmd_vel` üzenetet.
 
 ### DWA biztonsági változás
 
-A DWA sebességmintája előremenő jelölteket vizsgál. A jelölt pálya
-15 lépésen keresztül, 0,1 s-os lépéssel kerül ellenőrzésre, vagyis a konfigurált
-vizsgált időtáv 1,5 s. A LiDAR-mérés pontszerű, ezért az akadály sugara `0 m`;
-a robot sugarához `0,05 m` biztonsági tartalék adódik.
+A DWA előremenő és helyben forduló jelölteket vizsgál, `0.1 s` lépéssel,
+a helyi cél távolságától függő `0.8...2.5 s` időtávon. A LiDAR-pontok sugara
+`0 m`; a robot sugara `0.22 m`, a statikus tartalék `0.03 m`, a mozgó
+akadályoké `0.08 m`. Például álló ponttól `0.36 m` távolságban a szabad tér
+`0.36 - (0.22 + 0.03 + 0) = 0.11 m`: először a test és a tartalék együttes
+sugarát számoljuk ki, majd ezt levonjuk a középpontok távolságából. Ebben a
+példában nincs ütközés. Mozgó pontnál ugyanott `0.06 m` maradna.
 
-Például egy LiDAR-pont 0,36 m-re van a jelölt robotpozíciótól:
-
-```text
-robot_radius + obstacle_radius + tartalek
-= 0,28 m + 0,00 m + 0,05 m
-= 0,33 m
-```
-
-Ez a pálya veszélyesnek minősül, ezért a DWA másik elfordulási irányt vagy
-visszatolató pályát keres. Ha egyetlen minta sem biztonságos, a korábbi
-biztonsági ág marad érvényben: a robot `v=0` sebességgel a cél irányába fordul,
-nem hajt bele az akadályba.
+Az ütközésjelzés a kezdeti szabad távolsághoz is viszonyít, így a már
+biztonsági margón belül lévő robot nem minden mozdulatát tiltja le. Az
+elfogadást ezután a fékezhetőség és a `min_ttc` feltétel dönti el. Ha nincs
+elfogadott minta, a DWA nulla lineáris sebességgel az akadálytól elfelé fordul;
+a forgásirányt a `recovery_dir_` őrzi. Ez nem tolatás és nem célirányú forgás.
 
 ### Miért oldja meg az elakadást?
 
@@ -2224,7 +2222,7 @@ ad, és a cellák körüli zónák tévesen teljes átjárókat zárhatnak le.
 
 ### Ellenőrzés
 
-A módosított csomag ellenőrzött buildje:
+A csomag ROS2-környezetben ellenőrizhető az alábbi paranccsal:
 
 ```bash
 source /opt/ros/jazzy/setup.bash
@@ -2232,7 +2230,8 @@ cd ros2_astar_dwa_gazebo
 colcon build --packages-select astar_dwa_controller --symlink-install
 ```
 
-A build sikeresen lefutott. Az RViz-ben az `/astar_path`, a sárga LiDAR-pontok
+A korábbi build eredménye nem igazolja az új pontozás Gazebo-beli működését.
+Az RViz-ben az `/astar_path`, a sárga LiDAR-pontok
 és a kék DWA-trajektória együttesét kell figyelni. Ha a robot mégsem halad,
 a vezérlő naplójában az `Az A* nem talált elérhető útvonalat` üzenet
 különválasztja a valódi útvonalhiányt a DWA biztonsági megállásától.
@@ -2434,22 +2433,190 @@ befordulást jelent.
 ## 13. C++ DWA frissítés a Python referencia alapján
 
 Az aktuális `dwa()` trajektória közben kumulálja az ívhosszt. Ha a pálya később
-ér akadályt, a jelölt nem esik ki azonnal: a `collision_distance` alapján az
-`abs(v) <= sqrt(2 * acceleration_limit * collision_distance)` fékezési feltétel
-dönt. Csak az első lépésben bekövetkező ütközés azonnali elutasítás.
+ér akadályt, a jelölt nem esik ki automatikusan: a `collision_dist` adja az
+ütközésig megtett úthosszt méterben. A fékezhetőségi ellenőrzésben a sebesség
+nem haladhatja meg a kétszeres gyorsulás és az úthossz szorzatának négyzetgyökét.
+Például `2 m/s²` lassulásnál, `0.01 m` úthosszból a sebességhatár
+`sqrt(2 * 2 * 0.01) = 0.2 m/s`. A `0.26 m/s` jelölt ekkor kiesik.
+A külön `min_ttc` vizsgálat az ütközésig szükséges minimális időt ellenőrzi.
 
-A lokális cél távolsága 1 méter alatt az adaptív előretekintés
-`max(0.5, 2 * dist_to_goal)`, egyébként a konfigurált `predict_time`. A
-sebességpont a Python referencia célsebességéhez igazodik.
+Az adaptív időtáv `clamp(goal_dist * 2.0, 0.8, predict_time_)`: a helyi
+célpont méterben mért távolságát egy `2 s/m` tényező szorozza, majd a kód
+`0.8 s` és a konfigurált `2.5 s` közé szorítja. `0.3 m` céltávolságnál
+`0.6 s` adódna, ezért `0.8 s` lesz az időtáv. A sebességpont célsebességhez
+viszonyít, az új útvonalközelségi tag ettől különálló büntetés.
 
-Az A* akadályinflációja a robot sugarát, az akadály sugarát és a biztonsági
-margin értékét együtt használja. A `control()` 0,35 méteres lokális waypointot
-követ, ezért a robot nem vágja le a rés előtti A* kanyart. A statikus LiDAR-
-falpontok kiszűrése miatt a DWA nem ellenőrzi ugyanazt a falat második,
-dinamikus akadályként.
+Az A* akadályinflációjában a robot sugara, az akadály sugara és a
+`planning_margin` szerepel. A `control()` alapértéken `0.25 m` ívhosszú
+előretekintést használ; a diszkrét pontok miatt a kiválasztott waypoint ennél
+távolabb is lehet. A `line_free()` a statikus akadályokon átvezető közvetlen
+célpontot visszalépteti. A jelenlegi `obstacles()` a statikus falpontokat is
+megtartja a DWA számára; a fal közelsége a sebességbecslést tiltja, nem a
+pontok ütközésvizsgálatát.
 
 Ellenőrzés:
 
 ```text
 colcon build --packages-select astar_dwa_controller dwa_gazebo_sim --symlink-install
 ```
+
+## 14. Visszatérés az A* útvonalra akadálykerülés után
+
+### A vezérlő célja és a hiba oka
+
+Az `astar_dwa_node.cpp` továbbra is a ROS2-integráció vezérlője. A módosítás a
+lokális DWA pontozását érinti, nem az A* keresést és nem a Python-szimulátort.
+A korábbi célirány-pont azt mérte, hogy az előrejelzés végén a robot orra
+mennyire néz a helyi cél felé. Nem mérte külön, milyen messze marad az eredeti
+útvonaltól, vagy ténylegesen közelebb kerül-e a célponthoz. Az akadálytávolság
+és a sebesség jutalma ezért előnyben részesíthetett egy oldalra eltolt ívet.
+Ez kódszinten igazolható hiányosság; a konkrét Gazebo-futás teljes ok-okozati
+bizonyításához új szimulációs próba szükséges.
+
+### Adatfolyam, függvények és adatok
+
+A `control()` a `current_path_` világkoordinátás pontpárlistát követi. A
+`waypoint_index_` csak előre halad: nyolc ponton belül a legközelebbi látható
+waypointot keresi. Ezután az útvonal ívhosszán választ előretekintési célpontot,
+és a `line_free()` segítségével ellenőrzi annak statikus láthatóságát.
+
+A hívás most `dwa(target_x, target_y, target_index, sensed)`: az első két
+paraméter a cél méterben megadott világkoordinátája, a harmadik az útvonalon
+elfoglalt indexe, a negyedik az aktuális LiDAR-akadálylista. Visszatérése a
+lineáris és szögsebesség párja, `m/s` és `rad/s` egységben. A jelöltek
+dinamikus ablakát, gyorsuláskorlátját, fékezhetőségét és ütközési idővizsgálatát
+a módosítás nem változtatja meg.
+
+Az elfogadott rollout `(x, y)` végpontjára a `path_tracking::tracking_cost()`
+büntetést számol. A vizsgált útvonaldarab a jelenlegi waypoint előtti ponttól
+az előretekintési célpont utáni pontig tart, az útvonal határaihoz igazítva.
+Így nem egy tetszőleges, későbbi útvonalág közelsége ad jutalmat, és a kerülés
+utáni eltolás nem válik új referencia-egyenessé.
+
+### Pontozás és számpélda
+
+```text
+score = alpha * heading_score + beta * clear_score + gamma * vel_score
+    - path_distance_bias * path_distance
+    - goal_distance_bias * target_distance
+```
+
+A `score` dimenzió nélküli összehasonlító érték, a nagyobb a jobb. A
+`heading_score` a rollout végén a célirány és a robot iránya közötti abszolút
+szöghibát vonja le a pi értékéből, majd pi-vel oszt; egysége nincs. A
+`clear_score` a legkisebb megmaradt biztonsági távolságot `1 m`-hez viszonyítja
+és 0 és 1 közé szorítja. A `vel_score` a jelölt sebesség és a célsebesség
+abszolút különbségét osztja a maximális lineáris sebességgel, majd ezt kivonja
+egyből. Az `alpha=5`, `beta=2`, `gamma=3` dimenzió nélküli súlyok.
+
+A `path_distance` a végpont és a helyi A* vonallánc legkisebb távolsága
+méterben. A `target_distance` a végpont és a helyi cél távolsága méterben.
+A két új paraméter `path_distance_bias=6.0` és `goal_distance_bias=2.0`,
+pontszám/méter értelmű súly. Először a három jutalmat összeadjuk, majd az
+útvonaltól és a céltól mért súlyozott távolságokat levonjuk.
+
+Konkrét példa: az útvonal az x tengelyen fut, a helyi cél `(1.0, 0.0) m`.
+Egy párhuzamos jelölt végpontja `(0.8, 0.4) m`: az útvonalhibája `0.4 m`,
+célhibája `sqrt(0.2² + 0.4²) = 0.4472 m`. Büntetése
+`6 * 0.4 + 2 * 0.4472 = 3.2944` pont. Egy visszatérő jelölt vége
+`(0.75, 0.1) m`: a két távolság `0.1 m` és `sqrt(0.25² + 0.1²) = 0.2693 m`,
+ezért büntetése `6 * 0.1 + 2 * 0.2693 = 1.1385` pont.
+
+Ha a párhuzamos jelölt három részpontja `(0.95, 0.8, 1.0)`, a visszatérőé
+`(0.9, 0.6, 1.0)`, a régi jutalmuk `9.35`, illetve `8.70` pont. A régi
+pontozás a párhuzamosat választaná. Az új értékek `6.0556` és `7.5615` pont:
+ugyanilyen feltételek mellett a visszatérő jelölt nyer. Ezek tesztbemenetek,
+nem Gazebo-ból mért trajektóriák.
+
+### Biztonsági korlátok és megfigyelés
+
+Az útvonalközelség puha büntetés, nem tiltott folyosó: az akadálykerüléshez
+szükséges eltérés továbbra is lehetséges. Az új tag csak a meglévő biztonsági
+vizsgálatokon átjutott jelöltek sorrendjét változtatja. Ez nem jelent új,
+szigorú ütközésmentességi garanciát, hiszen a jelenlegi DWA a későbbi ütközést
+a fékezhetőség alapján is elfogadhatja. Túl nagy útvonalsúly szűk helyen
+ronthatja a kerülést, ezért a súlyokat csak méréssel érdemes tovább emelni.
+
+A `Vezerles` napló új `utvonal_elteres` mezője az aktuális robotpozíció
+távolsága a vizsgált útvonaldarabtól, méterben. Ez az érték a normál DWA-ágon
+jelenik meg, nem a külön helyben forgató vagy megállító ágakon. Kerülés közben
+nőhet, utána viszont az útvonalra visszatérő robotnál csökkennie kell.
+Üres útvonalnál a `control()` megállítja a robotot, nem hívja a DWA-t.
+
+### Kapcsolat és tesztelés
+
+A hívási lánc: `control()` -> `dwa()` -> `path_tracking::tracking_cost()` ->
+`path_tracking::distance_to_path()` -> legjobb jelölt -> `/cmd_vel`.
+Az ábra ROS2-blokkja ugyanezt mutatja. A YAML tárolja az új súlyokat;
+a node az indulásakor olvassa be őket, ezért módosítás után újra kell indítani.
+Mindkét súly nullázásával az új büntetés kikapcsolható összehasonlító futáshoz.
+
+ROS2-környezetben, a `ros2_astar_dwa_gazebo` könyvtárból:
+
+```bash
+colcon build --packages-select astar_dwa_controller --symlink-install --cmake-args -DBUILD_TESTING=ON
+colcon test --packages-select astar_dwa_controller --event-handlers console_direct+
+colcon test-result --verbose
+```
+
+A teljes node fordítása és a Gazebo/RViz célbaérési próba ebben a
+Windows-munkamenetben nem igazolható: ROS2 és telepített WSL nem érhető el.
+A regressziós teszt a geometriai függvényeket és a pontozási példákat méri,
+nem a teljes robot zárt hurkú mozgását.
+
+A helyi hordozható C++ fordítóval megkísérelt ellenőrzésből nem született
+sikeres tesztfutási eredmény. A felhasználó kérésére további teszt nem fut;
+a ROS2-fordítást, a regressziós tesztet és a Gazebo-próbát ő végzi el.
+
+## 15. Útvonaltávolság számítása: path_tracking.hpp
+
+### Cél, bemenet és kimenet
+
+A `ros2_astar_dwa_gazebo/src/astar_dwa_controller/src/path_tracking.hpp`
+ROS2-től független C++17 segédfájl. A `Path` a világkoordinátás `(x, y)`
+pontpárok vektora. A `distance_to_path(path, first, last, x, y)` a megadott,
+inkluzív indextartomány vonalláncától mért legkisebb távolságot adja méterben.
+A `tracking_cost(path, first, last, x, y, target_x, target_y,
+path_distance_bias, goal_distance_bias)` a két súlyozott távolság összegét adja,
+amelyet a DWA levon a jutalompontszámból. A paraméterek a 14. fejezetben
+bemutatott rollout-végpontot, helyi célt és súlyokat jelentik.
+
+### Szakaszra vetítés hétköznapi példával
+
+Nemcsak a waypointok távolságát mérjük: az összekötő vonalra ejtett
+merőleges talppont is számít. Képzelj el egy kifeszített zsinórt két szög
+között: a robot távolságát a zsinór legközelebbi pontjától kell mérni,
+nem feltétlenül valamelyik szögtől.
+
+Minden szakasz két végpontja `start` és `end`, méterben. A `dx` és `dy` a
+két végpont koordinátakülönbsége, a `length_squared` ezek négyzetösszege,
+négyzetméterben. A `fraction` a kezdőponttól a vizsgált pontig tartó vektornak
+a szakaszirányra vett skalárszorzata, osztva a szakaszhossz négyzetével;
+dimenzió nélküli arány. Ezt a kód 0 és 1 közé szorítja, hogy a véges
+szakaszt, ne a végtelen egyenest mérje. A kapott aránnyal a kezdőponttól
+a szakasz mentén haladunk, majd e talppont és a vizsgált `(x, y)` pont
+euklideszi távolságát számítjuk.
+
+Például `(0,0)` és `(1,0) m` között, `(0.5,0.4) m` végpontra `dx=1 m`,
+`dy=0 m`, `length_squared=1 m²`, a skalárszorzat `0.5 m²`. Az arány `0.5`,
+tehát a talppont `(0.5,0) m`, a távolság `0.4 m`. Csak a waypointokhoz mérve
+hibásan `sqrt(0.5² + 0.4²) = 0.6403 m` adódna. A `(-0.3,0.4) m` pontnál
+az arány negatív lenne, ezért 0-ra szorítjuk, és a szakasz kezdőpontjához
+mérjük a `0.5 m` távolságot.
+
+### Szélső esetek és tesztelés
+
+Azonos szakaszvégpontoknál a vetítési arány 0, így nincs nullával osztás.
+Egypontos útvonalnál ponttávolságot kapunk. A kód a túl nagy indexeket az
+útvonal végéhez igazítja. Üres útvonalra a távolság pozitív végtelen; a
+vezérlő ezt az esetet korábban kezeli, így nem pontoz ilyen pályát.
+
+A `test/test_path_tracking.cpp` ellenőrzi az egyenes és kanyarodó szakaszt,
+az ismételt és egyetlen pontot, az üres listát, a végpontra szorított vetítést,
+a vizsgált tartományból kizárt későbbi visszatérő ágat, a visszatérés és a
+párhuzamos haladás összehasonlítását, a cél megközelítését és a nullázott
+súlyokkal kikapcsolt büntetést. Sikertelen állításnál kivétellel és nem nulla
+kilépési kóddal áll le. A `CMakeLists.txt` `BUILD_TESTING` esetén önálló
+`test_path_tracking` futtatható programként fordítja, és `path_tracking`
+néven regisztrálja a CTest-ben; külön ROS2- vagy tesztkönyvtár nem kell a
+teszt forrásának közvetlen C++17 fordításához.

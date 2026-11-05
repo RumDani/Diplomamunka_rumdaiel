@@ -35,4 +35,6 @@ astar_dwa_node:
     alpha: 5.0
     beta: 2.0
     gamma: 3.0
+    path_distance_bias: 6.0
+    goal_distance_bias: 2.0
     planning_margin: 0.30

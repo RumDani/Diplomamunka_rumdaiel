@@ -18,4 +18,9 @@ ament_target_dependencies(astar_dwa_node rclcpp geometry_msgs nav_msgs sensor_ms
 
 install(TARGETS astar_dwa_node DESTINATION lib/${PROJECT_NAME})
 install(DIRECTORY config launch rviz DESTINATION share/${PROJECT_NAME})
+if(BUILD_TESTING)
+  enable_testing()
+  add_executable(test_path_tracking test/test_path_tracking.cpp)
+  add_test(NAME path_tracking COMMAND test_path_tracking)
+endif()
 ament_package()

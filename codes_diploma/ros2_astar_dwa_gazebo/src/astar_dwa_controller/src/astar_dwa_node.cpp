@@ -26,6 +26,7 @@
 #include "sensor_msgs/msg/laser_scan.hpp"
 #include "tf2_ros/transform_broadcaster.h"
 #include "visualization_msgs/msg/marker_array.hpp"
+#include "path_tracking.hpp"
 
 namespace {
 // vx, vy: becsult sebesseg [m/s] (LiDAR-klaszter koveto adja), allo akadalynal 0.
@@ -76,6 +77,8 @@ public:
     alpha_ = declare_parameter("alpha", 5.0);
     beta_ = declare_parameter("beta", 2.0);
     gamma_ = declare_parameter("gamma", 3.0);
+    path_distance_bias_ = declare_parameter("path_distance_bias", 6.0);
+    goal_distance_bias_ = declare_parameter("goal_distance_bias", 2.0);
     known_obstacle_x_ = declare_parameter("known_obstacle_x", std::vector<double>{});
     known_obstacle_y_ = declare_parameter("known_obstacle_y", std::vector<double>{});
     known_obstacle_radius_ = declare_parameter("known_obstacle_radius", std::vector<double>{});
@@ -469,6 +472,7 @@ private:
   // A Python DWA logikajaval egyezo: az utkozes NEM dob el egy jeloltet automatikusan,
   // hanem az utkozesig megtett ivhossz (collision_dist) donti el a fekezesi feltetel alapjan.
   std::pair<double, double> dwa(double target_x, double target_y,
+                                std::size_t target_index,
                                 const std::vector<Obstacle> & sensed) {
     const double wa = acceleration_limit_ / wheel_radius_;
     const double left_min = std::max(-wheel_max_, wheel_left_ - wa * dt_);
@@ -565,7 +569,14 @@ private:
         const double clear_score = std::clamp(min_clear / 1.0, 0.0, 1.0);
         const double v_target = std::min(max_linear_velocity_, std::max(0.08, goal_dist * 1.4));
         const double vel_score = 1.0 - std::abs(v_target - cand.first) / max_linear_velocity_;
-        const double score = alpha_ * heading_score + beta_ * clear_score + gamma_ * vel_score;
+        // Keep the original local A* reference: a detour must not become a parallel route.
+        const std::size_t first = waypoint_index_ > 0 ? waypoint_index_ - 1 : 0;
+        const std::size_t last = std::min(target_index + 1, current_path_.size() - 1);
+        const double tracking_cost = path_tracking::tracking_cost(
+          current_path_, first, last, x, y, target_x, target_y,
+          path_distance_bias_, goal_distance_bias_);
+        const double score = alpha_ * heading_score + beta_ * clear_score + gamma_ * vel_score -
+                             tracking_cost;
         if (score > best_score) {
           best_score = score;
           best_left = left;
@@ -850,13 +861,16 @@ private:
       return;
     }
 
-    const auto velocity = dwa(target_x, target_y, sensed_obstacles);
+    const auto velocity = dwa(target_x, target_y, target_index, sensed_obstacles);
+    const double path_error = path_tracking::distance_to_path(
+      path, waypoint_index_ > 0 ? waypoint_index_ - 1 : 0,
+      std::min(target_index + 1, path.size() - 1), pose_.x, pose_.y);
     RCLCPP_INFO_THROTTLE(
       get_logger(), *get_clock(), 2000,
       "Vezerles: cel=(%.2f, %.2f), waypoint=(%.2f, %.2f), ut=%zu pont, akadaly_tav=%.2f, "
-      "cmd=(%.2f, %.2f)",
+      "utvonal_elteres=%.3f m, cmd=(%.2f, %.2f)",
       goal_x_, goal_y_, target_x, target_y, path.size(), nearest_obstacle,
-      velocity.first, velocity.second);
+      path_error, velocity.first, velocity.second);
     command.linear.x = std::clamp(velocity.first, 0.0, max_linear_velocity_);
     command.angular.z = std::clamp(velocity.second, -max_angular_velocity_, max_angular_velocity_);
     last_linear_velocity_ = command.linear.x;
@@ -880,6 +894,7 @@ private:
   double wheel_resolution_{0.5}, acceleration_limit_{2.0};
   double predict_time_{2.5}, safety_margin_{0.08}, min_ttc_{1.0};
   double alpha_{5.0}, beta_{2.0}, gamma_{3.0}, dt_{0.1};
+  double path_distance_bias_{6.0}, goal_distance_bias_{2.0};
   double wheel_left_{0.0}, wheel_right_{0.0};
   double last_linear_velocity_{0.0}, last_angular_velocity_{0.0};
   std::vector<Track> tracks_;

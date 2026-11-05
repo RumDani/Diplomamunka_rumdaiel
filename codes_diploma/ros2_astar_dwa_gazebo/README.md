@@ -97,8 +97,8 @@ fékezhetőség és pontozás), de nem azonos program: a robot sugara, a
 `predict_time`, a DWA-súlyok és az akadálybemenet eltérhetnek.
 
 A statikus falakat az A* kezeli a `rosbot.yaml` ismert akadálypontjaiból.
-A DWA a LiDAR-bemenetből csak a statikus fal közvetlen visszaverődési pontjait
-szűri ki; a mozgó akadályok távolabbi pontjai megmaradnak a lokális vizsgálathoz.
+A DWA a statikus falak LiDAR-pontjait is vizsgálja; a fal közelsége a hamis
+mozgásbecslést tiltja, nem az ütközésvizsgálatot.
 
 Ellenőrizd, hogy a bridge és a vezérlő tényleg létrehozta-e a kapcsolatokat:
 
@@ -177,8 +177,39 @@ A tesztelt célpozíció `(6,5; 4,2) m`.
 Az RViz-ben az A* útvonal zöld, a kiválasztott DWA-trajektória kék, a
 statikus akadályok pirosak, azok robotmérettel növelt biztonsági zónája
 halványsárga, a LiDAR által érzékelt pontok pedig sárgák. A vezérlő alapértelmezett
-maximális lineáris sebessége `0,32 m/s`; ez a `rosbot.yaml` paraméterben
+maximális lineáris sebessége `0,26 m/s`; ez a `rosbot.yaml` paraméterben
 állítható.
+
+## Visszateres az utvonalra akadalykerules utan
+
+A DWA az irány, szabad tér és sebesség mellett a rollout végpontjának az
+eredeti A* útvonalszakaszoktól és a helyi céltól mért távolságát is bünteti.
+A `path_distance_bias: 6.0` az oldalirányú eltérést, a
+`goal_distance_bias: 2.0` a helyi céltól maradt távolságot súlyozza.
+Ezek pontszám/méter értelmű súlyok, nem méterben megadott toleranciák.
+Nem merev útvonalkényszerek: a robot továbbra is kitérhet akadály elől.
+Mindkét érték nullázásával összehasonlítható a korábbi pontozás.
+
+Újrafordítás és regressziós teszt a ROS2 workspace gyökeréből:
+
+```bash
+colcon build --packages-select astar_dwa_controller --symlink-install --cmake-args -DBUILD_TESTING=ON
+colcon test --packages-select astar_dwa_controller --event-handlers console_direct+
+colcon test-result --verbose
+source install/setup.bash
+```
+
+Ezután állítsd le és indítsd újra a vezérlőt a fenti szimulációs launch-csal.
+A YAML-paramétereket a node induláskor olvassa; a forrás átírása önmagában nem
+változtatja meg a már futó vagy korábban lefordított programot.
+
+Az RViz-ben az `/astar_path` és a robot helyzetét, a naplóban az
+`utvonal_elteres=... m` értéket figyeld. Elfogadási feltétel: a kerülés után,
+amikor az akadály már nem zárja el a visszatérést, az eltérés csökkenjen,
+ne maradjon tartósan párhuzamos eltolás; a robot a szokásos `(6.5, 4.2) m`
+cél `0.3 m` sugarú környezetébe érjen. A súlyokat szűk rés és mindkét mozgó
+akadály mellett is próbáld ki. A regressziós teszt a geometriát és a pontozást
+ellenőrzi, nem helyettesíti ezt a Gazebo-próbát.
 
 ## Gyors hibaellenőrzés
 

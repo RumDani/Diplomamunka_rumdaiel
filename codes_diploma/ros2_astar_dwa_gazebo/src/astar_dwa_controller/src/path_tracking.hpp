@@ -1,0 +1,40 @@
+#pragma once
+
+#include <algorithm>
+#include <cmath>
+#include <cstddef>
+#include <limits>
+#include <utility>
+#include <vector>
+
+namespace path_tracking {
+using Path = std::vector<std::pair<double, double>>;
+
+inline double distance_to_path(const Path & path, std::size_t first, std::size_t last,
+                               double x, double y) {
+  if (path.empty()) return std::numeric_limits<double>::infinity();
+  first = std::min(first, path.size() - 1);
+  last = std::clamp(last, first, path.size() - 1);
+  double nearest = std::hypot(x - path[first].first, y - path[first].second);
+  for (std::size_t index = first; index < last; ++index) {
+    const auto & start = path[index];
+    const auto & end = path[index + 1];
+    const double dx = end.first - start.first;
+    const double dy = end.second - start.second;
+    const double length_squared = dx * dx + dy * dy;
+    // Measure against the finite segment, not just its waypoints or an infinite line.
+    const double fraction = length_squared > 0.0 ? std::clamp(
+      ((x - start.first) * dx + (y - start.second) * dy) / length_squared, 0.0, 1.0) : 0.0;
+    nearest = std::min(nearest, std::hypot(
+      x - start.first - fraction * dx, y - start.second - fraction * dy));
+  }
+  return nearest;
+}
+
+inline double tracking_cost(const Path & path, std::size_t first, std::size_t last,
+                            double x, double y, double target_x, double target_y,
+                            double path_distance_bias, double goal_distance_bias) {
+  return path_distance_bias * distance_to_path(path, first, last, x, y) +
+         goal_distance_bias * std::hypot(target_x - x, target_y - y);
+}
+}
