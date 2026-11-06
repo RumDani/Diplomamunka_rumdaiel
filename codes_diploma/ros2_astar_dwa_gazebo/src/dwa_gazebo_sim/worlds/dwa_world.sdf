@@ -83,6 +83,9 @@
     <model name="moving_obstacle_1">
       <static>false</static>
       <pose>2.4 0.4 0.45 0 0 0</pose>
+      <plugin filename="gz-sim-velocity-control-system" name="gz::sim::systems::VelocityControl">
+        <topic>/model/moving_obstacle_1/cmd_vel</topic>
+      </plugin>
       <link name="link">
         <collision name="collision">
           <geometry><cylinder><radius>0.18</radius><length>0.9</length></cylinder></geometry>
@@ -96,6 +99,9 @@
     <model name="moving_obstacle_2">
       <static>false</static>
       <pose>6.8 2.1 0.45 0 0 0</pose>
+      <plugin filename="gz-sim-velocity-control-system" name="gz::sim::systems::VelocityControl">
+        <topic>/model/moving_obstacle_2/cmd_vel</topic>
+      </plugin>
       <link name="link">
         <collision name="collision">
           <geometry><cylinder><radius>0.18</radius><length>0.9</length></cylinder></geometry>

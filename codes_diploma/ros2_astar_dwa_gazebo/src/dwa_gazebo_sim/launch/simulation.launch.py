@@ -4,79 +4,114 @@ import xml.etree.ElementTree as ET
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, ExecuteProcess, OpaqueFunction, SetEnvironmentVariable
+from launch.actions import DeclareLaunchArgument, ExecuteProcess, IncludeLaunchDescription, OpaqueFunction, SetEnvironmentVariable
 from launch.conditions import IfCondition
+from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
 
-def start_simulation(context):
+def start_reference(context):
+    from dwa_gazebo_sim.python_world import write_world_with_pose_odometry
+
     package_share = get_package_share_directory("dwa_gazebo_sim")
-    controller_share = get_package_share_directory("astar_dwa_controller")
     model_root = os.path.join(get_package_share_directory("turtlebot3_gazebo"), "models")
-    model_file = os.path.join(model_root, "turtlebot3_waffle", "model.sdf")
-    world_file = os.path.join(package_share, "worlds", "dwa_world.sdf")
-    model = ET.parse(model_file).getroot()
+    world_path = os.path.join(package_share, "worlds", "dwa_world.sdf")
+    model = ET.parse(os.path.join(model_root, "turtlebot3_waffle", "model.sdf")).getroot()
     drive = model.find(".//plugin[@name='gz::sim::systems::DiffDrive']")
     laser = model.find(".//sensor[@type='gpu_lidar']")
     collision = model.find(".//link[@name='base_link']/collision")
     if drive is None or laser is None or collision is None:
-        raise RuntimeError("Installed TurtleBot Waffle model is missing DiffDrive, LiDAR or body geometry")
-    from dwa_gazebo_sim.gazebo_odometry_world import add_world_pose_odometry
-    runtime_world = add_world_pose_odometry(world_file, model_file)
+        raise RuntimeError("The installed TurtleBot Waffle model lacks drive, LiDAR or body geometry")
+    wheel_radius = float(drive.findtext("wheel_radius"))
+    wheel_base = float(drive.findtext("wheel_separation")) / 2
     body_pose = [float(value) for value in collision.findtext("pose", "0 0 0 0 0 0").split()]
-    body_size = [float(value) for value in collision.findtext("geometry/box/size").split()]
-    robot_radius = math.hypot(abs(body_pose[0]) + body_size[0] / 2,
-                              abs(body_pose[1]) + body_size[1] / 2)
+    size = [float(value) for value in collision.findtext("geometry/box/size").split()]
+    robot_radius = math.hypot(abs(body_pose[0]) + size[0] / 2, abs(body_pose[1]) + size[1] / 2)
     laser_pose = [float(value) for value in laser.findtext("pose", "0 0 0 0 0 0").split()]
+    if any(abs(value) > 1e-6 for value in laser_pose[3:]):
+        raise RuntimeError("The reference expects an unrotated TurtleBot LiDAR")
+    base_pose = [float(value) for value in model.findtext(
+        ".//joint[@name='base_joint']/pose", "0 0 0.01 0 0 0").split()]
+    start_environment = LaunchConfiguration("start_environment").perform(context).lower() == "true"
+    runtime_world = write_world_with_pose_odometry(
+        world_path, os.path.join(model_root, "turtlebot3_waffle", "model.sdf")) if start_environment else world_path
     return [
         SetEnvironmentVariable("GZ_SIM_RESOURCE_PATH", os.pathsep.join(
             [model_root, os.environ.get("GZ_SIM_RESOURCE_PATH", "")])),
         ExecuteProcess(cmd=["gz", "sim", "-r", "-v", LaunchConfiguration("verbose"), runtime_world],
-                       output="screen"),
+                   output="screen", condition=IfCondition(LaunchConfiguration("start_environment"))),
         Node(
             package="ros_gz_bridge", executable="parameter_bridge", output="screen",
+            condition=IfCondition(LaunchConfiguration("start_environment")),
             arguments=[
                 "/cmd_vel@geometry_msgs/msg/Twist]gz.msgs.Twist",
+                "/model/moving_obstacle_1/cmd_vel@geometry_msgs/msg/Twist]gz.msgs.Twist",
+                "/model/moving_obstacle_2/cmd_vel@geometry_msgs/msg/Twist]gz.msgs.Twist",
                 "/odom@nav_msgs/msg/Odometry[gz.msgs.Odometry",
                 "/world_pose_odom@nav_msgs/msg/Odometry[gz.msgs.Odometry",
                 "/scan@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan",
                 "/clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock",
-                "/world/dwa_world/set_pose@ros_gz_interfaces/srv/SetEntityPose",
+                "/world/dwa_world/create@ros_gz_interfaces/srv/SpawnEntity",
+                "/world/dwa_world/remove@ros_gz_interfaces/srv/DeleteEntity",
             ],
             remappings=[("/odom", "/gazebo/wheel_odom"),
-                        ("/world_pose_odom", "/odom")],
+                        ("/world_pose_odom", "/gazebo/ground_truth_odom")],
             parameters=[{"use_sim_time": True}],
         ),
         Node(
-            package="astar_dwa_controller", executable="astar_dwa_node", name="astar_dwa_node",
-            output="screen",
-            parameters=[
-                os.path.join(controller_share, "config", "rosbot.yaml"),
-                {"use_sim_time": True,
-                 "initial_pose_x": 0.0, "initial_pose_y": 0.0,
-                 "robot_radius": robot_radius,
-                 "wheel_radius": float(drive.findtext("wheel_radius")),
-                 "wheel_base": float(drive.findtext("wheel_separation")) / 2.0,
-                 "scan_offset_x": laser_pose[0],
-                 "scan_offset_y": laser_pose[1],
-                 "scan_offset_z": laser_pose[2],
-                 "acceleration_limit": float(drive.findtext("max_linear_acceleration", "1.0")),
-                 "max_linear_velocity": 0.22,
-                 "gazebo_world": "dwa_world"},
-            ],
+            package="dwa_gazebo_sim", executable="python_simulation_node", output="screen",
+            condition=IfCondition(LaunchConfiguration("start_environment")),
+            parameters=[{"use_sim_time": True, "world_file": world_path,
+                         "laser_pose": laser_pose[:3], "base_link_z": base_pose[2],
+                         "odom_child_frame": drive.findtext("child_frame_id", "base_footprint")}],
         ),
-        Node(package="dwa_gazebo_sim", executable="moving_obstacle_node", output="screen",
-             parameters=[{"use_sim_time": True}]),
+        IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(os.path.join(
+                get_package_share_directory("slam_toolbox"), "launch", "online_async_launch.py")),
+            launch_arguments={"use_sim_time": "true", "autostart": "true",
+                              "use_lifecycle_manager": "false",
+                              "slam_params_file": os.path.join(package_share, "config", "slam.yaml")}.items(),
+            condition=IfCondition(LaunchConfiguration("start_environment")),
+        ),
+        Node(
+            package="dwa_gazebo_sim", executable="python_planner_node", output="screen",
+            condition=IfCondition(LaunchConfiguration("start_planner")),
+            parameters=[{"use_sim_time": True, "external_control_ticks": False,
+                         "map_source": "topic", "r_kerek": wheel_radius, "b": wheel_base,
+                         "rob_radius": robot_radius, "map_inflation_radius": robot_radius + 0.03,
+                         "static_safety_margin": 0.03, "w_kerek_max": 0.26 / wheel_radius,
+                         "a_max": float(drive.findtext("max_linear_acceleration", "1.0")),
+                         "obstacle_source": "tracked", "autostart": False}],
+        ),
+        Node(
+            package="dwa_gazebo_sim", executable="lidar_obstacle_node", output="screen",
+            condition=IfCondition(LaunchConfiguration("start_planner")),
+            parameters=[{"use_sim_time": True, "tracking_frame": "odom"}],
+        ),
     ]
 
 
 def generate_launch_description():
     return LaunchDescription([
-        DeclareLaunchArgument("verbose", default_value="4"),
-        DeclareLaunchArgument("software_rendering", default_value="true"),
-        SetEnvironmentVariable("LIBGL_ALWAYS_SOFTWARE", "1",
-                               condition=IfCondition(LaunchConfiguration("software_rendering"))),
+        DeclareLaunchArgument(
+            "verbose",
+            default_value="4",
+            description="Gazebo naplózási szintje (0-4)",
+        ),
+        DeclareLaunchArgument(
+            "software_rendering",
+            default_value="true",
+            description="Szoftveres Mesa renderelés bekapcsolása WSLg renderelési hibákhoz",
+        ),
+        DeclareLaunchArgument("start_planner", default_value="true",
+                      description="Set false for manual SLAM mapping without a cmd_vel controller"),
+        DeclareLaunchArgument("start_environment", default_value="true",
+                      description="Set false to start only the planner against an already running SLAM simulation"),
+        DeclareLaunchArgument("map_resolution", default_value="0.10",
+                      description="SLAM grid cell size in metres"),
+        SetEnvironmentVariable(
+            "LIBGL_ALWAYS_SOFTWARE", "1", condition=IfCondition(LaunchConfiguration("software_rendering"))),
         SetEnvironmentVariable("ROS_AUTOMATIC_DISCOVERY_RANGE", "LOCALHOST"),
-        OpaqueFunction(function=start_simulation),
+        OpaqueFunction(function=start_reference),
     ])

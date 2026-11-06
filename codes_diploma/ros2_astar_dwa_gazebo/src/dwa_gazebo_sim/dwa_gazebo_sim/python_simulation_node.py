@@ -1,0 +1,125 @@
+"""Continuous Gazebo odometry and obstacle adapter; no physics stepping."""
+
+import copy
+import math
+import time
+
+import rclpy
+from geometry_msgs.msg import TransformStamped, Twist
+from nav_msgs.msg import Odometry
+from rclpy.node import Node
+from rclpy.qos import DurabilityPolicy, QoSProfile
+from std_msgs.msg import Bool
+from tf2_ros import StaticTransformBroadcaster, TransformBroadcaster
+
+from .python_reference import create_gazebo_scene
+
+
+class GazeboSimulationAdapter:
+    def __init__(self, node):
+        self.node = node
+        self.ground_truth = None
+        self.last_diagnostic_wall = -math.inf
+        if not node.has_parameter("world_file"):
+            node.declare_parameter("world_file", "")
+        world_file = node.get_parameter("world_file").value
+        _, self.start, _, _, _, self.obstacles = create_gazebo_scene(world_file)
+        self.active = False
+        self.last_time = node.get_clock().now().nanoseconds * 1e-9
+        self.odom_pub = node.create_publisher(Odometry, "/odom", 10)
+        self.obstacle_commands = [node.create_publisher(
+            Twist, f"/model/moving_obstacle_{index + 1}/cmd_vel", 10)
+            for index in range(len(self.obstacles))]
+        latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
+        node.create_subscription(Bool, "/controller_active", self.set_active, latched)
+        node.create_subscription(Odometry, "/gazebo/wheel_odom", self.odom, 10)
+        node.create_subscription(Odometry, "/gazebo/ground_truth_odom", self.record_ground_truth, 10)
+        self.tf = TransformBroadcaster(node)
+        self.static_tf = StaticTransformBroadcaster(node)
+        self.odom_child = node.declare_parameter("odom_child_frame", "base_footprint").value
+        base_z = float(node.declare_parameter("base_link_z", 0.01).value)
+        laser_pose = node.declare_parameter("laser_pose", [-0.064, 0.0, 0.121]).value
+        base = TransformStamped()
+        base.header.frame_id, base.child_frame_id = self.odom_child, "base_link"
+        base.transform.translation.z, base.transform.rotation.w = base_z, 1.0
+        laser = TransformStamped()
+        laser.header.frame_id, laser.child_frame_id = "base_link", "base_scan"
+        laser.transform.translation.x, laser.transform.translation.y, laser.transform.translation.z = laser_pose
+        laser.transform.rotation.w = 1.0
+        self.static_tf.sendTransform([laser] if self.odom_child == "base_link" else [base, laser])
+        node.create_timer(0.10, self.tick)
+        node.get_logger().info(
+            "python-turtlebot-physical: odometry=wheel; obstacles=LiDAR; "
+            "simulation-only adapter; velocity-driven obstacles; physical cmd_vel control")
+
+    def set_active(self, message):
+        self.active = message.data
+
+    def record_ground_truth(self, message):
+        self.ground_truth = message
+
+    def odom(self, message):
+        mapped = copy.deepcopy(message)
+        mapped.header.frame_id = "odom"
+        mapped.child_frame_id = message.child_frame_id or self.odom_child
+        mapped.pose.pose.position.x += self.start[0]
+        mapped.pose.pose.position.y += self.start[1]
+        self.odom_pub.publish(mapped)
+        transform = TransformStamped()
+        transform.header, transform.child_frame_id = mapped.header, mapped.child_frame_id
+        transform.transform.translation.x = mapped.pose.pose.position.x
+        transform.transform.translation.y = mapped.pose.pose.position.y
+        transform.transform.translation.z = mapped.pose.pose.position.z
+        transform.transform.rotation = mapped.pose.pose.orientation
+        self.tf.sendTransform(transform)
+        wall_time = time.monotonic()
+        if wall_time - self.last_diagnostic_wall >= 2.0:
+            self.last_diagnostic_wall = wall_time
+            stamp = message.header.stamp.sec + message.header.stamp.nanosec * 1e-9
+            truth_position = None
+            truth_delta = None
+            error = None
+            if self.ground_truth is not None:
+                truth = self.ground_truth
+                truth_stamp = truth.header.stamp.sec + truth.header.stamp.nanosec * 1e-9
+                truth_delta = stamp - truth_stamp
+                truth_position = (truth.pose.pose.position.x, truth.pose.pose.position.y)
+                if abs(truth_delta) <= 0.2:
+                    error = math.hypot(mapped.pose.pose.position.x - truth_position[0],
+                                       mapped.pose.pose.position.y - truth_position[1])
+            self.node.get_logger().info(
+                f"DIAG_ODOM stamp={stamp:.3f} source=wheel "
+                f"raw_xy=({message.pose.pose.position.x:.3f},{message.pose.pose.position.y:.3f}) "
+                f"spawn_offset={self.start} "
+                f"odom_xy=({mapped.pose.pose.position.x:.3f},{mapped.pose.pose.position.y:.3f}) "
+                f"truth_xy={truth_position} truth_dt={truth_delta} xy_error={error} "
+                f"child={mapped.child_frame_id}")
+
+    def tick(self):
+        now = self.node.get_clock().now().nanoseconds * 1e-9
+        dt, self.last_time = max(0.0, now - self.last_time), now
+        if self.active:
+            for obstacle in self.obstacles:
+                obstacle.move(dt)
+        for obstacle, publisher in zip(self.obstacles, self.obstacle_commands):
+            command = Twist()
+            if self.active:
+                command.linear.x, command.linear.y = obstacle.vx, obstacle.vy
+            publisher.publish(command)
+
+
+class PythonSimulationNode(Node):
+    def __init__(self):
+        super().__init__("python_simulation")
+        self.adapter = GazeboSimulationAdapter(self)
+
+
+def main(args=None):
+    rclpy.init(args=args)
+    node = PythonSimulationNode()
+    try:
+        rclpy.spin(node)
+    finally:
+        node.destroy_node()
+        if rclpy.ok():
+            rclpy.shutdown()
