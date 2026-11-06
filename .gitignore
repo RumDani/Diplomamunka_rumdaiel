@@ -11,3 +11,4 @@ log/
 **/log/
 *.o
 *.so
+**/symlink_install_manifest.txt

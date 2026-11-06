@@ -1,1 +1,0 @@
-ament_cmake_symlink_install_targets("TARGET_FILES" "/mnt/c/Users/Rum Dániel/Desktop/Diplomamunka/codes_diploma/ros2_astar_dwa_gazebo/build/astar_dwa_controller/astar_dwa_node" "TARGETS" "astar_dwa_node" "DESTINATION" "lib/astar_dwa_controller")
