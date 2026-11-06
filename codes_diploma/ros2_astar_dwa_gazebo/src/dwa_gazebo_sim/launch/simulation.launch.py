@@ -56,6 +56,13 @@ def start_reference(context):
         raise RuntimeError("Map resolution must be finite and positive")
     slam_executable = "localization_slam_toolbox_node" if slam_mode == "localization" else "async_slam_toolbox_node"
     slam_config = os.path.join(package_share, "config", "slam.yaml")
+    if start_environment and not os.path.isfile(slam_config):
+        raise RuntimeError(
+            f"Installed SLAM config is missing: {slam_config}. "
+            "From the ROS workspace run: colcon build --symlink-install "
+            "--packages-select astar_dwa_controller dwa_gazebo_sim; "
+            "then source install/setup.bash and verify ros2 pkg prefix dwa_gazebo_sim. "
+            "Do not recreate the saved map: the missing file is package configuration.")
     slam_node = LifecycleNode(
         package="slam_toolbox", executable=slam_executable, name="slam_toolbox", namespace="",
         output="screen", condition=IfCondition(LaunchConfiguration("start_environment")),

@@ -21,8 +21,17 @@ git log -1 --oneline
 cd "/mnt/c/Users/Rum Dániel/Desktop/Diplomamunka/codes_diploma/ros2_astar_dwa_gazebo"
 source /opt/ros/jazzy/setup.bash
 rosdep install --from-paths src --ignore-src --rosdistro jazzy -r -y
+ls -l src/dwa_gazebo_sim/config/slam.yaml
 colcon build --symlink-install --packages-select astar_dwa_controller dwa_gazebo_sim
+source install/setup.bash
+ros2 pkg prefix dwa_gazebo_sim
+ls -l "$(ros2 pkg prefix dwa_gazebo_sim)/share/dwa_gazebo_sim/config/slam.yaml"
 ```
+
+**Ha `No such file .../config/slam.yaml` jelenik meg:** ez a csomag telepítési konfigurációja, nem a `~/maps/palya` mentés.
+Ha már a `src/...` fájl hiányzik, előbb frissítsd a megfelelő klónt; ha csak az installból hiányzik, buildeld újra a fenti két csomagot.
+Csak sikeres build és a második `ls` által megtalált fájl után indítsd a 3. fázist; az üzenetben a `ros2 pkg prefix` a most buildelt workspace-re mutasson.
+A mentett térképet emiatt nem kell újraépíteni vagy felülírni; ha a fájl továbbra is hiányzik, a teljes buildkimenetet küldd vissza.
 
 **Minden új WSL-terminál elején ezt futtasd**, a `~` mappából is működik:
 
