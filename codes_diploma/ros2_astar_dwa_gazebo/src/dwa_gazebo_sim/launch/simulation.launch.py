@@ -57,7 +57,7 @@ def start_reference(context):
     if not math.isfinite(map_resolution) or map_resolution <= 0:
         raise RuntimeError("Map resolution must be finite and positive")
     slam_executable = "localization_slam_toolbox_node" if slam_mode == "localization" else "async_slam_toolbox_node"
-    scan_motion_threshold = 0.0 if slam_mode == "localization" else 0.1
+    scan_motion_threshold = 0.1
     slam_config = os.path.join(package_share, "config", "slam.yaml")
     if start_environment and not os.path.isfile(slam_config):
         raise RuntimeError(
@@ -76,6 +76,7 @@ def start_reference(context):
                      "scan_topic": "/scan", "max_laser_range": 3.0,
                      "minimum_travel_distance": scan_motion_threshold,
                      "minimum_travel_heading": scan_motion_threshold,
+                     "check_min_dist_and_heading_precisely": True,
                      "use_lifecycle_manager": False}],
     )
     runtime_world = write_world_with_pose_odometry(
