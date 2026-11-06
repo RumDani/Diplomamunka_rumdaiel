@@ -240,28 +240,44 @@ class PythonPlannerNode(Node):
             f"goal={self.requested_goal} waypoint={self.planner.waypoint_index}")
 
     def goal(self, message):
+        self.get_logger().info(
+            f"DIAG_GOAL reason=received frame={message.header.frame_id} "
+            f"xy=({message.pose.position.x},{message.pose.position.y}) "
+            f"map_ready={self.map_ready}")
         if not self.map_ready:
-            self.get_logger().warning("Waiting for /map before accepting an RViz goal.")
+            self.get_logger().warning("DIAG_GOAL reason=waiting_map; no SLAM map received yet.")
             return
         target = (message.pose.position.x, message.pose.position.y)
         received = target
         if not all(math.isfinite(value) for value in target):
-            self.get_logger().error("Goal coordinates must be finite.")
+            self.get_logger().error("DIAG_GOAL reason=nonfinite; goal coordinates must be finite.")
             return
         transform = self.frame_transform(message.header.frame_id or self.map_frame, message.header.stamp)
         if transform is None:
+            self.get_logger().warning(
+                f"DIAG_GOAL reason=tf_missing source={message.header.frame_id} target={self.map_frame}")
             return
         offset_x, offset_y, yaw = transform
         target = (offset_x + math.cos(yaw) * target[0] - math.sin(yaw) * target[1],
                   offset_y + math.sin(yaw) * target[0] + math.cos(yaw) * target[1])
-        if not self.grid.is_free(*self.grid.world_to_grid(*target)):
-            self.get_logger().error("Goal is outside the free map; check occupancy, inflation and TF.")
-            return
         goal_cell = self.grid.world_to_grid(*target)
+        if not self.grid.is_free(*goal_cell):
+            if not self.grid.is_inside(*goal_cell):
+                reason = "outside_map"
+            elif self.grid.grid[goal_cell[0]][goal_cell[1]] == 2:
+                reason = "unknown_cell"
+            else:
+                reason = "occupied_or_inflated"
+            self.get_logger().error(
+                f"DIAG_GOAL reason={reason} xy={target} cell={goal_cell} "
+                f"grid={self.grid.width}x{self.grid.height} resolution={self.grid.resolution} "
+                f"origin=({self.grid.origin_x},{self.grid.origin_y}) "
+                f"inflation_radius={self.inflation_radius}; choose observed free space.")
+            return
         cell_center = self.grid.grid_to_world(*goal_cell)
         quantization_error = math.hypot(target[0] - cell_center[0], target[1] - cell_center[1])
         self.get_logger().info(
-            f"RViz goal: received={received} frame={message.header.frame_id}; "
+            f"DIAG_GOAL reason=accepted received={received} frame={message.header.frame_id}; "
             f"accepted={target} planning_frame={self.map_frame}; "
             f"goal_cell={goal_cell} cell_center={cell_center} "
             f"cell_center_error={quantization_error:.4f} m")

@@ -105,7 +105,7 @@ Visualization Manager:
       Class: rviz_default_plugins/TopDownOrtho
       Name: Top view
       Angle: 0
-      Scale: 3.5
+      Scale: 80
       Target Frame: map
       X: 4
       Y: 2.5
