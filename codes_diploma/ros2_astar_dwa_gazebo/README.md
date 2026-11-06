@@ -33,6 +33,20 @@ Ha már a `src/...` fájl hiányzik, előbb frissítsd a megfelelő klónt; ha c
 Csak sikeres build és a második `ls` által megtalált fájl után indítsd a 3. fázist; az üzenetben a `ros2 pkg prefix` a most buildelt workspace-re mutasson.
 A mentett térképet emiatt nem kell újraépíteni vagy felülírni; ha a fájl továbbra is hiányzik, a teljes buildkimenetet küldd vissza.
 
+**Ha a build egy már törölt `robot_controller.launch.py` fájlt akar másolni:** régi generált symlink maradt a buildben; állítsd le a futásokat, frissítsd a kódot, majd új WSL-terminálban:
+
+```bash
+cd "/mnt/c/Users/Rum Dániel/Desktop/Diplomamunka/codes_diploma/ros2_astar_dwa_gazebo"
+source /opt/ros/jazzy/setup.bash
+if [ -d build/dwa_gazebo_sim ]; then mv -- build/dwa_gazebo_sim "build/dwa_gazebo_sim_backup_$(date +%Y%m%d_%H%M%S)"; fi
+colcon build --symlink-install --packages-select astar_dwa_controller dwa_gazebo_sim
+source install/setup.bash
+ls -l "$(ros2 pkg prefix dwa_gazebo_sim)/share/dwa_gazebo_sim/config/slam.yaml"
+```
+
+Az átnevezés csak az érintett csomag generált buildjét teszi félre, a forrást és a `~/maps` mentést nem módosítja; ne hozd vissza a törölt launch-fájlt.
+Csak sikeres build és megtalált `slam.yaml` után folytasd a **3. fázissal**, nem kell újra feltérképezni.
+
 **Minden új WSL-terminál elején ezt futtasd**, a `~` mappából is működik:
 
 ```bash
