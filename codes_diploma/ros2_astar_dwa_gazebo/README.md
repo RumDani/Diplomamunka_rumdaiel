@@ -1,34 +1,21 @@
-# Rövid indítás: Gazebo + SLAM + Python A*/DWA
+# Indítás három fázisban
 
-**Sorrend: frissítés/build → SLAM → RViz → kézi térképezés → waypointos navigáció.**
-Ezt csak az első térkép elkészítésekor kell végigcsinálni; utána a 12. pont szerint indulhatsz a mentett térképpel a kezdőhelyről.
-A SLAM eleinte csak a belátott területet mutatja; nincs automatikus felfedezés.
-Minden parancsot soronként futtass, és hiba esetén állj meg.
+**Először: előkészítés → 1. feltérképezés → 2. mentés → teljes leállítás → 3. mentett térképes indítás.**
+Később csak az előkészítés és a **3. fázis** kell; ne fussanak párhuzamosan régi szimulációk.
 
-Az útvonalak a tesztgép `C:\Users\Rum Dániel\Desktop\Diplomamunka` mappáját
-használják; másik gépen ezt cseréld a saját projektmappádra, az idézőjeleket megtartva.
+## Előkészítés
 
-## 0. Frissítés: VS Code PowerShell Extension terminál
-
-A pull a követett távoli ágból frissít; a merge önmagában nem tölt le változást.
+**VS Code PowerShell: frissítés** – a pull a követett távoli ágból frissít, a merge önmagában nem tölt le semmit.
 
 ```powershell
 Set-Location "C:\Users\Rum Dániel\Desktop\Diplomamunka"
-git rev-parse --show-toplevel
-git status --short --branch
 git fetch --all
 git switch cpp-rethink
 git pull --ff-only
-git log -1 --oneline --decorate
-git rev-list --left-right --count 'HEAD...@{upstream}'
+git log -1 --oneline
 ```
 
-Az utolsó sorban `0 0` egyezést jelent; a helyi módosításokat ne töröld.
-A remote neve lehet `master` is; a `final_v1` a commit szövegében nem a HEAD verziója.
-
-## 1. Build: WSL/Linux terminál
-
-Ez telepíti a függőségeket és a friss forrásból újraépíti a futtatott csomagokat.
+**WSL: build, csak kódfrissítés után** – a forrás frissítése nem építi újra a futó programot.
 
 ```bash
 cd "/mnt/c/Users/Rum Dániel/Desktop/Diplomamunka/codes_diploma/ros2_astar_dwa_gazebo"
@@ -37,13 +24,7 @@ rosdep install --from-paths src --ignore-src --rosdistro jazzy -r -y
 colcon build --symlink-install --packages-select astar_dwa_controller dwa_gazebo_sim
 ```
 
-WSL-ben ugyanazt a projektmásolatot használd; külön WSL-klónban külön pull kell.
-
-## Minden új futtatóterminál elején: WSL/Linux
-
-Ez az adott terminált a megfelelő ROS-workspace-re és helyi kommunikációra állítja.
-
-Az alábbi blokk a `~` mappából is indítható; nem feltételezi, hogy már egy Git-repóban állsz.
+**Minden új WSL-terminál elején ezt futtasd**, a `~` mappából is működik:
 
 ```bash
 source /opt/ros/jazzy/setup.bash
@@ -58,514 +39,107 @@ mkdir -p "$XDG_RUNTIME_DIR" results/diagnostics
 chmod 700 "$XDG_RUNTIME_DIR"
 ```
 
-## 2. Terminál A: Gazebo és SLAM
+Másik gépen az útvonalat cseréld a sajátodra, az idézőjeleket megtartva; hiba esetén állj meg.
 
-Elindítja a fizikai világot, kerékodometriát és LiDAR-térképezést, automatikus vezérlő nélkül.
+## 1. Feltérképezés
+
+**A terminál: Gazebo + új SLAM-térkép** – a planner még nem vezérli a robotot.
 
 ```bash
-ros2 launch dwa_gazebo_sim simulation.launch.py start_planner:=false map_resolution:=0.10 2>&1 | tee "results/diagnostics/slam_$(date +%Y%m%d_%H%M%S).log"
+ros2 launch dwa_gazebo_sim simulation.launch.py slam_mode:=mapping start_planner:=false map_resolution:=0.10 2>&1 | tee "results/diagnostics/mapping_$(date +%Y%m%d_%H%M%S).log"
 ```
 
-Ezt a terminált a térképezés és a navigáció alatt is hagyd futni.
-
-## 3. Terminál B: RViz
-
-Megjeleníti a SLAM `/map` térképét, a LiDAR-t és a zöld globális `/astar_path` útvonalat.
+**B terminál: RViz** – itt látod a feltérképezett területet; Fixed Frame: `map`.
 
 ```bash
 ros2 launch dwa_gazebo_sim visualization.launch.py
 ```
 
-Fixed Frame: `map`; a `Planner inflated map` réteg a robotmérettel felfújt tiltott területet mutatja.
-
-## 4. Terminál C: kézi feltérképezés
-
-Az aktív teleop terminál billentyűivel lassan körbevezetheted a robotot, miközben az RViz térképe bővül.
+**C terminál: kézi mozgatás** – az aktív teleop terminál billentyűivel lassan járd körbe a pályát.
 
 ```bash
 ros2 run teleop_twist_keyboard teleop_twist_keyboard --ros-args -p speed:=0.15 -p turn:=0.5
 ```
 
-Ha kész a kívánt terület, állítsd meg a robotot és zárd be a teleopot Ctrl+C-vel; az A és B terminál maradjon futva.
+**A térképnek az RViz-ben látszania és bővülnie kell.** Ha üres a nézet, `tf_missing`, `waiting_map` vagy tartós `queue is full` látszik, ne ments és ne indíts lokalizációt.
 
-## 5. Terminál C: waypointos navigáció
+## 2. Mentés
 
-Csak a Python plannert és LiDAR-követőt indítja el a már futó Gazebo/SLAM mellé.
+**C terminál:** állítsd meg a robotot, majd Ctrl+C-vel zárd be a teleopot; az A és B terminál maradjon futva.
 
-```bash
-ros2 topic pub --once /cmd_vel geometry_msgs/msg/Twist '{}'
-ros2 launch dwa_gazebo_sim simulation.launch.py start_environment:=false start_planner:=true 2>&1 | tee "results/diagnostics/planner_$(date +%Y%m%d_%H%M%S).log"
-```
-
-RViz: **2D Goal Pose → ismert szabad területen kattintás, húzás, elengedés**.
-Ne fusson közben teleop vagy második planner; az ismeretlen/foglalt/felfújt célcellát a rendszer elutasítja.
-
-## 6. Terminál D: állapotellenőrzés
-
-Ezekkel ellenőrizhető a tényleges build, az aktív SLAM és a cél-/szenzortopicok kapcsolata.
+Először ellenőrizd, hogy valóban érkezik térkép:
 
 ```bash
-git log -1 --oneline
-ros2 pkg prefix dwa_gazebo_sim
 ros2 lifecycle get /slam_toolbox
-ros2 param get /astar_dwa_node map_source
-ros2 topic info /map --verbose
-ros2 topic info /tracked_obstacles --verbose
-ros2 topic info /goal_pose --verbose
-ros2 topic info /cmd_vel --verbose
+timeout 10s ros2 topic echo --once /map --field info
 ```
 
-Elvárt: SLAM `active`, planner `map_source=topic`, `/tracked_obstacles` publisher `lidar_obstacles`, induláskor `DIAG_CONFIG schema=slam-waypoints-1`.
+Elvárt: `active`, valamint pozitív `width` és `height`; ha nincs adat vagy hibát kapsz, állj meg és küldd az A terminál naplóját.
 
-## 7. Terminál E: TF-fa
-
-A futó rendszer koordinátakapcsolatait PDF-be menti és megnyitja.
+Ha már létezik régi `~/maps/palya` mentés, előbb másold el:
 
 ```bash
-cd "/mnt/c/Users/Rum Dániel/Desktop/Diplomamunka/codes_diploma/ros2_astar_dwa_gazebo/results/diagnostics"
-ros2 run tf2_tools view_frames --output frames
-xdg-open frames.pdf
+cp -a "$HOME/maps" "$HOME/maps_backup_$(date +%Y%m%d_%H%M%S)"
 ```
 
-Hiányzó eszközök: `sudo apt install ros-jazzy-tf2-tools graphviz xdg-utils`.
-
-## 8. Terminál F: élő robotpóz
-
-Folyamatosan mutatja a robot SLAM-térképen becsült helyzetét; Ctrl+C-vel állítható le.
-
-```bash
-ros2 run tf2_ros tf2_echo map base_link
-```
-
-## 9. Terminál G: rqt_graph
-
-Megmutatja a ROS node-ok és topicok kapcsolatait, nem a geometriai TF-fát.
-
-```bash
-ros2 run rqt_graph rqt_graph
-```
-
-Hiányzó csomag: `sudo apt install ros-jazzy-rqt-graph`.
-
-## 10. Terminál H: az elkészült térkép mentése
-
-Álló robot és továbbra is futó SLAM mellett, egy előkészített WSL-terminálból elmenti a térképképet és a később folytatható SLAM-állapotot.
+Ezután mentsd a térképképet:
 
 ```bash
 mkdir -p "$HOME/maps"
 MAP="$HOME/maps/palya"
-ros2 run nav2_map_server map_saver_cli -f "$MAP"
+ros2 run nav2_map_server map_saver_cli -f "$MAP" --ros-args -p save_map_timeout:=10.0
+```
+
+**Csak sikeres térképképmentés után** mentsd a folytatható SLAM-állapotot ugyanebben a terminálban:
+
+```bash
 ros2 service call /slam_toolbox/serialize_map slam_toolbox/srv/SerializePoseGraph "{filename: '$MAP'}"
 ls -lh "$MAP"*
 ```
 
-- `.yaml` és térképkép: foglaltsági térkép, például navigációhoz.
-- `.posegraph` és `.data`: SLAM-pózgráf és mérési adatok a térképezés folytatásához.
-- A serialize válaszában `result: 0` sikert jelent; hiba esetén a teljes kimenetet küldd vissza.
+Eredmény: `.yaml` + térképkép és `.posegraph` + `.data`; a későbbi indítás a két utóbbit használja.
+A serialize `result: 0` csak sikeres fájlkiírást jelent, nem bizonyít használható térképet.
+**Sikeres mentés után állítsd le az A és B terminál futását is Ctrl+C-vel.**
 
-A fájlok a WSL `~/maps` mappájába kerülnek, állandó `palya` néven; ha már van ilyen mentés, előbb készíts biztonsági másolatot a 13. pont szerint.
-A 12. pont a `.posegraph` és `.data` állapotot használja, nem a térképképet; mindkét SLAM-fájlt együtt őrizd meg.
+## 3. Indítás a mentett térképpel
 
-## 11. Új térkép építése a nulláról
-
-Üres térképet épít a nulláról; a meglévő mentések ettől még nem törlődnek vagy íródnak felül.
-
-Először állítsd meg a robotot, zárd be a teleopot/plannert, majd a Gazebo–SLAM termináljában is nyomj Ctrl+C-t; ezután előkészített WSL-terminálban:
-
-```bash
-ros2 launch dwa_gazebo_sim simulation.launch.py slam_mode:=mapping start_planner:=false map_resolution:=0.10
-```
-
-Másik előkészített terminálban járd körbe újra a pályát:
-
-```bash
-ros2 run teleop_twist_keyboard teleop_twist_keyboard --ros-args -p speed:=0.15 -p turn:=0.5
-```
-
-## 12. Későbbi használat: újraindítás a kezdőhelyről, mentett térképpel
-
-Lokalizációs módban a korábban mentett térképet használja, újraindított Gazebóban a robot eredeti kezdőhelyéről; nincs új kézi feltérképezés.
-
-Először állítsd meg a robotot, zárd be a teleopot/plannert, az RViz-t és a régi Gazebo–SLAM launch-t Ctrl+C-vel; új WSL-terminálban futtasd a fenti közös előkészítést, majd:
+**A terminál: új Gazebo a kezdőhelyről + mentett térképes lokalizáció** – nem kell újra kézzel feltérképezni.
 
 ```bash
 ros2 launch dwa_gazebo_sim simulation.launch.py slam_mode:=localization map_file:="$HOME/maps/palya" initial_x:=0.8 initial_y:=0.8 initial_yaw:=0.0 2>&1 | tee "results/diagnostics/localization_$(date +%Y%m%d_%H%M%S).log"
 ```
 
-A `map_file` a kiterjesztés nélküli teljes előtag; ne `.yaml`, `.posegraph` vagy `.data` fájlnevet adj meg.
-Hiányzó `.posegraph` vagy `.data` esetén az indítás hibával megáll; ilyenkor ne indíts újabb példányt.
-
-Másik előkészített terminálban indítsd az RViz-t:
+**B terminál: RViz és céladás** – megjeleníti a mentett térképet és a globális utat.
 
 ```bash
 ros2 launch dwa_gazebo_sim visualization.launch.py
 ```
 
-Ellenőrizd a robot helyét a mentett térképen; az `initial_x/y/yaw` csak map-frame-beli kezdőpóz-becslés, nem a Gazebo robotjának áthelyezése.
-A `(0.8,0.8,0)` a példapálya feltételezett induló becslése; ha a térképen máshol jelenik meg a robot, használd a **2D Pose Estimate** eszközt a mentett térképen a helyes kezdőhelyen és irányban, vagy javítsd az argumentumokat.
-Csak sikeres lokalizáció és a `map → odom → base_link` TF megléte után adj **2D Goal Pose** célt.
+1. Ellenőrizd a robot térképbeli helyét; szükség esetén **2D Pose Estimate**-tel jelöld a helyét és irányát.
+2. **2D Goal Pose:** ismert szabad helyen kattints, húzd meg az irányt, majd engedd el.
+3. A robot az A*-út waypointjait követi DWA-val; ne indíts mellé teleopot vagy második plannert.
 
-Ez az indítás a plannert is elindítja; ne indíts mellé külön `start_environment:=false` példányt vagy teleopot.
-Új célra készül a globális út, utána a régi waypointos DWA-logika követi; nincs automatikus globális újratervezés.
-Lokalizációs módban a mentett pózgráf nem épül újra, és új pózgráf-mentést sem ebből a módból kell kérni.
+Az `initial_x/y/yaw` a mentett térképben adott becslés, nem a Gazebo robotjának áthelyezése; a példa nem garantálja a helyes lokalizációt.
+A `map_file` kiterjesztés nélküli előtag: ugyanahhoz a mentéshez tartozó `.posegraph` és `.data` kell.
+Az út RViz-ben és Gazebóban ugyanabból a `/astar_path`-ból rajzolódik; a Gazebo-illesztés csak vizualizáció, nem vezérlési visszacsatolás.
 
-## Globális útvonal RViz-ben és Gazebóban
+## Új térkép vagy felülírás
 
-Az RViz a `/astar_path` map-frame útját mutatja, a Gazebo ugyanennek a vizuális, ütközésmentes vonalát rajzolja a padlóra, külön indítóparancs nélkül.
-A rajzoló a SLAM-TF-et és időben illesztett odom/Gazebo-pózokat használ csak a megjelenítés illesztésére; ettől nem módosul a vezérlő helyzetbecslése vagy az A*/DWA.
-Ha nem jelenik meg, küldd a `DIAG_PATH` sorokat: `waiting_alignment`, `alignment_mismatch`, `tf_missing`, `stale_alignment` vagy `drawn` segít az ok elkülönítésében.
-Hiányzó frame-illesztéskor inkább nem rajzol, mint hogy téves helyen mutassa az utat; a valós megjelenítést Gazebo-futásban még ellenőrizni kell.
+Állíts le minden futást, majd ismételd az **1. és 2. fázist**, a régi mentés biztonsági másolatával; ezután a **3. fázissal** indulj.
+Lokalizációs módban a mentett térkép nem frissül automatikusan; a fájl felülírása nem cseréli le egy már futó node térképét.
 
-## 13. A mentett térkép későbbi frissítése vagy felülírása
+## Csak hibakereséshez
 
-Előbb ments másolatot a régi térképfájlokról, majd új térképezési futásból ugyanarra a `palya` névre ments; az aktív lokalizáció nem frissíti a mentett térképet.
-
-```bash
-MAP="$HOME/maps/palya"
-BACKUP="$HOME/maps/backup_$(date +%Y%m%d_%H%M%S)"
-mkdir -p "$BACKUP"
-cp -p "$MAP".* "$BACKUP/"
-```
-
-Csak sikeres másolat után állítsd le a régi futást, végezd el a 11. pont szerinti új feltérképezést, majd álló robot és futó **mapping** mód mellett írd felül az állandó mentést:
+Küldd vissza a `results/diagnostics/mapping_*.log` vagy `localization_*.log` fájlt az indulástól a hibáig; RViz-problémánál képernyőképet is.
+Külön előkészített WSL-terminálban a következő parancsokat egyesével futtasd, a folyamatos kimenetet Ctrl+C-vel zárd le:
 
 ```bash
-MAP="$HOME/maps/palya"
-ros2 run nav2_map_server map_saver_cli -f "$MAP"
-ros2 service call /slam_toolbox/serialize_map slam_toolbox/srv/SerializePoseGraph "{filename: '$MAP'}"
-ls -lh "$MAP"*
-```
-
-Ha bármelyik mentés hibás, ne használd az esetleg részleges fájlkészletet: a régi teljes készlet megvan a `BACKUP` mappában.
-A következő használathoz állítsd le a mapping futást és indítsd újra a 12. pont lokalizációs parancsával; a fájl felülírása nem cseréli le egy már futó node memóriájában lévő térképet.
-
-## Naplók és leállítás
-
-Hibánál a `results/diagnostics/slam_*.log`, `planner_*.log` vagy `localization_*.log` fájlt küldd vissza az indulástól az esetig, RViz-problémánál képernyőképpel.
-Leállítás: előbb teleop/planner, majd RViz és Gazebo/SLAM termináljában Ctrl+C; egyszerre csak egy szimuláció fusson.
-
-**Ellenőrzési korlát:** az indítás és rajzolás editor-/konfigurációs ellenőrzésen ment át; a mentett térképes lokalizáció, a megjelenítés, a kikerülés és a SLAM-pontosság még nincs ROS/Gazebo-futással igazolva.
-
-<details>
-<summary>Korábbi részletes referencia és hibakeresés</summary>
-
-Ez a blokk korábbi indítási állapotot is tartalmaz; a mentett térképhez és útvonalrajzhoz a fenti rövid útmutató az irányadó.
-
-## Python A* + DWA, LiDAR es SLAM Gazeboban
-
-Az aktiv inditas a valtozatlan Matplotlibes Python A*/DWA magot hasznalja.
-A `cpp-rethink` ag neve megmaradt, de nem a C++ controller fut.
-A `/scan` adja a LiDAR-bemenetet, a SLAM Toolbox a `/map`-et es a
-`map -> odom` korrekciot. A robotot `/cmd_vel` hajtja; az odometria a
-kerekekbol szarmazik. A Gazebo ground truth csak a `DIAG_ODOM` meresi
-osszeveteseben szerepel, nem javitja vissza a robot tervezesi poziciojat.
-
-Uj celra egyszer keszul globalis A*-ut, utana waypointos kovetes es lokalis
-DWA mukodik. A SLAM terkepfrissitese azonos frame-ben nem torli az utat,
-nem lepteti vissza a waypoint-indexet es nem indit uj A*-keresest.
-Nincs automatikus ismeretlen-terulet felfedezes: csak feltetelezett szabad
-terkepcellaba adhato cel. A dinamikus akadalyok a fizikai motorban
-sebessegvezerelt testek, nem `set_pose`-szal athelyezett objektumok.
-Ez idealizalt modell, nem kalibralt valos robot vagy ember modellje.
-
-## Frissítés a VS Code PowerShell Extension termináljából
-
-A Git-parancsok ebben a terminálban is működnek. A ROS-os `source`, `colcon`
-és `ros2` parancsokat viszont később WSL/Linux terminálban kell futtatni.
-A parancsokat soronként futtasd; hiba esetén ne folytasd automatikusan.
-
-### Mit jelent a fetch, pull és merge?
-
-- `fetch`: letölti a távoli Git-állapotot, de a nyitott forrásfájlokat nem írja át.
-- `pull`: letölti a követett távoli ág állapotát és beilleszti a jelenlegi helyi ágba.
-- `pull --ff-only`: csak előretekerhető, merge-commit nélküli frissítést enged.
-	Ha a két ág eltérő saját commitokat tartalmaz, hibával megáll; ez szándékos védelem.
-- `merge`: már letöltött ágakat egyesít; önmagában nem tölt le GitHub-változásokat.
-- `switch`: ágat vált; a pull önmagában nem vált át a kívánt ágra.
-
-A bővítmény Pull/Merge/Sync művelete a kiválasztott repositoryra és ágra hat.
-Ezért a gomb megnyomása nem bizonyítja, hogy a megfelelő mappát vagy ágat
-frissítetted. Ezen a projekten nem kell a `master` ágat kézzel belemerge-elni
-a `cpp-rethink` ágba. Az alábbi terminálos ellenőrzés egyértelműbb.
-
-### 1. Ellenőrizd a projektmappát és a helyi változásokat
-
-```powershell
-Get-Location
-git rev-parse --show-toplevel
-git status --short --branch
-git remote -v
-```
-
-A repoútvonal ugyanahhoz a projektmásolathoz tartozzon, amelynek fájljait
-a VS Code-ban nézed. A távoli cím a `RumDani/Diplomamunka_rumdaiel` repository
-legyen. Az `M` helyi módosítást jelent, nem régi verziót; például a módosított
-Word-dokumentumot nem kell törölni. Ne használj `reset --hard` vagy kényszerített
-checkout parancsot a pull helyettesítésére.
-
-### 2. Töltsd le és frissítsd a megfelelő ágat
-
-```powershell
-git fetch --all
-git switch cpp-rethink
-git branch -vv
-git pull --ff-only
-```
-
-A `git branch -vv` sorában például `[origin/cpp-rethink]` vagy
-`[master/cpp-rethink]` látható. A második példában a `master` a remote neve,
-nem a helyi `master` ág. A távoli név nem minden gépen `origin`, ezért a
-beállított upstreamet használó `git pull --ff-only` parancsot alkalmazzuk.
-Ha nincs upstream, az ág nem található vagy konfliktust jelez, állj meg,
-és küldd vissza a teljes kimenetet; ne nyomj rá találomra Merge-re.
-
-### 3. Bizonyítsd a frissítést
-
-```powershell
-git status --short --branch
-git log -1 --oneline --decorate
-git rev-list --left-right --count 'HEAD...@{upstream}'
-```
-
-Az utolsó sorban `0 0` teljes commit-egyezést jelent a követett távoli ággal.
-`0 N` esetén még le vagy maradva; `N 0` esetén saját helyi commitjaid vannak;
-ha mindkettő pozitív, az ágak szétváltak, és egyeztetni kell a folytatást.
-Az `Everything up-to-date` vagy `Already up to date` csak a kiválasztott
-repository és upstream viszonyáról szól, nem egy másik gép fájljairól.
-
-A SLAM-es tesztkód alapcommitja `f4c75e9`; a későbbi README- vagy kódjavítások
-miatt a HEAD ennél újabb is lehet. A commit üzenetében szereplő `final_v1`
-nem azt jelenti, hogy a HEAD azon a régi tagen áll. A `.venv` a promptban
-csak az aktív Python-környezet neve, nem Git-verzió.
-
-### 4. A forrás frissítése nem a futó program frissítése
-
-A sikeres pull után a megfelelő WSL-mappában újra kell buildelni, betölteni
-az ottani `install/setup.bash` fájlt, és újraindítani a futást. A következő
-Terminal 0 blokk ezt tartalmazza. Ha WSL-ben külön klónod van, nem a
-Windows-mappa `/mnt/c/...` megfelelőjét használod, abban a klónban külön
-fetch/pull kell. A `ros2 pkg prefix dwa_gazebo_sim` az elvárt workspace
-`install` könyvtárába mutasson.
-
-Az aktuális futásban `DIAG_CONFIG schema=slam-waypoints-1` és a tényleges
-Python `source=` útvonal jelenik meg. Régi `cpp-world-pose...` üzenet régi
-vagy másik buildet jelent. A friss commit önmagában nem bizonyít sikeres
-SLAM-et vagy akadálykikerülést; azt a futási naplóval kell ellenőrizni.
-
-## Terminal 0: regi folyamatok leallitasa
-
-```bash
-source /opt/ros/jazzy/setup.bash
-pkill -TERM -f 'ros2 launch dwa_gazebo_sim (simulation|visualization)\.launch\.py' 2>/dev/null || true
-pkill -TERM -f '/(python_planner_node|python_simulation_node|lidar_obstacle_node|gazebo_path_node|moving_obstacle_node)( |$)' 2>/dev/null || true
-pkill -TERM -x astar_dwa_node 2>/dev/null || true
-pkill -TERM -f '/async_slam_toolbox_node( |$)' 2>/dev/null || true
-pkill -TERM -f '/parameter_bridge( |$)' 2>/dev/null || true
-pkill -TERM -x rviz2 2>/dev/null || true
-pkill -TERM -f 'gz sim|gz-sim-[0-9]+-(server|gui)' 2>/dev/null || true
-export ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST
-ros2 daemon stop
-ros2 daemon start
-```
-
-## Terminal 0: cpp-rethink lehuzasa es build
-
-```bash
-source /opt/ros/jazzy/setup.bash
-cd "/mnt/c/Users/Rum Dániel/Desktop/Diplomamunka/codes_diploma/ros2_astar_dwa_gazebo"
-git fetch --all
-git switch cpp-rethink
-git pull --ff-only
-rosdep install --from-paths src --ignore-src --rosdistro jazzy -r -y
-colcon build --symlink-install --packages-select astar_dwa_controller dwa_gazebo_sim
-source install/setup.bash
-```
-
-Hianyzo ROS-csomagok: `sudo apt install ros-jazzy-slam-toolbox ros-jazzy-teleop-twist-keyboard`.
-Az `astar_dwa_controller` csomag a Python magot es az RViz-beallitasokat is
-telepiti, ezert ezt is buildelni kell. Az ottani C++ binaris nem az aktiv planner.
-
-## Terminal 1: SLAM, Python waypointok es fizikai Gazebo
-
-```bash
-source /opt/ros/jazzy/setup.bash
-cd "/mnt/c/Users/Rum Dániel/Desktop/Diplomamunka/codes_diploma/ros2_astar_dwa_gazebo"
-source install/setup.bash
-export ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST
-export DISPLAY=:0
-export TURTLEBOT3_MODEL=waffle
-export XDG_RUNTIME_DIR=/tmp/gazebo-runtime
-mkdir -p "$XDG_RUNTIME_DIR"
-chmod 700 "$XDG_RUNTIME_DIR"
-mkdir -p results/diagnostics
-RUN_LOG="results/diagnostics/run_$(date +%Y%m%d_%H%M%S).log"
-set -o pipefail
-{
-	git rev-parse --show-toplevel
-	git status --short --branch
-	git log -1 --oneline --decorate
-	ros2 pkg prefix dwa_gazebo_sim
-	ros2 pkg prefix astar_dwa_controller
-	ros2 launch dwa_gazebo_sim simulation.launch.py software_rendering:=true map_resolution:=0.10
-} 2>&1 | tee "$RUN_LOG"
-```
-
-Elvart uzenetek: `DIAG_CONFIG schema=slam-waypoints-1`, `python-lidar-reference`,
-`python-turtlebot-physical` es `LiDAR-only tracker`. A SLAM lifecycle allapota
-`active` legyen. C++ indulouzenet regi vagy masik buildet jelez.
-A `RUN_LOG` fajlt kuldd vissza hibakereseskor, az indulastol az esetig.
-Ne vagd ki csak a hibas sort: az elozo bemenetek es a megallasi ok is szukseges.
-
-A `final_v1` csak az algoritmus alapja: ott meg ismert Gazebo-akadalyadatok es
-vilagpozicios odometria volt. Az aktualis szenzoros/SLAM valtozat nincs
-Gazebo-futassal vagy valos roboton igazolva.
-
-## Terminal 2: RViz es celadas
-
-```bash
-source /opt/ros/jazzy/setup.bash
-cd "/mnt/c/Users/Rum Dániel/Desktop/Diplomamunka/codes_diploma/ros2_astar_dwa_gazebo"
-source install/setup.bash
-export ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST
-export DISPLAY=:0
-export QT_QPA_PLATFORM=xcb
-export QT_X11_NO_MITSHM=1
-export XDG_RUNTIME_DIR=/tmp/gazebo-runtime
-mkdir -p "$XDG_RUNTIME_DIR"
-chmod 700 "$XDG_RUNTIME_DIR"
-ros2 launch dwa_gazebo_sim visualization.launch.py
-# Fixed Frame: map. Celadaszkoz: 2D Goal Pose.
-# A SLAM terkep es a zold A*-ut az RViz-ben lathato.
-```
-
-A `Planner inflated map` reteget bekapcsolva lathato a robotmerettel bovelt
-terkep. A korabbi Gazebo-padlo utvonalrajzolas alapbol ki van kapcsolva,
-mert a SLAM `map` koordinatai nem azonosithatok vakon Gazebo-vilagkoordinatakkal.
-
-## Terminal 3: odometria, cel es vezerles ellenorzese
-
-```bash
-source /opt/ros/jazzy/setup.bash
-cd "/mnt/c/Users/Rum Dániel/Desktop/Diplomamunka/codes_diploma/ros2_astar_dwa_gazebo"
-source install/setup.bash
-export ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST
-ros2 node list
 ros2 lifecycle get /slam_toolbox
-ros2 param get /slam_toolbox resolution
-ros2 param get /astar_dwa_node map_source
-ros2 topic info /cmd_vel
-ros2 topic info /scan
-ros2 topic info /map --verbose
-ros2 topic info /tracked_obstacles --verbose
-ros2 topic info /odom
-ros2 topic info /gazebo/wheel_odom
-ros2 topic info /goal_pose
-ros2 topic echo --once /odom
-ros2 topic echo --once /gazebo/wheel_odom
-ros2 topic echo --once /gazebo/ground_truth_odom
-```
-
-A `/tracked_obstacles` egyetlen publishere a `lidar_obstacles` legyen.
-A `/map` es `map -> odom` csak a SLAM-tol erkezzen. A robot `/cmd_vel`
-topicjat egyszerre csak egy controller vagy teleop vezerelje.
-
-## Terminal 4: TF-fa mentese es megjelenitese
-
-Az alabbi parancsokat te futtasd WSL/Linux terminalban, mikozben a Terminal 1
-szimulacioja fut. Nem elore megrajzolt abrakat inditanak: az aktualis ROS
-adatokbol kerik le a TF-fat, illetve a Terminal 6-ban a node/topic grafot.
-
-A lanc `map -> odom -> base_footprint -> base_link -> base_scan` lehet;
-a `base_footprint` koztes keret az SDF hajtasbeallitasatol fugg.
-A `view_frames --output frames` a futas kozben latott TF-fat
-a munkakonyvtarba menti (`frames.gv`, `frames.pdf`), ezert ezt a kulon
-diagnosztikai mappabol inditsd:
-
-```bash
-source /opt/ros/jazzy/setup.bash
-cd "/mnt/c/Users/Rum Dániel/Desktop/Diplomamunka/codes_diploma/ros2_astar_dwa_gazebo/results/diagnostics"
-export ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST
-export DISPLAY=:0
-ros2 run tf2_tools view_frames --output frames
-xdg-open frames.pdf
-```
-
-Hianyzo eszkozok telepitese: `sudo apt install ros-jazzy-tf2-tools graphviz xdg-utils`.
-Az `xdg-open` a PDF-et az alapertelmezett megjelenitoben nyitja meg; ha nincs
-PDF-megjelenito, a `frames.pdf` VS Code-bol is megnyithato.
-
-## Terminal 5: eloben kovetheto TF-transzformacio
-
-```bash
-source /opt/ros/jazzy/setup.bash
-export ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST
-ros2 run tf2_ros tf2_echo map base_link
-```
-
-## Terminal 6: ROS node- es topicgraf
-
-Ezt a szimulacio es az RViz futasa kozben inditsd. Az `rqt_graph` a node-ok
-kozotti ROS topic-kapcsolatokat mutatja; nem azonos a fenti geometriai TF-faval.
-
-```bash
-source /opt/ros/jazzy/setup.bash
-cd "/mnt/c/Users/Rum Dániel/Desktop/Diplomamunka/codes_diploma/ros2_astar_dwa_gazebo"
-source install/setup.bash
-export ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST
-export DISPLAY=:0
-export QT_QPA_PLATFORM=xcb
+ros2 run tf2_ros tf2_echo odom base_scan
+ros2 run tf2_ros tf2_echo map odom
 ros2 run rqt_graph rqt_graph
 ```
 
-Ha a parancs nem talalja a csomagot: `sudo apt install ros-jazzy-rqt-graph`.
+TF-fa mentése: `cd results/diagnostics`, majd `ros2 run tf2_tools view_frames --output frames` és `xdg-open frames.pdf`.
 
-## Kezi feltérkepezes, majd waypointos navigacio ugyanabban a futasban
-
-A Terminal 1 launch parancsat eloszor `start_planner:=false` argumentummal
-inditsd. A Gazebo, bridge, odometria es SLAM fut; controller es LiDAR-tracker nem.
-Kulon elokeszitett ROS-terminalban mozgasd a robotot:
-
-```bash
-ros2 run teleop_twist_keyboard teleop_twist_keyboard --ros-args -p speed:=0.15 -p turn:=0.5
-```
-
-Ha az RViz-ben felépult a kivant szabad terulet, allitsd le a teleopot,
-de ne a Gazebot vagy a SLAM-et. Egy uj, a Terminal 1 szerint elokeszitett
-terminalban inditsd csak a waypointos plannert es kovetot:
-
-```bash
-ros2 topic pub --once /cmd_vel geometry_msgs/msg/Twist '{}'
-ros2 launch dwa_gazebo_sim simulation.launch.py start_environment:=false start_planner:=true
-```
-
-Ez nem hoz letre masodik Gazebot, bridge-et vagy SLAM-et. Most adhato RViz-cel
-a mar megismert szabad teruleten. Uj celra uj A* fut; a terkep frissulesere nem.
-
-## Terkepracs es poziciohiba
-
-A `map_resolution:=0.20` es `map_resolution:=0.10` ket kulon, teljesen uj
-futasban osszehasonlithato; ne fusson ket kornyezet egyszerre. Ugyanaz a
-`8.2 x 5.2 m` Gazebo-vilag marad, a SLAM-terkep merete azonban a meresekkel novekszik.
-A finomabb racs nem jelenti a fizikai vilag felnagyitasat, es nem garantal
-pontosabb poziciobecsleset. A SLAM scan matching es loop closure kulon lepes.
-
-Egy fix origós GridMap-koordinataellenorzesben a `(7.38,4.25) m` cel
-cellakozep-elterese `0.20 m` cellanal `0.053852 m`, `0.10 m` cellanal
-`0.030000 m` volt. Ez nem mért robot-celhiba; a SLAM origója elterhet.
-A kert vegcel pontos koordinatai megmaradnak, a racskozep-elteres kulon naplozott.
-
-## Naplok ertelmezese
-
-- `DIAG_CONFIG`: tenyleges forrasutvonal, robotparameterek es vezerlesi mod.
-- `DIAG_MAP`: aktualis origó, felbontas, terkepsorszam es `waypoints_kept` vagy frame-reset.
-- `DIAG_ODOM`: nyers kerekpozicio, egyszeri spawn-eltolas es idoben illesztett meresi ground truth.
-- `DIAG_LIDAR`: scan-kor, pontok/klaszterek, parositott kovetesek es becsult sebesseg.
-- `DIAG_CONTROL`: bemeneti idobelyegek, pozicio, waypoint, DWA-jeloltek, kiadott parancs es okkod.
-
-A `braking_no_pair` jelolthianyt, a `stale_input` elavult bemenetet,
-a `planner_deadline` tul keson elkeszult szamitast jelent. Az `admissible`
-a Python fekezesi feltetelen atmeno jeloltek szama, nem biztonsagi garancia.
-A ground truth csak az odom-frame meresi osszevetese; a SLAM map-frame
-helyzetet nem szabad kozvetlenul, frame-illesztes nelkul kivonni belole.
-
-</details>
+**Jelenlegi korlát:** a felhasználói naplóban az `odom` frame hiánya miatt nem épült térkép; a teljes ROS/Gazebo működés még nincs igazolva, a leírás átrendezése ezt nem javítja meg.
