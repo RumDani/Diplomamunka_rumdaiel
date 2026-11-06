@@ -14,8 +14,11 @@ astar_dwa_node:
     map_height: 5.2
     map_origin_x: -0.1
     map_origin_y: -0.1
-    initial_pose_x: 0.8
-    initial_pose_y: 0.8
+    initial_pose_x: 0.0
+    initial_pose_y: 0.0
+    scan_offset_x: -0.064
+    scan_offset_y: 0.0
+    scan_offset_z: 0.121
     resolution: 0.20
     robot_radius: 0.24  # Megnövelve, hogy a robot hátulja is biztonságban legyen kikerüléskor!
     safety_margin: 0.10

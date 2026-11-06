@@ -52,8 +52,11 @@ public:
     map_height_ = declare_parameter("map_height", 5.2);
     map_origin_x_ = declare_parameter("map_origin_x", 0.0);
     map_origin_y_ = declare_parameter("map_origin_y", 0.0);
-    initial_pose_x_ = declare_parameter("initial_pose_x", 0.8);
-    initial_pose_y_ = declare_parameter("initial_pose_y", 0.8);
+    initial_pose_x_ = declare_parameter("initial_pose_x", 0.0);
+    initial_pose_y_ = declare_parameter("initial_pose_y", 0.0);
+    scan_offset_x_ = declare_parameter("scan_offset_x", 0.0);
+    scan_offset_y_ = declare_parameter("scan_offset_y", 0.0);
+    scan_offset_z_ = declare_parameter("scan_offset_z", 0.16);
     resolution_ = declare_parameter("resolution", 0.20);
     robot_radius_ = declare_parameter("robot_radius", 0.22);
     max_linear_velocity_ = declare_parameter("max_linear_velocity", 0.26);
@@ -104,7 +107,7 @@ public:
         RCLCPP_INFO(get_logger(), "Uj cel: x=%.2f m, y=%.2f m", goal_x_, goal_y_); });
     timer_ = rclcpp::create_timer(
       this, get_clock(), rclcpp::Duration::from_seconds(period), [this]() { control(); });
-    RCLCPP_INFO(get_logger(), "A* + DWA: cpa-rejoin (tavolodo akadaly nem tiltja a visszaterest)");
+    RCLCPP_INFO(get_logger(), "A* + DWA: cpp-world-pose (Gazebo tenyleges vilagpozicio)");
   }
 
   ~AStarDwaNode() override {
@@ -192,9 +195,9 @@ private:
     tf_broadcaster_->sendTransform(transform);
     transform.header.frame_id = "base_link";
     transform.child_frame_id = "base_scan";
-    transform.transform.translation.x = 0.0;
-    transform.transform.translation.y = 0.0;
-    transform.transform.translation.z = 0.16;
+    transform.transform.translation.x = scan_offset_x_;
+    transform.transform.translation.y = scan_offset_y_;
+    transform.transform.translation.z = scan_offset_z_;
     transform.transform.rotation.x = 0.0;
     transform.transform.rotation.y = 0.0;
     transform.transform.rotation.z = 0.0;
@@ -249,7 +252,11 @@ private:
       const double rel = scan_->angle_min + static_cast<double>(i) * scan_->angle_increment;
       if (r > max_dist || std::abs(angle_error(rel)) > half_fov) continue;
       const double a = pose_.yaw + rel;
-      pts.push_back({pose_.x + r * std::cos(a), pose_.y + r * std::sin(a), 0.0});
+      const double sensor_x = pose_.x + scan_offset_x_ * std::cos(pose_.yaw) -
+        scan_offset_y_ * std::sin(pose_.yaw);
+      const double sensor_y = pose_.y + scan_offset_x_ * std::sin(pose_.yaw) +
+        scan_offset_y_ * std::cos(pose_.yaw);
+      pts.push_back({sensor_x + r * std::cos(a), sensor_y + r * std::sin(a), 0.0});
       scan_index.push_back(i);
     }
 
@@ -414,6 +421,7 @@ private:
       current = parent[current];
     }
     std::reverse(path.begin(), path.end());
+    if (!path.empty()) path.back() = {goal_x_, goal_y_};
     return path;
   }
 
@@ -979,6 +987,7 @@ private:
   double goal_x_{0.0}, goal_y_{0.0}, map_size_{8.2}, map_height_{5.2};
   double map_origin_x_{0.0}, map_origin_y_{0.0};
   double initial_pose_x_{0.0}, initial_pose_y_{0.0};
+  double scan_offset_x_{0.0}, scan_offset_y_{0.0}, scan_offset_z_{0.16};
   double resolution_{0.2}, robot_radius_{0.22};
   double max_linear_velocity_{0.26}, max_angular_velocity_{1.0};
   std::vector<double> known_obstacle_x_, known_obstacle_y_, known_obstacle_radius_;
