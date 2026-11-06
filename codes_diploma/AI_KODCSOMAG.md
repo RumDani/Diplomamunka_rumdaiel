@@ -1,18 +1,33 @@
-﻿# AI-kódcsomag - aktuális forrássnapshot
+# AI-kódcsomag - aktuális forrássnapshot
 
 Generálás dátuma: 2026-11-06
 
-Ez a dokumentum a `cpp-rethink` ág forrásainak gépileg összeállított pillanatképe. A projekt tényleges forrásfájljai az alábbi fejezetcímekben megadott útvonalakon az irányadók. A Pythonos A* + DWA szimuláció külön megvalósítás; a Gazebo-integráció aktív ROS 2 vezérlője C++.
+Ez a dokumentum a `cpp-rethink` ág jelenlegi munkafájának forrássnapshotja. Nem egy futással igazolt kiadás. A Gazebo `simulation.launch.py` kizárólag a C++ `astar_dwa_node` vezérlőt indítja. A build forrása `reference_controller.cpp`, tervezőmagja `reference_planner.hpp`; a régi `astar_dwa_node.cpp` már nem a buildelt implementáció.
 
-A snapshot 54 követett forrás-, konfigurációs és tesztfájlt tartalmaz: 45 aktív `codes_diploma` fájlt és 9 külön jelölt `Önlab` archív fájlt. Kihagyja a virtuális környezetet, a build/install/log könyvtárakat, a binárisokat, az eredményábrákat és a futási naplókat. Az archív kód nem része az aktív Gazebo launch-nak. A dokumentáció forrásai: `ros2_astar_dwa_gazebo/README.md`, `KODMAGYARAZATOK.md` és `DOLGOZAT_KOD_AUDIT.md`.
+A snapshot a követett forrás-, konfigurációs, csomagolási és tesztfájlok aktuális lemezes tartalmát tartalmazza. Kihagyja a virtuális környezetet, a build/install/log könyvtárakat, a binárisokat, az eredményábrákat és a futási naplókat. Az `Önlab` fájlok archívak; a C++ és legacy ROS fájlok jelenléte sem jelenti, hogy az aktív launch használja őket. A régebbi kódmagyarázatok frissítése halasztott; az alábbi állapotjelentést kell figyelembe venni.
 
 ## Aktuális architektúra - ellenőrzött források alapján
 
-- A Gazebo `simulation.launch.py` indítja a szimulációt, a ROS-Gazebo bridge-et, az `astar_dwa_node` C++ vezérlőt és a szimulációs mozgóakadály-node-ot.
-- A C++ vezérlő fogadja az `/odom`, `/scan` és `/goal_pose` adatokat, A*-útvonalat tervez, a DWA-val lokális sebességparancsot választ, és `/cmd_vel` üzenetet ad ki.
-- A világpozíciós odometria `/odom` néven érkezik; a kerék-odometria diagnosztikai célra `/gazebo/wheel_odom` néven marad elérhető.
-- A C++ node a forrás szerint `odom -> base_link -> base_scan` TF-transzformációkat küld. A valós idejű helyességet Gazebo-futással kell ellenőrizni; ez a snapshot önmagában nem futási bizonyíték.
-- A Pythonos Matplotlib-szimuláció és az `astar_project` könyvtár nem a ROS2/Gazebo launch vezérlője, a két megvalósítás eredményeit külön kell kezelni.
+- A `simulation.launch.py` Gazebót, ROS-Gazebo bridge-et, SLAM Toolboxot, a C++ `astar_dwa_node` vezérlőt, továbbá `python_simulation_node` és `lidar_obstacle_node` segédfolyamatokat indít.
+- A C++ mag az eredeti Python A*+DWA alapján tartalmazza a globális A*-ot, ellenőrzött Bézier-simítást, 0,2 m-es waypointokat, az adaptív toleranciát és az eredeti DWA fékút-szűrését, mozgóakadály-predikcióját, valamint irány/távolság/sebesség pontozását.
+- Python navigációs backend nincs: `python_planner_node.py`, `python_dwa.py`, a tervezőbetöltő és a backend-kapcsolók törölve. Python csak a launch, szimulációs segédfeladatok és LiDAR-követés oldalán maradt. Az eredeti Matplotlib-források változatlan referenciák, nem a Gazebo vezérlője.
+- A SLAM `/map` térképet ad a globális A*-hoz. A lokális akadályadat útja: `/scan` -> LiDAR-követő -> `/tracked_obstacles` -> DWA -> `/cmd_vel`.
+- A robot állapota kerék-odometriából és TF-ből származik. Lánc: `map -> odom -> base_footprint -> base_link -> base_scan`. Az adapter a spawneltolást egyszer adja hozzá a nyers kerék-odometriához.
+- A `/gazebo/ground_truth_odom` kizárólag diagnosztikára és a Gazebo útvonalrajzának illesztésére szolgál, nem navigációra.
+- Mapping, térképmentés és mentett térképes lokalizáció rendelkezésre áll. Azonos koordinátakeretű térképfrissítés megőrzi a waypointokat; nem cél a folyamatos globális újratervezés.
+
+## Átadási Állapot És Korlátok
+
+- Kiinduló, korábban pusholt állapot: `d8bfb61`, ág: `cpp-rethink`. Az alábbi snapshot már az ezt követő C++-átállást tartalmazza.
+- VÉGLEGES CÉL: az eredeti, Matplotlibben a felhasználó szerint jól működő Python `DWA+A.py` A* + DWA megvalósítás ötleteinek és döntési logikájának átültetése C++ / ROS 2 / fizikai Gazebo környezetbe. A felhasználó a szimulációban kizárólag C++ navigációs vezérlőt kér. A DWA válassza a kitérő mozgást, majd folytatódjon az eredeti waypointkövetés. Külön kézzel kijelölt oldalsó kerülőcél és új kerülési algoritmus nem kell, ilyen nincs az aktív C++ magban.
+- Az eredeti `robot.py`, `DWA.py`, `DWA+A.py`, `simulation.py`, az `astar_project` és a védett A* folyamatábra nem módosítható e javításokhoz. Csak a ROS/Gazebo integráció változzon. Teszteket csak kérésre kell indítani; a felhasználó másik gépen tesztel. Dokumentációs és ábrafrissítések a kódcsomag kivételével halasztottak.
+- Fennálló, a felhasználó által jelentett hiba: szembejövő akadálynál a robot megáll, az akadály nekiütközik és eltolja; korábban waypoint-túlfutás és kanyarodási megakadás is előfordult. Sikeres elkerülés NINCS igazolva.
+- A korábbi NumPy-backend és annak eltérő pontozási/kerülési próbálkozásai törölve. A C++ mag nem tartalmazza a régi C++ külön visszatérési üzemmódját és pályabüntetéseit sem. A LiDAR-segédfolyamat felületi pontillesztéses sebességbecslése megmaradt; pontossága nincs fizikai méréssel igazolva.
+- Az eredeti Pythonhoz képest tudatos fizikai eltérés: a kerékminták nem léphetik túl a kerékhatárt, míg a NumPy arange végpontja túlcsúszhatott. A C++ és Python numerikus azonosságát nem ellenőriztük; azonos adatokon összehasonlítás szükséges.
+- A C++ adapter mért keréksebességből indul, pontos szenzoridőbélyeghez kér TF-et, késő transzformációhoz korlátos üzenetsorokat tart, az akadályokat a robotállapot idejére igazítja. Friss adatok és számítási határidő nélkül megáll. Ugyanabban a map koordinátakeretben érkező új térkép nem indít új globális tervezést.
+- A fizikai illesztés bemenete nem a Matplotlib pontos akadálymodellje: LiDAR-felületi pontok, becsült akadálysebesség, kerék-odometria és késleltetett TF érkezik. A megállás okát friss `DIAG_CONTROL`, `DIAG_LIDAR`, `DIAG_TF_QUEUE` adatokkal kell elkülöníteni; lehet elégtelen sebességbecslés, üres megengedett jelölthalmaz, célfüggvény vagy késleltetés. Egy konkrét ok még nincs bizonyítva.
+- Következő munka: C++/ROS build és Gazebo-futtatás a célgépen; `DIAG_CONFIG backend=cpp-python-reference`, `DIAG_CONTROL cpp`, `DIAG_TF_CPP` és `DIAG_LIDAR` naplók értékelése. Ne helyettesítsd a hibakeresést vak előremenettel, akadályadatok elhagyásával vagy biztonsági időkorlátok kikapcsolásával.
+- Helyi ROS/Gazebo-futás és numerikus összehasonlítás nem történt. A korábbi editor- és szintaxisellenőrzés nem bizonyítja a helyes akadálykerülést.
 
 ## Diplomamunka - Gazebo-fejezet ötletek
 
@@ -25,7 +40,7 @@ A snapshot 54 követett forrás-, konfigurációs és tesztfájlt tartalmaz: 45 
 
 ### Diplomamunkaszöveg készítésére használható prompt
 
-> Készíts magyar nyelvű, diplomamunkába illeszthető fejezetet a projekt ROS 2 Jazzy- és Gazebo Sim-integrációjáról. Először ellenőrizd az aktuális `simulation.launch.py`, `astar_dwa_node.cpp`, `gazebo_odometry_world.py`, `rosbot.yaml`, RViz-konfiguráció és README tartalmát. Írd le a node-ok felelősségét, az `/odom`, `/gazebo/wheel_odom`, `/scan`, `/goal_pose` és `/cmd_vel` adatfolyamát, az `odom -> base_link -> base_scan` TF-láncot, a globális A* és lokális DWA szerepét, valamint a statikus térkép és a LiDAR-alapú akadálykezelés határait. Válaszd szét a kódból bizonyítható tényeket, a még le nem futtatott teszteket és a javasolt további méréseket. Ne találj ki mérési eredményt, teljesítményt vagy valós roboton igazolt működést. Javasolj reprodukálható Gazebo-kísérleti tervet célbaérési aránnyal, útvonalhosszal, futási idővel, minimális akadálytávolsággal és végső célhibával; mindegyikhez írd le a szükséges naplózást és az ismétlés feltételeit. A fejezet végére adj rövid korlátok és szimuláció-valós robot átvihetőségi részt. A hivatkozásokat hiteles ROS 2/Gazebo-dokumentációval és ellenőrzött szakirodalommal támaszd alá; ne tulajdoníts a projektnek olyan modult, amely nincs a jelenlegi kódban.
+> A fenti átadási állapotból és a beillesztett aktuális forrásokból dolgozz. A navigáció csak C++; a megmaradt Python segédnode-okat ne keverd össze egy Python vezérlővel. Az eredeti Python A*+DWA változatlan viselkedési referencia. Különítsd el a kódból bizonyítható tényeket, a felhasználói hibajelentést és az ellenőrizetlen hipotéziseket. Ne állítsd működőnek a szembejövő akadály kerülését futási bizonyíték nélkül. Csak a ROS/Gazebo fájlokat módosítsd, az eredeti Python-fájlokat ne.
 
 A teljes Gazebo-indítási sorrend és a TF/rqt terminálparancsok a `ros2_astar_dwa_gazebo/README.md` fájlban találhatók.
 
@@ -3605,6 +3620,321 @@ def update(robot, config, w_L_target, w_R_target, dt):
 	return np.array([robot.x, robot.y, robot.irany, robot.v, robot.w, robot.w_L, robot.w_R])
 ~~~~~
 
+### codes_diploma/ros2_astar_dwa_gazebo/gazebo_topdown.config
+
+~~~~~text
+<?xml version="1.0"?>
+
+<window>
+  <width>1200</width>
+  <height>800</height>
+  <style material_theme="Light" material_primary="DeepOrange" material_accent="LightBlue" />
+</window>
+
+<plugin filename="MinimalScene" name="3D View">
+  <gz-gui>
+    <title>3D View</title>
+    <property type="bool" key="showTitleBar">false</property>
+    <property type="string" key="state">docked</property>
+  </gz-gui>
+  <engine>ogre2</engine>
+  <scene>scene</scene>
+  <ambient_light>0.6 0.6 0.6</ambient_light>
+  <background_color>0.12 0.14 0.18</background_color>
+  <camera_pose>4 2.5 8 0 1.5708 0</camera_pose>
+</plugin>
+
+<plugin filename="WorldControl" name="World control">
+  <gz-gui>
+    <title>World control</title>
+    <property type="bool" key="showTitleBar">false</property>
+    <property type="bool" key="resizable">false</property>
+    <property type="double" key="height">72</property>
+    <property type="string" key="state">floating</property>
+    <anchors target="3D View">
+      <line own="left" target="left" />
+      <line own="bottom" target="bottom" />
+    </anchors>
+  </gz-gui>
+  <play_pause>true</play_pause>
+  <step>true</step>
+  <start_paused>false</start_paused>
+  <use_event>true</use_event>
+</plugin>
+
+<plugin filename="WorldStats" name="World stats">
+  <gz-gui>
+    <title>World stats</title>
+    <property type="bool" key="showTitleBar">false</property>
+    <property type="bool" key="resizable">false</property>
+    <property type="double" key="height">80</property>
+    <property type="double" key="width">260</property>
+    <property type="string" key="state">floating</property>
+    <anchors target="3D View">
+      <line own="right" target="right" />
+      <line own="bottom" target="bottom" />
+    </anchors>
+  </gz-gui>
+  <sim_time>true</sim_time>
+  <real_time>true</real_time>
+  <real_time_factor>true</real_time_factor>
+  <iterations>true</iterations>
+</plugin>
+
+<plugin filename="Screenshot" name="Screenshot">
+  <gz-gui>
+    <property key="resizable" type="bool">false</property>
+    <property key="x" type="double">250</property>
+    <property key="y" type="double">50</property>
+    <property key="width" type="double">50</property>
+    <property key="height" type="double">50</property>
+    <property key="state" type="string">floating</property>
+    <property key="showTitleBar" type="bool">false</property>
+    <property key="cardBackground" type="string">#777777</property>
+  </gz-gui>
+</plugin>
+
+~~~~~
+
+### codes_diploma/ros2_astar_dwa_gazebo/README.md
+
+~~~~~text
+# Indítás három fázisban
+
+**Először: előkészítés → 1. feltérképezés → 2. mentés → teljes leállítás → 3. mentett térképes indítás.**
+Később csak az előkészítés és a **3. fázis** kell; ne fussanak párhuzamosan régi szimulációk.
+
+## Előkészítés
+
+**VS Code PowerShell: frissítés** – a pull a követett távoli ágból frissít, a merge önmagában nem tölt le semmit.
+
+```powershell
+Set-Location "C:\Users\Rum Dániel\Desktop\Diplomamunka"
+git fetch --all
+git switch cpp-rethink
+git pull --ff-only
+git log -1 --oneline
+```
+
+**WSL: build, csak kódfrissítés után** – a forrás frissítése nem építi újra a futó programot.
+
+```bash
+cd "/mnt/c/Users/Rum Dániel/Desktop/Diplomamunka/codes_diploma/ros2_astar_dwa_gazebo"
+source /opt/ros/jazzy/setup.bash
+rosdep install --from-paths src --ignore-src --rosdistro jazzy -r -y
+ls -l src/dwa_gazebo_sim/config/slam.yaml
+colcon build --symlink-install --packages-select astar_dwa_controller dwa_gazebo_sim
+source install/setup.bash
+ros2 pkg prefix dwa_gazebo_sim
+ls -l "$(ros2 pkg prefix dwa_gazebo_sim)/share/dwa_gazebo_sim/config/slam.yaml"
+```
+
+**Ha `No such file .../config/slam.yaml` jelenik meg:** ez a csomag telepítési konfigurációja, nem a `~/maps/palya` mentés.
+Ha már a `src/...` fájl hiányzik, előbb frissítsd a megfelelő klónt; ha csak az installból hiányzik, buildeld újra a fenti két csomagot.
+Csak sikeres build és a második `ls` által megtalált fájl után indítsd a 3. fázist; az üzenetben a `ros2 pkg prefix` a most buildelt workspace-re mutasson.
+A mentett térképet emiatt nem kell újraépíteni vagy felülírni; ha a fájl továbbra is hiányzik, a teljes buildkimenetet küldd vissza.
+
+**Ha a build egy már törölt `robot_controller.launch.py` fájlt akar másolni:** régi generált symlink maradt a buildben; állítsd le a futásokat, frissítsd a kódot, majd új WSL-terminálban:
+
+```bash
+cd "/mnt/c/Users/Rum Dániel/Desktop/Diplomamunka/codes_diploma/ros2_astar_dwa_gazebo"
+source /opt/ros/jazzy/setup.bash
+if [ -d build/dwa_gazebo_sim ]; then mv -- build/dwa_gazebo_sim "build/dwa_gazebo_sim_backup_$(date +%Y%m%d_%H%M%S)"; fi
+colcon build --symlink-install --packages-select astar_dwa_controller dwa_gazebo_sim
+source install/setup.bash
+ls -l "$(ros2 pkg prefix dwa_gazebo_sim)/share/dwa_gazebo_sim/config/slam.yaml"
+```
+
+Az átnevezés csak az érintett csomag generált buildjét teszi félre, a forrást és a `~/maps` mentést nem módosítja; ne hozd vissza a törölt launch-fájlt.
+Csak sikeres build és megtalált `slam.yaml` után folytasd a **3. fázissal**, nem kell újra feltérképezni.
+
+**Minden új WSL-terminál elején ezt futtasd**, a `~` mappából is működik:
+
+```bash
+source /opt/ros/jazzy/setup.bash
+cd "/mnt/c/Users/Rum Dániel/Desktop/Diplomamunka/codes_diploma/ros2_astar_dwa_gazebo"
+source install/setup.bash
+export ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST
+export DISPLAY=:0
+export QT_QPA_PLATFORM=xcb
+export QT_X11_NO_MITSHM=1
+export XDG_RUNTIME_DIR=/tmp/gazebo-runtime
+mkdir -p "$XDG_RUNTIME_DIR" results/diagnostics
+chmod 700 "$XDG_RUNTIME_DIR"
+```
+
+Másik gépen az útvonalat cseréld a sajátodra, az idézőjeleket megtartva; hiba esetén állj meg.
+
+## Tiszta újraindítás hiba után
+
+1. Állítsd meg a robotot, majd Ctrl+C-vel zárd be a teleopot/plannert, az RViz-t és végül a Gazebo–SLAM futást.
+2. Nyiss új WSL-terminált, és futtasd a fenti **Minden új WSL-terminál elején** blokkot.
+3. Az alábbi paranccsal indíts új feltérképezést; ez az 1. fázis A termináljának indítása helyett használandó, ne indíts két szimulációt.
+
+```bash
+ros2 daemon stop
+ros2 daemon start
+ros2 launch dwa_gazebo_sim simulation.launch.py slam_mode:=mapping start_planner:=false map_resolution:=0.10 2>&1 | tee "results/diagnostics/mapping_$(date +%Y%m%d_%H%M%S).log"
+```
+
+Ezután az 1. fázis **B és C termináljával** folytasd: RViz, majd kézi mozgatás.
+A daemon újraindítása nem állítja le a régi node-okat és nem hoz létre hiányzó TF-et; ezért szükséges előtte a Ctrl+C-s leállítás.
+A `queue is full` nem megtelt tárhely: hiányzó/késő TF miatt is betelhet a mérések várakozási sora.
+Ha friss indítás után is `odom ... does not exist` vagy tartós TF-hiba látszik, ne ments és ne indíts lokalizációt; küldd a `mapping_*.log` fájlt a `DIAG_TF`, `DIAG_ODOM` és SLAM sorokkal.
+
+## 1. Feltérképezés
+
+**A terminál: Gazebo + új SLAM-térkép** – a planner még nem vezérli a robotot.
+
+```bash
+ros2 launch dwa_gazebo_sim simulation.launch.py slam_mode:=mapping start_planner:=false map_resolution:=0.10 2>&1 | tee "results/diagnostics/mapping_$(date +%Y%m%d_%H%M%S).log"
+```
+
+**B terminál: RViz** – itt látod a feltérképezett területet; Fixed Frame: `map`.
+
+```bash
+ros2 launch dwa_gazebo_sim visualization.launch.py
+```
+
+**C terminál: kézi mozgatás** – az aktív teleop terminál billentyűivel lassan járd körbe a pályát.
+
+```bash
+ros2 run teleop_twist_keyboard teleop_twist_keyboard --ros-args -p speed:=0.15 -p turn:=0.5
+```
+
+**A térképnek az RViz-ben látszania és bővülnie kell.** Ha üres a nézet, `tf_missing`, `waiting_map` vagy tartós `queue is full` látszik, ne ments és ne indíts lokalizációt.
+
+## 2. Mentés
+
+**C terminál:** állítsd meg a robotot, majd Ctrl+C-vel zárd be a teleopot; az A és B terminál maradjon futva.
+
+Először ellenőrizd, hogy valóban érkezik térkép:
+
+```bash
+ros2 lifecycle get /slam_toolbox
+timeout 10s ros2 topic echo --once /map --field info
+```
+
+Elvárt: `active`, valamint pozitív `width` és `height`; ha nincs adat vagy hibát kapsz, állj meg és küldd az A terminál naplóját.
+
+Ha már létezik régi `~/maps/palya` mentés, előbb másold el:
+
+```bash
+cp -a "$HOME/maps" "$HOME/maps_backup_$(date +%Y%m%d_%H%M%S)"
+```
+
+Ezután mentsd a térképképet:
+
+```bash
+mkdir -p "$HOME/maps"
+MAP="$HOME/maps/palya"
+ros2 run nav2_map_server map_saver_cli -f "$MAP" --ros-args -p save_map_timeout:=10.0
+```
+
+**Csak sikeres térképképmentés után** mentsd a folytatható SLAM-állapotot ugyanebben a terminálban:
+
+```bash
+ros2 service call /slam_toolbox/serialize_map slam_toolbox/srv/SerializePoseGraph "{filename: '$MAP'}"
+ls -lh "$MAP"*
+```
+
+Eredmény: `.yaml` + térképkép és `.posegraph` + `.data`; a későbbi indítás a két utóbbit használja.
+A serialize `result: 0` csak sikeres fájlkiírást jelent, nem bizonyít használható térképet.
+**Sikeres mentés után állítsd le az A és B terminál futását is Ctrl+C-vel.**
+
+## 3. Indítás a mentett térképpel
+
+**A terminál: új Gazebo a kezdőhelyről + mentett térképes lokalizáció** – nem kell újra kézzel feltérképezni.
+
+```bash
+ros2 launch dwa_gazebo_sim simulation.launch.py slam_mode:=localization map_file:="$HOME/maps/palya" initial_x:=0.8 initial_y:=0.8 initial_yaw:=0.0 2>&1 | tee "results/diagnostics/localization_$(date +%Y%m%d_%H%M%S).log"
+```
+
+**B terminál: RViz és céladás** – megjeleníti a mentett térképet és a globális utat.
+
+```bash
+ros2 launch dwa_gazebo_sim visualization.launch.py
+```
+
+1. Ellenőrizd a robot térképbeli helyét; szükség esetén **2D Pose Estimate**-tel jelöld a helyét és irányát.
+2. **2D Goal Pose:** ismert szabad helyen kattints, húzd meg az irányt, majd engedd el.
+3. A robot az A*-út waypointjait követi DWA-val; ne indíts mellé teleopot vagy második plannert.
+
+Az `initial_x/y/yaw` a mentett térképben adott becslés, nem a Gazebo robotjának áthelyezése; a példa nem garantálja a helyes lokalizációt.
+A `map_file` kiterjesztés nélküli előtag: ugyanahhoz a mentéshez tartozó `.posegraph` és `.data` kell.
+Az út RViz-ben és Gazebóban ugyanabból a `/astar_path`-ból rajzolódik; a Gazebo-illesztés csak vizualizáció, nem vezérlési visszacsatolás.
+
+## Új térkép vagy felülírás
+
+Állíts le minden futást, majd ismételd az **1. és 2. fázist**, a régi mentés biztonsági másolatával; ezután a **3. fázissal** indulj.
+Lokalizációs módban a mentett térkép nem frissül automatikusan; a fájl felülírása nem cseréli le egy már futó node térképét.
+
+## Csak hibakereséshez
+
+Küldd vissza a `results/diagnostics/mapping_*.log` vagy `localization_*.log` fájlt az indulástól a hibáig; RViz-problémánál képernyőképet is.
+Külön előkészített WSL-terminálban a következő parancsokat egyesével futtasd, a folyamatos kimenetet Ctrl+C-vel zárd le:
+
+```bash
+ros2 lifecycle get /slam_toolbox
+ros2 run tf2_ros tf2_echo odom base_scan
+ros2 run tf2_ros tf2_echo map odom
+```
+
+**Jelenlegi korlát:** a felhasználói naplóban az `odom` frame hiánya miatt nem épült térkép; a teljes ROS/Gazebo működés még nincs igazolva, a leírás átrendezése ezt nem javítja meg.
+
+## TF-fa és rqt_graph – külön terminálokban
+
+A Gazebo és a SLAM maradjon futva; minden alábbi eszközhöz új WSL-terminált nyiss, és először ezt futtasd:
+
+```bash
+source /opt/ros/jazzy/setup.bash
+cd "/mnt/c/Users/Rum Dániel/Desktop/Diplomamunka/codes_diploma/ros2_astar_dwa_gazebo"
+source install/setup.bash
+export ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST
+export DISPLAY=:0
+export QT_QPA_PLATFORM=xcb
+export QT_X11_NO_MITSHM=1
+export XDG_RUNTIME_DIR=/tmp/gazebo-runtime
+mkdir -p "$XDG_RUNTIME_DIR" results/diagnostics
+chmod 700 "$XDG_RUNTIME_DIR"
+```
+
+### TF-fa rajzolása és megnyitása
+
+A koordinátakeretek geometriai kapcsolatait PDF-be menti és megnyitja.
+
+```bash
+cd results/diagnostics
+ros2 run tf2_tools view_frames --output frames
+xdg-open frames.pdf
+```
+
+### Élő TF-adatok
+
+A robot térképbeli becsült helyzetét mutatja; néhány sor után Ctrl+C-vel állítható le.
+
+```bash
+ros2 run tf2_ros tf2_echo map base_link
+```
+
+Ha hibát jelez, külön-külön ellenőrizd a láncot, a parancsok között Ctrl+C-vel:
+
+```bash
+ros2 run tf2_ros tf2_echo odom base_scan
+ros2 run tf2_ros tf2_echo map odom
+```
+
+### rqt_graph megnyitása
+
+A ROS node-ok és topicok adatkapcsolatait rajzolja ki; ez nem a geometriai TF-fa.
+
+```bash
+ros2 run rqt_graph rqt_graph
+```
+
+Ha hiányzik valamelyik eszköz: `sudo apt install ros-jazzy-tf2-tools ros-jazzy-rqt-graph graphviz xdg-utils`.
+~~~~~
+
 ### codes_diploma/ros2_astar_dwa_gazebo/src/astar_dwa_controller/CMakeLists.txt
 
 ~~~~~text
@@ -3616,18 +3946,28 @@ if(NOT CMAKE_CXX_STANDARD)
 endif()
 
 find_package(ament_cmake REQUIRED)
+find_package(ament_cmake_python REQUIRED)
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
 find_package(rclcpp REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
+find_package(std_msgs REQUIRED)
 find_package(visualization_msgs REQUIRED)
+find_package(tf2 REQUIRED)
 find_package(tf2_ros REQUIRED)
 
-add_executable(astar_dwa_node src/astar_dwa_node.cpp)
-ament_target_dependencies(astar_dwa_node rclcpp geometry_msgs nav_msgs sensor_msgs visualization_msgs tf2_ros)
+add_executable(astar_dwa_node src/reference_controller.cpp)
+ament_target_dependencies(astar_dwa_node rclcpp geometry_msgs nav_msgs sensor_msgs std_msgs visualization_msgs tf2 tf2_ros)
 
 install(TARGETS astar_dwa_node DESTINATION lib/${PROJECT_NAME})
 install(DIRECTORY config launch rviz DESTINATION share/${PROJECT_NAME})
+ament_get_python_install_dir(PYTHON_INSTALL_DIR)
+set(PYTHON_REFERENCE_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/../../..")
+ament_python_install_module("${PYTHON_REFERENCE_SOURCE}/robot.py" DESTINATION_SUFFIX codes_diploma)
+install(FILES "${PYTHON_REFERENCE_SOURCE}/astar_project/__init__.py"
+  "${PYTHON_REFERENCE_SOURCE}/astar_project/grid_map.py"
+  DESTINATION "${PYTHON_INSTALL_DIR}/codes_diploma/astar_project")
 if(BUILD_TESTING)
   enable_testing()
   add_executable(test_path_tracking test/test_path_tracking.cpp)
@@ -3726,11 +4066,15 @@ def generate_launch_description():
   <maintainer email="rumdaniel@todo.todo">rumdaniel</maintainer>
   <license>MIT</license>
   <buildtool_depend>ament_cmake</buildtool_depend>
+  <buildtool_depend>ament_cmake_python</buildtool_depend>
+  <exec_depend>python3-numpy</exec_depend>
   <depend>rclcpp</depend>
   <depend>geometry_msgs</depend>
   <depend>nav_msgs</depend>
   <depend>sensor_msgs</depend>
+  <depend>std_msgs</depend>
   <depend>visualization_msgs</depend>
+  <depend>tf2</depend>
   <depend>tf2_ros</depend>
   <export>
     <build_type>ament_cmake</build_type>
@@ -3758,15 +4102,27 @@ Visualization Manager:
       Plane Cell Count: 20
       Reference Frame: <Fixed Frame>
     - Class: rviz_default_plugins/Map
-      Name: Known occupancy map
+      Name: SLAM occupancy map
       Enabled: true
       Topic:
         Depth: 1
         Durability Policy: Transient Local
         History Policy: Keep Last
         Reliability Policy: Reliable
-        Value: /astar_map
+        Value: /map
       Alpha: 0.45
+      Color Scheme: map
+      Draw Behind: true
+    - Class: rviz_default_plugins/Map
+      Name: Planner inflated map
+      Enabled: false
+      Topic:
+        Depth: 1
+        Durability Policy: Transient Local
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /astar_map
+      Alpha: 0.35
       Color Scheme: map
       Draw Behind: true
     - Class: rviz_default_plugins/TF
@@ -3823,13 +4179,15 @@ Visualization Manager:
   Enabled: true
   Global Options:
     Background Color: 35; 40; 48
-    Fixed Frame: odom
+    Fixed Frame: map
     Frame Rate: 30
   Name: root
   Tools:
     - Class: rviz_default_plugins/Interact
     - Class: rviz_default_plugins/MoveCamera
     - Class: rviz_default_plugins/Select
+    - Class: rviz_default_plugins/SetInitialPose
+      Topic: /initialpose
     - Class: rviz_default_plugins/SetGoal
       Topic: /goal_pose
   Views:
@@ -3837,8 +4195,8 @@ Visualization Manager:
       Class: rviz_default_plugins/TopDownOrtho
       Name: Top view
       Angle: 0
-      Scale: 3.5
-      Target Frame: odom
+      Scale: 80
+      Target Frame: map
       X: 4
       Y: 2.5
 Window Geometry:
@@ -5003,6 +5361,641 @@ inline bool collision_course(double relative_x, double relative_y,
 }
 ~~~~~
 
+### codes_diploma/ros2_astar_dwa_gazebo/src/astar_dwa_controller/src/reference_controller.cpp
+
+~~~~~cpp
+#include <chrono>
+#include <deque>
+#include <memory>
+#include <stdexcept>
+#include <string>
+
+#include "geometry_msgs/msg/pose_stamped.hpp"
+#include "geometry_msgs/msg/twist.hpp"
+#include "nav_msgs/msg/occupancy_grid.hpp"
+#include "nav_msgs/msg/odometry.hpp"
+#include "nav_msgs/msg/path.hpp"
+#include "rclcpp/rclcpp.hpp"
+#include "rclcpp/create_timer.hpp"
+#include "sensor_msgs/msg/point_cloud2.hpp"
+#include "sensor_msgs/point_cloud2_iterator.hpp"
+#include "std_msgs/msg/bool.hpp"
+#include "tf2/exceptions.h"
+#include "tf2_ros/buffer.h"
+#include "tf2_ros/transform_listener.h"
+#include "reference_planner.hpp"
+
+namespace planner = reference_planner;
+
+class ReferenceController final : public rclcpp::Node {
+public:
+  ReferenceController() : Node("astar_dwa_node") {
+    config_.wheel_radius = declare_parameter("r_kerek", config_.wheel_radius);
+    config_.half_axle = declare_parameter("b", config_.half_axle);
+    config_.wheel_max = declare_parameter("w_kerek_max", config_.wheel_max);
+    config_.wheel_resolution = declare_parameter("w_kerek_resolution", config_.wheel_resolution);
+    config_.acceleration = declare_parameter("a_max", config_.acceleration);
+    config_.dt = declare_parameter("dt", config_.dt);
+    config_.predict_time = declare_parameter("predict_time", config_.predict_time);
+    config_.radius = declare_parameter("rob_radius", config_.radius);
+    config_.safety_margin = declare_parameter("safety_margin", config_.safety_margin);
+    config_.static_margin = declare_parameter("static_safety_margin", config_.static_margin);
+    config_.alpha = declare_parameter("Alfa", config_.alpha);
+    config_.beta = declare_parameter("Beta", config_.beta);
+    config_.gamma = declare_parameter("Gamma", config_.gamma);
+    config_.waypoint_slowdown = declare_parameter("enable_waypoint_slowdown", false);
+    inflation_ = declare_parameter("map_inflation_radius", config_.radius + config_.static_margin);
+    for (double value : {config_.wheel_radius, config_.half_axle, config_.wheel_max,
+                        config_.wheel_resolution, config_.acceleration, config_.dt,
+                        config_.predict_time, config_.radius})
+      if (!std::isfinite(value) || value <= 0.0) throw std::invalid_argument("Invalid robot parameter");
+    for (double value : {inflation_, config_.safety_margin, config_.static_margin,
+                        config_.alpha, config_.beta, config_.gamma})
+      if (!std::isfinite(value) || value < 0.0) throw std::invalid_argument("Invalid margin or weight");
+    buffer_ = std::make_unique<tf2_ros::Buffer>(get_clock());
+    listener_ = std::make_unique<tf2_ros::TransformListener>(*buffer_);
+    command_pub_ = create_publisher<geometry_msgs::msg::Twist>("/cmd_vel", 10);
+    const auto latched = rclcpp::QoS(1).transient_local();
+    active_pub_ = create_publisher<std_msgs::msg::Bool>("/controller_active", latched);
+    path_pub_ = create_publisher<nav_msgs::msg::Path>("/astar_path", latched);
+    goal_pub_ = create_publisher<geometry_msgs::msg::PoseStamped>("/accepted_goal", latched);
+    map_pub_ = create_publisher<nav_msgs::msg::OccupancyGrid>("/astar_map", latched);
+    map_sub_ = create_subscription<nav_msgs::msg::OccupancyGrid>("/map", latched,
+      [this](nav_msgs::msg::OccupancyGrid::ConstSharedPtr message) { receive_map(message); });
+    odom_sub_ = create_subscription<nav_msgs::msg::Odometry>("/odom", rclcpp::SensorDataQoS(),
+      [this](nav_msgs::msg::Odometry::ConstSharedPtr message) {
+        odometry_.push_back(message);
+        if (odometry_.size() > 50) odometry_.pop_front();
+      });
+    obstacle_sub_ = create_subscription<sensor_msgs::msg::PointCloud2>("/tracked_obstacles", 10,
+      [this](sensor_msgs::msg::PointCloud2::ConstSharedPtr message) {
+        clouds_.push_back(message);
+        if (clouds_.size() > 10) clouds_.pop_front();
+      });
+    goal_sub_ = create_subscription<geometry_msgs::msg::PoseStamped>("/goal_pose", 10,
+      [this](geometry_msgs::msg::PoseStamped::ConstSharedPtr message) {
+        pending_goal_ = message;
+        active_ = false;
+        waypoints_.clear();
+        path_.clear();
+        publish_path();
+        stop("new_goal");
+      });
+    timer_ = rclcpp::create_timer(this, get_clock(), rclcpp::Duration::from_seconds(config_.dt),
+                                 [this]() { control(); });
+    RCLCPP_INFO(get_logger(),
+      "DIAG_CONFIG backend=cpp-python-reference dt=%.3f horizon=%.3f radius=%.3f "
+      "half_axle=%.4f wheel_max=%.3f weights=(%.1f,%.1f,%.1f)",
+      config_.dt, config_.predict_time, config_.radius, config_.half_axle,
+      config_.wheel_max, config_.alpha, config_.beta, config_.gamma);
+  }
+
+  void shutdown_command() { command_pub_->publish(geometry_msgs::msg::Twist{}); }
+
+private:
+  static double seconds(const builtin_interfaces::msg::Time & stamp) {
+    return stamp.sec + stamp.nanosec * 1e-9;
+  }
+  static double yaw(const geometry_msgs::msg::Quaternion & rotation) {
+    return std::atan2(2.0 * (rotation.w * rotation.z + rotation.x * rotation.y),
+                      1.0 - 2.0 * (rotation.y * rotation.y + rotation.z * rotation.z));
+  }
+  bool transform(const std::string & source, const builtin_interfaces::msg::Time & stamp,
+                 geometry_msgs::msg::Transform & result) {
+    if (source.empty()) return false;
+    if (source == frame_) {
+      result = geometry_msgs::msg::Transform{};
+      result.rotation.w = 1.0;
+      return true;
+    }
+    try {
+      result = buffer_->lookupTransform(frame_, source, rclcpp::Time(stamp)).transform;
+      return true;
+    } catch (const tf2::TransformException & error) {
+      RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000,
+        "DIAG_TF_CPP %s -> %s: %s", source.c_str(), frame_.c_str(), error.what());
+      return false;
+    }
+  }
+  static planner::Point project(double x, double y, const geometry_msgs::msg::Transform & transform) {
+    const double heading = yaw(transform.rotation);
+    return {transform.translation.x + std::cos(heading) * x - std::sin(heading) * y,
+            transform.translation.y + std::sin(heading) * x + std::cos(heading) * y};
+  }
+  void receive_map(nav_msgs::msg::OccupancyGrid::ConstSharedPtr message) {
+    const auto & info = message->info;
+    if (message->header.frame_id.empty() || !std::isfinite(info.resolution) || info.resolution <= 0.0 ||
+        info.width == 0 || info.height == 0 || info.width > 10000 || info.height > 10000 ||
+        message->data.size() != static_cast<std::size_t>(info.width) * info.height ||
+        !std::isfinite(info.origin.position.x) || !std::isfinite(info.origin.position.y) ||
+        std::abs(yaw(info.origin.orientation)) > 1e-6 ||
+        std::abs(info.origin.orientation.x) > 1e-6 || std::abs(info.origin.orientation.y) > 1e-6) {
+      RCLCPP_ERROR(get_logger(), "DIAG_MAP invalid or rotated map");
+      return;
+    }
+    if (!frame_.empty() && frame_ != message->header.frame_id) {
+      active_ = false;
+      path_.clear();
+      waypoints_.clear();
+      have_odom_ = have_obstacles_ = false;
+      odometry_.clear();
+      clouds_.clear();
+      stop("map_frame_changed");
+    }
+    frame_ = message->header.frame_id;
+    grid_.width = static_cast<int>(info.width);
+    grid_.height = static_cast<int>(info.height);
+    grid_.resolution = info.resolution;
+    grid_.origin_x = info.origin.position.x;
+    grid_.origin_y = info.origin.position.y;
+    grid_.blocked.resize(message->data.size());
+    for (std::size_t index = 0; index < message->data.size(); ++index)
+      grid_.blocked[index] = message->data[index] < 0 ? 2 : message->data[index] >= 65 ? 1 : 0;
+    const int radius = static_cast<int>(std::ceil(inflation_ / grid_.resolution));
+    for (int row = 0; row < grid_.height; ++row) {
+      for (int column = 0; column < grid_.width; ++column) {
+        if (message->data[static_cast<std::size_t>(row) * grid_.width + column] < 65) continue;
+        for (int delta_row = -radius; delta_row <= radius; ++delta_row) {
+          for (int delta_column = -radius; delta_column <= radius; ++delta_column) {
+            const int next_row = row + delta_row, next_column = column + delta_column;
+            if (next_row < 0 || next_column < 0 || next_row >= grid_.height || next_column >= grid_.width ||
+                std::hypot(delta_row, delta_column) * grid_.resolution > inflation_) continue;
+            grid_.blocked[static_cast<std::size_t>(next_row) * grid_.width + next_column] = 1;
+          }
+        }
+      }
+    }
+    auto inflated = *message;
+    for (std::size_t index = 0; index < grid_.blocked.size(); ++index)
+      inflated.data[index] = grid_.blocked[index] == 2 ? -1 : grid_.blocked[index] == 1 ? 100 : 0;
+    map_pub_->publish(inflated);
+    have_map_ = true;
+    publish_path();
+    RCLCPP_INFO(get_logger(), "DIAG_MAP cpp size=%dx%d resolution=%.3f preserved_waypoints=%zu",
+      grid_.width, grid_.height, grid_.resolution, waypoints_.size());
+  }
+  void process_inputs() {
+    if (!have_map_) return;
+    for (auto iterator = odometry_.rbegin(); iterator != odometry_.rend(); ++iterator) {
+      const auto & message = **iterator;
+      geometry_msgs::msg::Transform conversion;
+      if (!transform(message.header.frame_id, message.header.stamp, conversion)) continue;
+      const auto position = project(message.pose.pose.position.x, message.pose.pose.position.y, conversion);
+      state_.x = position.first;
+      state_.y = position.second;
+      state_.yaw = yaw(message.pose.pose.orientation) + yaw(conversion.rotation);
+      state_.velocity = message.twist.twist.linear.x;
+      state_.angular = message.twist.twist.angular.z;
+      state_.left = (state_.velocity - state_.angular * config_.half_axle) / config_.wheel_radius;
+      state_.right = (state_.velocity + state_.angular * config_.half_axle) / config_.wheel_radius;
+      odom_stamp_ = seconds(message.header.stamp);
+      have_odom_ = std::isfinite(state_.x) && std::isfinite(state_.y) && std::isfinite(state_.yaw) &&
+        std::isfinite(state_.left) && std::isfinite(state_.right);
+      break;
+    }
+    while (!odometry_.empty() && seconds(odometry_.front()->header.stamp) <= odom_stamp_) odometry_.pop_front();
+    for (auto iterator = clouds_.rbegin(); iterator != clouds_.rend(); ++iterator) {
+      const auto & message = **iterator;
+      geometry_msgs::msg::Transform conversion;
+      if (!transform(message.header.frame_id, message.header.stamp, conversion)) continue;
+      std::vector<planner::Obstacle> points;
+      const double heading = yaw(conversion.rotation);
+      try {
+        if (!message.data.empty()) {
+          sensor_msgs::PointCloud2ConstIterator<float> point_x(message, "x"), point_y(message, "y"),
+            radius(message, "radius"), velocity_x(message, "vx"), velocity_y(message, "vy");
+          for (; point_x != point_x.end(); ++point_x, ++point_y, ++radius, ++velocity_x, ++velocity_y) {
+            if (!std::isfinite(*point_x) || !std::isfinite(*point_y) || !std::isfinite(*radius) ||
+                !std::isfinite(*velocity_x) || !std::isfinite(*velocity_y) || *radius < 0.0) continue;
+            const auto position = project(*point_x, *point_y, conversion);
+            points.push_back({position.first, position.second, *radius,
+              std::cos(heading) * *velocity_x - std::sin(heading) * *velocity_y,
+              std::sin(heading) * *velocity_x + std::cos(heading) * *velocity_y});
+          }
+        }
+      } catch (const std::runtime_error & error) {
+        RCLCPP_ERROR(get_logger(), "DIAG_CLOUD invalid fields: %s", error.what());
+        have_obstacles_ = false;
+        return;
+      }
+      obstacles_ = std::move(points);
+      obstacle_stamp_ = seconds(message.header.stamp);
+      have_obstacles_ = true;
+      break;
+    }
+    while (!clouds_.empty() && seconds(clouds_.front()->header.stamp) <= obstacle_stamp_) clouds_.pop_front();
+  }
+  void publish_path() {
+    nav_msgs::msg::Path message;
+    message.header.frame_id = frame_.empty() ? "map" : frame_;
+    message.header.stamp = now();
+    for (const auto & point : path_) {
+      geometry_msgs::msg::PoseStamped pose;
+      pose.header = message.header;
+      pose.pose.position.x = point.first;
+      pose.pose.position.y = point.second;
+      pose.pose.orientation.w = 1.0;
+      message.poses.push_back(pose);
+    }
+    path_pub_->publish(message);
+  }
+  void plan_goal() {
+    if (!pending_goal_ || !have_map_ || !have_odom_) return;
+    geometry_msgs::msg::Transform conversion;
+    const auto message = pending_goal_;
+    if (!transform(message->header.frame_id.empty() ? frame_ : message->header.frame_id,
+                   message->header.stamp, conversion)) return;
+    pending_goal_.reset();
+    const auto goal = project(message->pose.position.x, message->pose.position.y, conversion);
+    if (!std::isfinite(goal.first) || !std::isfinite(goal.second)) { stop("invalid_goal"); return; }
+    path_ = grid_.smooth(grid_.astar({state_.x, state_.y}, goal));
+    if (path_.empty()) { publish_path(); stop("no_global_path"); return; }
+    path_.back() = goal;
+    if (!grid_.safe(path_)) { path_.clear(); publish_path(); stop("unsafe_endpoint"); return; }
+    waypoints_ = planner::resample(path_);
+    waypoint_ = std::min<std::size_t>(1, waypoints_.size() - 1);
+    active_ = true;
+    auto accepted = *message;
+    accepted.header.frame_id = frame_;
+    accepted.header.stamp = now();
+    accepted.pose.position.x = goal.first;
+    accepted.pose.position.y = goal.second;
+    goal_pub_->publish(accepted);
+    publish_path();
+    RCLCPP_INFO(get_logger(), "DIAG_GOAL cpp accepted=(%.3f,%.3f) waypoints=%zu", goal.first, goal.second, waypoints_.size());
+  }
+  void stop(const char * reason) {
+    shutdown_command();
+    std_msgs::msg::Bool status;
+    status.data = active_;
+    active_pub_->publish(status);
+    RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 2000, "DIAG_CONTROL cpp reason=%s", reason);
+  }
+  void control() {
+    process_inputs();
+    if (!have_map_ || !have_odom_ || !have_obstacles_) { stop("waiting_inputs"); return; }
+    const double age = now().seconds() - std::min(odom_stamp_, obstacle_stamp_);
+    if (age > std::max(0.5, 3.0 * config_.dt) || age < -0.05) { stop("stale_input"); return; }
+    plan_goal();
+    if (!active_ || waypoints_.empty()) { stop("inactive"); return; }
+    const double goal_distance = std::hypot(waypoints_.back().first - state_.x, waypoints_.back().second - state_.y);
+    const double tolerance = std::max(0.05, std::min(0.2, goal_distance * 0.2));
+    if (goal_distance <= tolerance) { active_ = false; stop("finished"); return; }
+    const auto previous_waypoint = waypoint_;
+    if (waypoint_ + 1 < waypoints_.size()) {
+      const auto & current = waypoints_[waypoint_];
+      const auto & next = waypoints_[waypoint_ + 1];
+      const bool passed = (current.first - state_.x) * (next.first - current.first) +
+        (current.second - state_.y) * (next.second - current.second) < 0.0;
+      if ((std::hypot(current.first - state_.x, current.second - state_.y) <= tolerance || passed) &&
+          std::abs(state_.velocity) <= 0.3) ++waypoint_;
+    }
+    auto obstacles = obstacles_;
+    for (auto & obstacle : obstacles) {
+      obstacle.x += obstacle.vx * (odom_stamp_ - obstacle_stamp_);
+      obstacle.y += obstacle.vy * (odom_stamp_ - obstacle_stamp_);
+    }
+    const auto start = std::chrono::steady_clock::now();
+    const auto result = planner::optimise(config_, state_, waypoints_[waypoint_],
+                                          waypoint_ + 1 == waypoints_.size(), obstacles);
+    const double compute_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+    if (now().seconds() - std::min(odom_stamp_, obstacle_stamp_) > std::max(0.5, 3.0 * config_.dt)) {
+      waypoint_ = previous_waypoint;
+      stop("planner_deadline");
+      return;
+    }
+    auto predicted = state_;
+    planner::update(predicted, config_, result.command);
+    geometry_msgs::msg::Twist command;
+    command.linear.x = predicted.velocity;
+    command.angular.z = predicted.angular;
+    command_pub_->publish(command);
+    std_msgs::msg::Bool status;
+    status.data = active_;
+    active_pub_->publish(status);
+    RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000,
+      "DIAG_CONTROL cpp reason=%s pose=(%.3f,%.3f,%.3f) measured=(%.3f,%.3f) "
+      "waypoint=%zu/%zu target=(%.3f,%.3f) observed=%zu pairs=%zu admissible=%zu "
+      "cmd=(%.3f,%.3f) odom_age=%.3f obstacle_age=%.3f compute_ms=%.2f",
+      result.found ? "command" : "braking_no_pair", state_.x, state_.y, state_.yaw,
+      state_.velocity, state_.angular, waypoint_, waypoints_.size(), waypoints_[waypoint_].first,
+      waypoints_[waypoint_].second, obstacles.size(), result.candidates, result.admissible,
+      command.linear.x, command.angular.z, now().seconds() - odom_stamp_, now().seconds() - obstacle_stamp_, compute_ms);
+  }
+
+  planner::Config config_;
+  planner::Grid grid_;
+  planner::State state_;
+  planner::Path path_, waypoints_;
+  std::vector<planner::Obstacle> obstacles_;
+  std::size_t waypoint_{0};
+  double inflation_{0.0}, odom_stamp_{0.0}, obstacle_stamp_{0.0};
+  bool have_map_{false}, have_odom_{false}, have_obstacles_{false}, active_{false};
+  std::string frame_;
+  std::deque<nav_msgs::msg::Odometry::ConstSharedPtr> odometry_;
+  std::deque<sensor_msgs::msg::PointCloud2::ConstSharedPtr> clouds_;
+  geometry_msgs::msg::PoseStamped::ConstSharedPtr pending_goal_;
+  std::unique_ptr<tf2_ros::Buffer> buffer_;
+  std::unique_ptr<tf2_ros::TransformListener> listener_;
+  rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr command_pub_;
+  rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr active_pub_;
+  rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr path_pub_;
+  rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr map_pub_;
+  rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr goal_pub_;
+  rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr map_sub_;
+  rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
+  rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr obstacle_sub_;
+  rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr goal_sub_;
+  rclcpp::TimerBase::SharedPtr timer_;
+};
+
+int main(int argc, char ** argv) {
+  rclcpp::init(argc, argv);
+  auto node = std::make_shared<ReferenceController>();
+  rclcpp::spin(node);
+  if (rclcpp::ok()) node->shutdown_command();
+  rclcpp::shutdown();
+  return 0;
+}
+~~~~~
+
+### codes_diploma/ros2_astar_dwa_gazebo/src/astar_dwa_controller/src/reference_planner.hpp
+
+~~~~~cpp
+#pragma once
+
+#include <algorithm>
+#include <cmath>
+#include <cstddef>
+#include <cstdint>
+#include <functional>
+#include <limits>
+#include <queue>
+#include <tuple>
+#include <utility>
+#include <vector>
+
+namespace reference_planner {
+constexpr double pi = 3.14159265358979323846;
+using Point = std::pair<double, double>;
+using Path = std::vector<Point>;
+
+inline double angle_error(double angle) {
+	return std::atan2(std::sin(angle), std::cos(angle));
+}
+
+struct Config {
+	double wheel_radius{0.033}, half_axle{0.1435}, wheel_max{0.26 / 0.033};
+	double wheel_resolution{1.0}, acceleration{1.0}, dt{0.1}, predict_time{3.0};
+	double radius{0.237}, safety_margin{0.15}, static_margin{0.03};
+	double alpha{5.0}, beta{2.0}, gamma{3.0};
+	bool waypoint_slowdown{false};
+};
+
+struct State {
+	double x{0.0}, y{0.0}, yaw{0.0}, velocity{0.0}, angular{0.0}, left{0.0}, right{0.0};
+};
+
+struct Obstacle { double x, y, radius, vx, vy; };
+struct Command { double velocity{0.0}, angular{0.0}, left{0.0}, right{0.0}; };
+struct Result {
+	Command command;
+	std::size_t candidates{0}, admissible{0};
+	bool found{false};
+};
+
+inline Command kinematics(double left, double right, const Config & config) {
+	return {(left + right) * 0.5 * config.wheel_radius,
+					(right - left) * config.wheel_radius / (2.0 * config.half_axle), left, right};
+}
+
+inline void update(State & state, const Config & config, const Command & target) {
+	const double step = config.acceleration / config.wheel_radius * config.dt;
+	state.left += std::clamp(target.left - state.left, -step, step);
+	state.right += std::clamp(target.right - state.right, -step, step);
+	const auto command = kinematics(state.left, state.right, config);
+	if (std::abs(command.angular) > 1e-6) {
+		state.x += command.velocity / command.angular *
+			(std::sin(state.yaw + command.angular * config.dt) - std::sin(state.yaw));
+		state.y -= command.velocity / command.angular *
+			(std::cos(state.yaw + command.angular * config.dt) - std::cos(state.yaw));
+	} else {
+		state.x += command.velocity * std::cos(state.yaw) * config.dt;
+		state.y += command.velocity * std::sin(state.yaw) * config.dt;
+	}
+	state.yaw += command.angular * config.dt;
+	state.velocity = command.velocity;
+	state.angular = command.angular;
+}
+
+inline double trajectory_distance(const Config & config, const State & state,
+																	const Command & command, const std::vector<Obstacle> & obstacles) {
+	State predicted = state;
+	double travelled = 0.0;
+	for (std::size_t step = 0; step * config.dt < config.predict_time; ++step) {
+		for (const auto & obstacle : obstacles) {
+			const bool moving = obstacle.vx != 0.0 || obstacle.vy != 0.0;
+			const double clearance = config.radius + obstacle.radius +
+				(moving ? config.safety_margin : config.static_margin);
+			if (std::hypot(predicted.x - obstacle.x - obstacle.vx * step * config.dt,
+										 predicted.y - obstacle.y - obstacle.vy * step * config.dt) <= clearance)
+				return travelled;
+		}
+		update(predicted, config, command);
+		travelled += std::abs(command.velocity) * config.dt;
+	}
+	return 10.0;
+}
+
+inline std::vector<double> wheel_samples(double measured, const Config & config) {
+	const double step = config.acceleration / config.wheel_radius * config.dt;
+	const double lower = std::clamp(measured - step, -config.wheel_max, config.wheel_max);
+	const double upper = std::clamp(measured + step, -config.wheel_max, config.wheel_max);
+	std::vector<double> samples;
+	const auto count = static_cast<std::size_t>(std::ceil((upper - lower) / config.wheel_resolution));
+	for (std::size_t index = 0; index <= count; ++index)
+		samples.push_back(std::min(upper, lower + index * config.wheel_resolution));
+	return samples;
+}
+
+inline Result optimise(const Config & config, const State & state, Point goal,
+											 bool final_waypoint, const std::vector<Obstacle> & sensed) {
+	std::vector<Obstacle> visible;
+	for (const auto & obstacle : sensed) {
+		if (std::hypot(obstacle.x - state.x, obstacle.y - state.y) <= 3.0 &&
+				std::abs(angle_error(std::atan2(obstacle.y - state.y, obstacle.x - state.x) - state.yaw)) <= pi / 2.0)
+			visible.push_back(obstacle);
+	}
+	const double goal_distance = std::hypot(goal.first - state.x, goal.second - state.y);
+	const double horizon = goal_distance < 1.0 ? std::max(0.5, goal_distance * 2.0) : config.predict_time;
+	const double maximum_velocity = config.wheel_max * config.wheel_radius;
+	const bool slowdown = config.waypoint_slowdown || final_waypoint;
+	const double slowdown_distance = final_waypoint ? 0.5 : 0.35;
+	double best_score = -std::numeric_limits<double>::infinity();
+	Result result;
+	for (double left : wheel_samples(state.left, config)) {
+		for (double right : wheel_samples(state.right, config)) {
+			++result.candidates;
+			const auto command = kinematics(left, right, config);
+			if (command.velocity < 0.0) continue;
+			const double collision_distance = trajectory_distance(config, state, command, visible);
+			if (command.velocity > std::sqrt(2.0 * config.acceleration * collision_distance)) continue;
+			++result.admissible;
+			State predicted = state;
+			for (std::size_t step = 0; step * config.dt < horizon; ++step) update(predicted, config, command);
+			const double heading = std::atan2(goal.second - predicted.y, goal.first - predicted.x);
+			const double heading_score = (pi - std::abs(angle_error(heading - predicted.yaw))) / pi;
+			const double target_velocity = std::min(maximum_velocity, std::max(0.08, goal_distance * 1.4));
+			const double velocity_score = !slowdown && goal_distance > slowdown_distance ?
+				command.velocity / maximum_velocity : 1.0 - std::abs(target_velocity - command.velocity) / maximum_velocity;
+			const double score = config.alpha * heading_score + config.beta * collision_distance + config.gamma * velocity_score;
+			if (score > best_score) { best_score = score; result.command = command; result.found = true; }
+		}
+	}
+	return result;
+}
+
+struct Grid {
+	int width{0}, height{0};
+	double resolution{0.1}, origin_x{0.0}, origin_y{0.0};
+	std::vector<std::int8_t> blocked;
+
+	bool free(int row, int column) const {
+		return row >= 0 && column >= 0 && row < height && column < width &&
+			blocked[static_cast<std::size_t>(row) * width + column] == 0;
+	}
+	std::pair<int, int> cell(Point point) const {
+		return {static_cast<int>(std::floor((point.second - origin_y) / resolution)),
+						static_cast<int>(std::floor((point.first - origin_x) / resolution))};
+	}
+	Point world(int row, int column) const {
+		return {origin_x + (column + 0.5) * resolution, origin_y + (row + 0.5) * resolution};
+	}
+	bool connected(std::pair<int, int> start, std::pair<int, int> finish) const {
+		const int row_step = finish.first - start.first, column_step = finish.second - start.second;
+		return std::abs(row_step) <= 1 && std::abs(column_step) <= 1 && free(finish.first, finish.second) &&
+			(row_step == 0 || column_step == 0 || (free(start.first, finish.second) && free(finish.first, start.second)));
+	}
+	Path astar(Point start_world, Point goal_world) const {
+		const auto start = cell(start_world), goal = cell(goal_world);
+		if (!free(start.first, start.second) || !free(goal.first, goal.second)) return {};
+		const auto index = [this](int row, int column) { return row * width + column; };
+		const auto heuristic = [&goal](int row, int column) { return std::hypot(goal.first - row, goal.second - column); };
+		using Entry = std::tuple<double, double, int, int>;
+		std::priority_queue<Entry, std::vector<Entry>, std::greater<Entry>> open;
+		std::vector<double> costs(blocked.size(), std::numeric_limits<double>::infinity());
+		std::vector<int> parents(blocked.size(), -1);
+		costs[index(start.first, start.second)] = 0.0;
+		open.emplace(heuristic(start.first, start.second), 0.0, start.first, start.second);
+		const int directions[8][2] = {{-1, 0}, {1, 0}, {0, -1}, {0, 1}, {-1, -1}, {-1, 1}, {1, -1}, {1, 1}};
+		while (!open.empty()) {
+			const auto [priority, cost, row, column] = open.top();
+			(void)priority;
+			open.pop();
+			if (cost > costs[index(row, column)]) continue;
+			if (std::make_pair(row, column) == goal) break;
+			for (const auto & direction : directions) {
+				const int next_row = row + direction[0], next_column = column + direction[1];
+				if (!connected({row, column}, {next_row, next_column})) continue;
+				const double next_cost = cost + std::hypot(direction[0], direction[1]);
+				const int next_index = index(next_row, next_column);
+				if (next_cost >= costs[next_index]) continue;
+				costs[next_index] = next_cost;
+				parents[next_index] = index(row, column);
+				open.emplace(next_cost + heuristic(next_row, next_column), next_cost, next_row, next_column);
+			}
+		}
+		int current = index(goal.first, goal.second);
+		const int first = index(start.first, start.second);
+		if (current != first && parents[current] < 0) return {};
+		Path path;
+		while (current >= 0) {
+			path.push_back(world(current / width, current % width));
+			if (current == first) break;
+			current = parents[current];
+		}
+		std::reverse(path.begin(), path.end());
+		return path;
+	}
+	bool safe(const Path & path) const {
+		if (path.empty()) return true;
+		auto previous = cell(path.front());
+		if (!free(previous.first, previous.second)) return false;
+		for (std::size_t index = 1; index < path.size(); ++index) {
+			const Point delta{path[index].first - path[index - 1].first, path[index].second - path[index - 1].second};
+			const int count = std::max(1, static_cast<int>(std::ceil(std::max(std::abs(delta.first), std::abs(delta.second)) / resolution)));
+			for (int step = 1; step <= count; ++step) {
+				const double fraction = static_cast<double>(step) / count;
+				const auto next = cell({path[index - 1].first + fraction * delta.first, path[index - 1].second + fraction * delta.second});
+				if (!connected(previous, next)) return false;
+				previous = next;
+			}
+		}
+		return true;
+	}
+	Path smooth(const Path & path) const {
+		if (path.size() < 3) return path;
+		Path turns{path.front()};
+		for (std::size_t index = 1; index + 1 < path.size(); ++index) {
+			const double incoming_x = path[index].first - path[index - 1].first;
+			const double incoming_y = path[index].second - path[index - 1].second;
+			const double outgoing_x = path[index + 1].first - path[index].first;
+			const double outgoing_y = path[index + 1].second - path[index].second;
+			if (std::abs(incoming_x * outgoing_y - incoming_y * outgoing_x) > 1e-10) turns.push_back(path[index]);
+		}
+		turns.push_back(path.back());
+		if (turns.size() < 3) return path;
+		const auto cut = [this](Point center, Point neighbor) {
+			const double length = std::hypot(neighbor.first - center.first, neighbor.second - center.second);
+			const double fraction = length == 0.0 ? 1.0 : std::min(1.0, 0.5 * resolution / length);
+			return Point{center.first + fraction * (neighbor.first - center.first), center.second + fraction * (neighbor.second - center.second)};
+		};
+		Path curve{turns.front()};
+		for (std::size_t index = 1; index + 1 < turns.size(); ++index) {
+			const Point start = index == 1 ? turns.front() : cut(turns[index], turns[index - 1]);
+			const Point finish = index + 2 == turns.size() ? turns.back() : cut(turns[index], turns[index + 1]);
+			for (int sample = 1; sample <= 8; ++sample) {
+				const double parameter = sample / 8.0, weight = 1.0 - parameter;
+				curve.emplace_back(weight * weight * start.first + 2.0 * weight * parameter * turns[index].first + parameter * parameter * finish.first,
+													 weight * weight * start.second + 2.0 * weight * parameter * turns[index].second + parameter * parameter * finish.second);
+			}
+		}
+		curve.push_back(turns.back());
+		for (std::size_t index = 1; index + 1 < curve.size(); ++index) {
+			if ((curve[index].first - curve[index - 1].first) * (curve[index + 1].first - curve[index].first) +
+					(curve[index].second - curve[index - 1].second) * (curve[index + 1].second - curve[index].second) < -1e-9) return path;
+		}
+		return safe(curve) ? curve : path;
+	}
+};
+
+inline Path resample(const Path & path, double spacing = 0.2) {
+	if (path.empty()) return {};
+	Path points{path.front()};
+	double remaining = spacing;
+	Point start = path.front();
+	for (std::size_t index = 1; index < path.size(); ++index) {
+		double delta_x = path[index].first - start.first, delta_y = path[index].second - start.second;
+		double length = std::hypot(delta_x, delta_y);
+		if (length == 0.0) continue;
+		while (length >= remaining) {
+			const double fraction = remaining / length;
+			start = {start.first + fraction * delta_x, start.second + fraction * delta_y};
+			points.push_back(start);
+			delta_x = path[index].first - start.first;
+			delta_y = path[index].second - start.second;
+			length = std::hypot(delta_x, delta_y);
+			remaining = spacing;
+		}
+		remaining -= length;
+		start = path[index];
+	}
+	if (points.back() != path.back()) points.push_back(path.back());
+	return points;
+}
+}
+~~~~~
+
 ### codes_diploma/ros2_astar_dwa_gazebo/src/astar_dwa_controller/test/test_path_tracking.cpp
 
 ~~~~~cpp
@@ -5088,6 +6081,123 @@ int main() {
 }
 ~~~~~
 
+### codes_diploma/ros2_astar_dwa_gazebo/src/dwa_gazebo_sim/config/gazebo_topdown.config
+
+~~~~~text
+<?xml version="1.0"?>
+<window>
+  <width>1200</width>
+  <height>800</height>
+  <style material_theme="Light" material_primary="DeepOrange" material_accent="LightBlue" />
+</window>
+
+<plugin filename="MinimalScene" name="3D View">
+  <gz-gui>
+    <title>3D View</title>
+    <property type="bool" key="showTitleBar">false</property>
+    <property type="string" key="state">docked</property>
+  </gz-gui>
+  <engine>ogre2</engine>
+  <scene>scene</scene>
+  <ambient_light>0.6 0.6 0.6</ambient_light>
+  <background_color>0.12 0.14 0.18</background_color>
+  <camera_pose>4 2.5 8 0 1.5708 0</camera_pose>
+</plugin>
+
+<plugin filename="WorldControl" name="World control">
+  <gz-gui>
+    <title>World control</title>
+    <property type="bool" key="resizable">false</property>
+    <property type="double" key="height">72</property>
+    <property type="string" key="state">floating</property>
+  </gz-gui>
+  <play_pause>true</play_pause>
+  <step>true</step>
+  <start_paused>false</start_paused>
+  <use_event>true</use_event>
+</plugin>
+
+<plugin filename="WorldStats" name="World stats">
+  <gz-gui>
+    <title>World stats</title>
+    <property type="bool" key="resizable">false</property>
+    <property type="double" key="height">80</property>
+    <property type="double" key="width">260</width>
+    <property type="string" key="state">floating</property>
+  </gz-gui>
+  <sim_time>true</sim_time>
+  <real_time>true</real_time>
+  <real_time_factor>true</real_time_factor>
+  <iterations>true</iterations>
+</plugin>
+
+~~~~~
+
+### codes_diploma/ros2_astar_dwa_gazebo/src/dwa_gazebo_sim/config/slam.yaml
+
+~~~~~yaml
+slam_toolbox:
+  ros__parameters:
+    solver_plugin: solver_plugins::CeresSolver
+    ceres_linear_solver: SPARSE_NORMAL_CHOLESKY
+    ceres_preconditioner: SCHUR_JACOBI
+    ceres_trust_strategy: LEVENBERG_MARQUARDT
+    ceres_dogleg_type: TRADITIONAL_DOGLEG
+    ceres_loss_function: None
+    odom_frame: odom
+    map_frame: map
+    base_frame: base_link
+    scan_topic: /scan
+    use_map_saver: true
+    mode: $(var slam_mode)
+    map_file_name: "$(var map_file)"
+    map_start_pose: [$(var initial_x), $(var initial_y), $(var initial_yaw)]
+    use_sim_time: true
+    debug_logging: false
+    throttle_scans: 1
+    transform_publish_period: 0.02
+    map_update_interval: 2.0
+    resolution: $(var map_resolution)
+    restamp_tf: false
+    min_laser_range: 0.0
+    max_laser_range: 3.0
+    minimum_time_interval: 0.1
+    transform_timeout: 0.2
+    tf_buffer_duration: 30.0
+    stack_size_to_use: 40000000
+    enable_interactive_mode: true
+    use_scan_matching: true
+    use_scan_barycenter: true
+    minimum_travel_distance: 0.1
+    minimum_travel_heading: 0.1
+    scan_buffer_size: 10
+    scan_buffer_maximum_scan_distance: 3.0
+    link_match_minimum_response_fine: 0.1
+    link_scan_maximum_distance: 1.5
+    loop_search_maximum_distance: 3.0
+    do_loop_closing: true
+    loop_match_minimum_chain_size: 10
+    loop_match_maximum_variance_coarse: 3.0
+    loop_match_minimum_response_coarse: 0.35
+    loop_match_minimum_response_fine: 0.45
+    correlation_search_space_dimension: 0.5
+    correlation_search_space_resolution: 0.01
+    correlation_search_space_smear_deviation: 0.1
+    loop_search_space_dimension: 8.0
+    loop_search_space_resolution: 0.05
+    loop_search_space_smear_deviation: 0.03
+    distance_variance_penalty: 0.5
+    angle_variance_penalty: 1.0
+    fine_search_angle_offset: 0.00349
+    coarse_search_angle_offset: 0.349
+    coarse_angle_resolution: 0.0349
+    minimum_angle_penalty: 0.9
+    minimum_distance_penalty: 0.5
+    use_response_expansion: true
+    min_pass_through: 2
+    occupancy_threshold: 0.1
+~~~~~
+
 ### codes_diploma/ros2_astar_dwa_gazebo/src/dwa_gazebo_sim/dwa_gazebo_sim/__init__.py
 
 ~~~~~python
@@ -5141,6 +6251,408 @@ def add_world_pose_odometry(world_file, model_file):
     with tempfile.NamedTemporaryFile(suffix=".sdf", prefix="turtlebot_world_pose_", delete=False) as handle:
         world_tree.write(handle, encoding="utf-8", xml_declaration=True)
         return handle.name
+~~~~~
+
+### codes_diploma/ros2_astar_dwa_gazebo/src/dwa_gazebo_sim/dwa_gazebo_sim/gazebo_path_node.py
+
+~~~~~python
+"""Draw a non-colliding global path on the Gazebo floor without blocking control."""
+
+import math
+import time
+import xml.etree.ElementTree as ET
+from collections import deque
+
+import rclpy
+from nav_msgs.msg import Odometry, Path
+from rclpy.node import Node
+from rclpy.time import Time
+from ros_gz_interfaces.srv import DeleteEntity, SetEntityPose, SpawnEntity
+from tf2_ros import Buffer, TransformException, TransformListener
+
+
+def project_path_points(points, source_to_odom, odom_pose, world_pose):
+    """Align display coordinates only; never correct the navigation state."""
+    offset_x, offset_y, source_yaw = source_to_odom
+    correction_yaw = world_pose[2] - odom_pose[2]
+    source_cos, source_sin = math.cos(source_yaw), math.sin(source_yaw)
+    world_cos, world_sin = math.cos(correction_yaw), math.sin(correction_yaw)
+    projected = []
+    for point_x, point_y in points:
+        delta_x = offset_x + source_cos * point_x - source_sin * point_y - odom_pose[0]
+        delta_y = offset_y + source_sin * point_x + source_cos * point_y - odom_pose[1]
+        projected.append((world_pose[0] + world_cos * delta_x - world_sin * delta_y,
+                          world_pose[1] + world_sin * delta_x + world_cos * delta_y))
+    return tuple(projected)
+
+
+def pose_2d(pose):
+    rotation = pose.orientation
+    yaw = math.atan2(2 * (rotation.w * rotation.z + rotation.x * rotation.y),
+                     1 - 2 * (rotation.y ** 2 + rotation.z ** 2))
+    return pose.position.x, pose.position.y, yaw
+
+
+def path_sdf(points):
+    sdf = ET.Element("sdf", version="1.8")
+    model = ET.SubElement(sdf, "model", name="python_global_path")
+    ET.SubElement(model, "static").text = "true"
+    link = ET.SubElement(model, "link", name="path")
+    for index, (start, end) in enumerate(zip(points, points[1:])):
+        dx, dy = end[0] - start[0], end[1] - start[1]
+        length = math.hypot(dx, dy)
+        if length < 1e-6:
+            continue
+        visual = ET.SubElement(link, "visual", name=f"segment_{index}")
+        ET.SubElement(visual, "pose").text = (
+            f"{(start[0] + end[0]) / 2} {(start[1] + end[1]) / 2} 0.015 0 0 {math.atan2(dy, dx)}")
+        ET.SubElement(visual, "cast_shadows").text = "false"
+        geometry = ET.SubElement(visual, "geometry")
+        ET.SubElement(ET.SubElement(geometry, "box"), "size").text = f"{length} 0.04 0.01"
+        material = ET.SubElement(visual, "material")
+        ET.SubElement(material, "ambient").text = "0.1 0.9 0.2 1"
+        ET.SubElement(material, "diffuse").text = "0.1 0.9 0.2 1"
+    return ET.tostring(sdf, encoding="unicode")
+
+
+class GazeboPathDisplay:
+    def __init__(self, node):
+        self.node = node
+        self.latest = self.drawn = self.pending = None
+        self.drawn_source = self.pending_source = None
+        self.model_pose = self.pending_model_pose = None
+        self.fixed_alignment = None
+        self.alignment_frame = None
+        self.path_frame = None
+        self.odometry = deque(maxlen=200)
+        self.ground_truth = None
+        self.tf_buffer = Buffer()
+        self.tf_listener = TransformListener(self.tf_buffer, node)
+        self.busy, self.generation, self.deadline = False, 0, 0.0
+        self.spawn = node.create_client(SpawnEntity, "/world/dwa_world/create")
+        self.delete = node.create_client(DeleteEntity, "/world/dwa_world/remove")
+        self.move = node.create_client(SetEntityPose, "/world/dwa_world/set_pose")
+        node.create_subscription(Path, "/astar_path", self.path, 10)
+        node.create_subscription(Odometry, "/odom", self.record_odometry, 10)
+        node.create_subscription(Odometry, "/gazebo/ground_truth_odom", self.record_ground_truth, 10)
+        node.create_timer(0.5, self.tick)
+
+    def record_odometry(self, message):
+        self.odometry.append(message)
+
+    def record_ground_truth(self, message):
+        self.ground_truth = message
+
+    def path(self, message):
+        points = tuple((pose.pose.position.x, pose.pose.position.y) for pose in message.poses)
+        if all(math.isfinite(value) for point in points for value in point):
+            self.latest = points
+            self.path_frame = message.header.frame_id
+
+    def world_points(self):
+        if not self.latest:
+            return self.latest
+        if self.fixed_alignment is not None and self.alignment_frame == self.path_frame:
+            self.model_pose = self.fixed_alignment
+            offset_x, offset_y, yaw = self.fixed_alignment
+            cosine, sine = math.cos(yaw), math.sin(yaw)
+            return tuple((offset_x + cosine * point_x - sine * point_y,
+                          offset_y + sine * point_x + cosine * point_y)
+                         for point_x, point_y in self.latest)
+        if self.ground_truth is None or not self.odometry or not self.path_frame:
+            self.node.get_logger().warning(
+                "DIAG_PATH reason=waiting_alignment", throttle_duration_sec=5.0)
+            return None
+        truth = self.ground_truth
+        truth_time = Time.from_msg(truth.header.stamp).nanoseconds
+        odom = min(self.odometry, key=lambda message: abs(
+            Time.from_msg(message.header.stamp).nanoseconds - truth_time))
+        odom_time = Time.from_msg(odom.header.stamp).nanoseconds
+        if abs(odom_time - truth_time) > 50000000 or odom.child_frame_id != truth.child_frame_id:
+            self.node.get_logger().warning(
+                f"DIAG_PATH reason=alignment_mismatch odom_child={odom.child_frame_id} "
+                f"world_child={truth.child_frame_id}", throttle_duration_sec=5.0)
+            return None
+        age = self.node.get_clock().now().nanoseconds - truth_time
+        if age < 0 or age > 500000000:
+            self.node.get_logger().warning("DIAG_PATH reason=stale_alignment", throttle_duration_sec=5.0)
+            return None
+        if self.path_frame == odom.header.frame_id:
+            source_to_odom = (0.0, 0.0, 0.0)
+        else:
+            try:
+                transform = self.tf_buffer.lookup_transform(
+                    odom.header.frame_id, self.path_frame, Time.from_msg(odom.header.stamp)).transform
+            except TransformException as error:
+                self.node.get_logger().warning(
+                    f"DIAG_PATH reason=tf_missing frame={self.path_frame} error={error}",
+                    throttle_duration_sec=5.0)
+                return None
+            rotation = transform.rotation
+            yaw = math.atan2(2 * (rotation.w * rotation.z + rotation.x * rotation.y),
+                             1 - 2 * (rotation.y ** 2 + rotation.z ** 2))
+            source_to_odom = (transform.translation.x, transform.translation.y, yaw)
+        projected = project_path_points(self.latest, source_to_odom,
+                                        pose_2d(odom.pose.pose), pose_2d(truth.pose.pose))
+        if not all(math.isfinite(value) for point in projected for value in point):
+            self.node.get_logger().warning("DIAG_PATH reason=nonfinite_projection", throttle_duration_sec=5.0)
+            return None
+        anchors = project_path_points(((0.0, 0.0), (1.0, 0.0)), source_to_odom,
+                                      pose_2d(odom.pose.pose), pose_2d(truth.pose.pose))
+        self.model_pose = (anchors[0][0], anchors[0][1],
+                           math.atan2(anchors[1][1] - anchors[0][1],
+                                      anchors[1][0] - anchors[0][0]))
+        self.fixed_alignment = self.model_pose
+        self.alignment_frame = self.path_frame
+        self.node.get_logger().info(
+            f"DIAG_PATH reason=alignment_locked frame={self.path_frame} "
+            f"world_transform={self.fixed_alignment} navigation_feedback=false")
+        return projected
+
+    def tick(self):
+        if self.busy:
+            if time.monotonic() > self.deadline:
+                self.generation += 1
+                self.busy = False
+                self.node.get_logger().warning("Gazebo path service timed out.", throttle_duration_sec=5.0)
+            return
+        projected = self.world_points()
+        if projected is None:
+            return
+        if not projected and not self.drawn:
+            return
+        if self.drawn is not None and len(projected) == len(self.drawn) and all(
+                math.hypot(current[0] - previous[0], current[1] - previous[1]) < 0.02
+                for current, previous in zip(projected, self.drawn)):
+            return
+        if not all(client.service_is_ready() for client in (self.spawn, self.delete, self.move)):
+            self.node.get_logger().warning("Waiting for Gazebo path services.", throttle_duration_sec=5.0)
+            return
+        self.pending = projected
+        self.pending_source = (self.path_frame, self.latest)
+        self.pending_model_pose = self.model_pose
+        self.busy, self.deadline = True, time.monotonic() + 10.0
+        self.generation += 1
+        generation = self.generation
+        def place_pose(pose):
+            pose.position.x, pose.position.y, yaw = self.pending_model_pose
+            pose.orientation.z, pose.orientation.w = math.sin(yaw / 2), math.cos(yaw / 2)
+
+        def failed(error):
+            self.busy = False
+            self.node.get_logger().warning(f"Gazebo path drawing failed: {error}", throttle_duration_sec=5.0)
+
+        if self.drawn and self.drawn_source == self.pending_source:
+            request = SetEntityPose.Request()
+            request.entity.name, request.entity.type = "python_global_path", request.entity.MODEL
+            place_pose(request.pose)
+
+            def moved(result):
+                if generation != self.generation:
+                    return
+                try:
+                    if not result.result().success:
+                        raise RuntimeError("Gazebo rejected path pose update")
+                    self.drawn, self.busy = self.pending, False
+                except Exception as error:
+                    failed(error)
+
+            self.move.call_async(request).add_done_callback(moved)
+            return
+
+        def deleted(result):
+            if generation != self.generation:
+                return
+            try:
+                if result is not None:
+                    result.result()
+                if len(self.pending) < 2:
+                    self.drawn, self.busy = self.pending, False
+                    return
+                create = SpawnEntity.Request()
+                create.entity_factory.name = "python_global_path"
+                create.entity_factory.sdf = path_sdf(self.pending_source[1])
+                place_pose(create.entity_factory.pose)
+                self.spawn.call_async(create).add_done_callback(created)
+            except Exception as error:
+                failed(error)
+
+        def created(result):
+            if generation != self.generation:
+                return
+            try:
+                if not result.result().success:
+                    raise RuntimeError("Gazebo rejected the path model")
+                self.drawn, self.busy = self.pending, False
+                self.drawn_source = self.pending_source
+                self.node.get_logger().info(
+                    f"DIAG_PATH reason=drawn source_frame={self.path_frame} "
+                    f"points={len(self.drawn)} first={self.drawn[0]} last={self.drawn[-1]} "
+                    "ground_truth_usage=visualization_only")
+            except Exception as error:
+                failed(error)
+
+        if not self.drawn:
+            deleted(None)
+        else:
+            request = DeleteEntity.Request()
+            request.entity.name, request.entity.type = "python_global_path", request.entity.MODEL
+            self.delete.call_async(request).add_done_callback(deleted)
+
+
+class GazeboPathNode(Node):
+    def __init__(self):
+        super().__init__("gazebo_global_path")
+        self.display = GazeboPathDisplay(self)
+
+
+def main(args=None):
+    rclpy.init(args=args)
+    node = GazeboPathNode()
+    try:
+        rclpy.spin(node)
+    finally:
+        node.destroy_node()
+        if rclpy.ok():
+            rclpy.shutdown()
+~~~~~
+
+### codes_diploma/ros2_astar_dwa_gazebo/src/dwa_gazebo_sim/dwa_gazebo_sim/lidar_obstacle_node.py
+
+~~~~~python
+"""Convert LiDAR surface points and cluster velocity estimates into planner input."""
+
+import math
+import time
+
+import numpy as np
+
+import rclpy
+from rclpy.node import Node
+from rclpy.qos import qos_profile_sensor_data
+from rclpy.time import Time
+from sensor_msgs.msg import LaserScan, PointCloud2, PointField
+from sensor_msgs_py import point_cloud2
+from std_msgs.msg import Header
+from tf2_ros import Buffer, TransformException, TransformListener
+
+
+def estimate_cluster_translation(current, previous, initial):
+    translation = np.asarray(initial, dtype=float)
+    for _ in range(3):
+        offsets = current[:, None, :] - (previous[None, :, :] + translation)
+        squared_distances = np.sum(offsets * offsets, axis=2)
+        nearest = np.argmin(squared_distances, axis=1)
+        matched = squared_distances[np.arange(len(current)), nearest] <= 0.15 ** 2
+        if np.count_nonzero(matched) < 2:
+            return None
+        translation = np.median(current[matched] - previous[nearest[matched]], axis=0)
+    return translation
+
+
+class LidarObstacleNode(Node):
+    def __init__(self):
+        super().__init__("lidar_obstacles")
+        self.tracking_frame = self.declare_parameter("tracking_frame", "odom").value
+        self.max_range = float(self.declare_parameter("max_range", 3.0).value)
+        self.previous, self.last_stamp = [], None
+        self.scan_sequence = 0
+        self.last_diagnostic_wall = -math.inf
+        self.tf_buffer = Buffer()
+        self.tf_listener = TransformListener(self.tf_buffer, self)
+        self.publisher = self.create_publisher(PointCloud2, "/tracked_obstacles", 10)
+        self.create_subscription(LaserScan, "/scan", self.scan, qos_profile_sensor_data)
+        self.get_logger().info(
+            f"LiDAR-only tracker: /scan -> /tracked_obstacles; frame={self.tracking_frame}")
+
+    @staticmethod
+    def transform_point(transform, x, y):
+        rotation = transform.rotation
+        yaw = math.atan2(2 * (rotation.w * rotation.z + rotation.x * rotation.y),
+                         1 - 2 * (rotation.y ** 2 + rotation.z ** 2))
+        return (transform.translation.x + math.cos(yaw) * x - math.sin(yaw) * y,
+                transform.translation.y + math.sin(yaw) * x + math.cos(yaw) * y)
+
+    def scan(self, message):
+        self.scan_sequence += 1
+        stamp = message.header.stamp.sec + message.header.stamp.nanosec * 1e-9
+        try:
+            transform = self.tf_buffer.lookup_transform(
+                self.tracking_frame, message.header.frame_id, Time.from_msg(message.header.stamp)
+            ).transform
+        except TransformException as error:
+            self.get_logger().warning(
+                f"DIAG_LIDAR seq={self.scan_sequence} stamp={stamp} reason=tf_missing "
+                f"transform={message.header.frame_id}->{self.tracking_frame} error={error}",
+                throttle_duration_sec=2.0)
+            return
+        clusters, last_index = [], -2
+        for index, value in enumerate(message.ranges):
+            if not math.isfinite(value) or not message.range_min <= value <= min(message.range_max, self.max_range):
+                continue
+            angle = message.angle_min + index * message.angle_increment
+            point = self.transform_point(transform, value * math.cos(angle), value * math.sin(angle))
+            if (not clusters or index - last_index > 2 or
+                    math.hypot(point[0] - clusters[-1][-1][0], point[1] - clusters[-1][-1][1]) > 0.15):
+                clusters.append([])
+            clusters[-1].append(point)
+            last_index = index
+        dt = None if self.last_stamp is None else stamp - self.last_stamp
+        tracks, points, used = [], [], set()
+        motion_fits = 0
+        for cluster in clusters:
+            surface = np.asarray(cluster[::max(1, (len(cluster) + 63) // 64)], dtype=float)
+            x = sum(point[0] for point in cluster) / len(cluster)
+            y = sum(point[1] for point in cluster) / len(cluster)
+            vx = vy = 0.0
+            if dt is not None and 0.02 < dt < 0.5 and len(cluster) >= 2:
+                matches = [(math.hypot(x - old[0] - old[2] * dt, y - old[1] - old[3] * dt), index)
+                           for index, old in enumerate(self.previous) if index not in used]
+                if matches:
+                    error, index = min(matches)
+                    if error < 0.35:
+                        old = self.previous[index]
+                        used.add(index)
+                        translation = estimate_cluster_translation(
+                            surface, old[4], (old[2] * dt, old[3] * dt))
+                        if translation is not None:
+                            motion_fits += 1
+                            vx = 0.6 * old[2] + 0.4 * float(translation[0]) / dt
+                            vy = 0.6 * old[3] + 0.4 * float(translation[1]) / dt
+                            if math.hypot(vx, vy) < 0.06:
+                                vx = vy = 0.0
+            tracks.append((x, y, vx, vy, surface))
+            points.extend((point[0], point[1], 0.0, 0.0, vx, vy) for point in cluster)
+        self.previous, self.last_stamp = tracks, stamp
+        fields = [PointField(name=name, offset=4 * index, datatype=PointField.FLOAT32, count=1)
+                  for index, name in enumerate(("x", "y", "z", "radius", "vx", "vy"))]
+        self.publisher.publish(point_cloud2.create_cloud(
+            Header(stamp=message.header.stamp, frame_id=self.tracking_frame), fields, points
+        ))
+        wall_time = time.monotonic()
+        if wall_time - self.last_diagnostic_wall >= 2.0:
+            self.last_diagnostic_wall = wall_time
+            moving = sum(math.hypot(track[2], track[3]) > 0 for track in tracks)
+            max_speed = max((math.hypot(track[2], track[3]) for track in tracks), default=0.0)
+            age = self.get_clock().now().nanoseconds * 1e-9 - stamp
+            self.get_logger().info(
+                f"DIAG_LIDAR seq={self.scan_sequence} stamp={stamp:.3f} age={age:.3f} "
+                f"frame={self.tracking_frame} scan_dt={dt} rays={len(message.ranges)} "
+                f"points={len(points)} clusters={len(clusters)} matches={len(used)} "
+                f"motion_fits={motion_fits} "
+                f"moving_clusters={moving} max_speed={max_speed:.3f} "
+                f"sensor_xy=({transform.translation.x:.3f},{transform.translation.y:.3f})")
+
+
+def main(args=None):
+    rclpy.init(args=args)
+    node = LidarObstacleNode()
+    try:
+        rclpy.spin(node)
+    finally:
+        node.destroy_node()
+        if rclpy.ok():
+            rclpy.shutdown()
 ~~~~~
 
 ### codes_diploma/ros2_astar_dwa_gazebo/src/dwa_gazebo_sim/dwa_gazebo_sim/moving_obstacle_node.py
@@ -5239,6 +6751,454 @@ if __name__ == "__main__":
 
 ~~~~~
 
+### codes_diploma/ros2_astar_dwa_gazebo/src/dwa_gazebo_sim/dwa_gazebo_sim/python_reference.py
+
+~~~~~python
+"""ROS-only copy of the Python scene; original simulation sources stay unchanged."""
+
+import math
+import xml.etree.ElementTree as ET
+
+from codes_diploma.astar_project.grid_map import GridMap
+from codes_diploma.robot import Obstacle, robotstate
+
+PHYSICS_STEP = 0.001
+
+
+def create_scene(
+    width=30, height=20, resolution=0.2, start_cell=(2, 2),
+    goal_cell=(17, 27), inflation_radius=0.11,
+):
+    grid = GridMap(width=width, height=height, resolution=resolution)
+    cells = [(row, min(10, width - 2)) for row in range(2, max(2, height - 2))
+             if row not in range(7, 13)]
+    cells += [(min(12, height - 2), column) for column in range(12, max(12, width - 2))
+              if column not in range(19, 25)]
+    for cell in cells:
+        if grid.is_inside(*cell) and cell not in (start_cell, goal_cell):
+            grid.add_obstacle(*cell)
+    grid.inflate_obstacles(inflation_radius)
+    start, goal = grid.grid_to_world(*start_cell), grid.grid_to_world(*goal_cell)
+    statics = [Obstacle(*grid.grid_to_world(*cell), radius=0.12) for cell in cells]
+    dynamic = [Obstacle(2.4, 0.4, radius=0.18, vx=0.0, vy=0.20),
+               Obstacle(6.8, 2.1, radius=0.18, vx=-0.25, vy=0.0)]
+    return grid, start, goal, robotstate(x=start[0], y=start[1], irany=0.0), statics, dynamic
+
+
+def create_gazebo_scene(world_file, resolution=0.2, inflation_radius=0.27):
+    if not math.isfinite(resolution) or resolution <= 0:
+        raise ValueError("Map resolution must be finite and positive")
+    world = ET.parse(world_file).getroot().find("world")
+    if world is None:
+        raise ValueError("Missing Gazebo world")
+    models = {model.get("name"): model for model in world.findall("model")}
+    poses = {name: [float(value) for value in model.findtext("pose", "0 0 0 0 0 0").split()]
+             for name, model in models.items()}
+    origin_x, origin_y = poses["boundary_left"][0], poses["boundary_bottom"][1]
+    width = math.ceil((poses["boundary_right"][0] - origin_x) / resolution)
+    height = math.ceil((poses["boundary_top"][1] - origin_y) / resolution)
+    grid = GridMap(width, height, resolution, origin_x, origin_y)
+    statics = []
+    for name, model in models.items():
+        size = model.findtext("link/collision/geometry/box/size")
+        if model.findtext("static") != "true" or size is None:
+            continue
+        x, y, _, roll, pitch, yaw = poses[name]
+        if abs(roll) + abs(pitch) + abs(yaw) > 1e-6:
+            raise ValueError("The reference world requires axis-aligned walls")
+        size_x, size_y, _ = map(float, size.split())
+        half_x, half_y = size_x / 2, size_y / 2
+        cell_margin = inflation_radius + resolution / math.sqrt(2)
+        for row in range(height):
+            for column in range(width):
+                cell_x, cell_y = grid.grid_to_world(row, column)
+                dx, dy = max(abs(cell_x - x) - half_x, 0), max(abs(cell_y - y) - half_y, 0)
+                if math.hypot(dx, dy) <= cell_margin:
+                    grid.add_obstacle(row, column)
+        along_x = size_x >= size_y
+        length, thickness = (size_x, size_y) if along_x else (size_y, size_x)
+        count = max(1, math.ceil(length / resolution))
+        radius = math.hypot(thickness / 2, length / count / 2)
+        for index in range(count + 1):
+            offset = -length / 2 + length * index / count
+            statics.append(Obstacle(x + offset if along_x else x,
+                                    y if along_x else y + offset, radius=radius))
+    include = world.find("include")
+    if include is None:
+        raise ValueError("Missing TurtleBot include")
+    spawn = [float(value) for value in include.findtext("pose", "0 0 0 0 0 0").split()]
+    if abs(spawn[5]) > 1e-6:
+        raise ValueError("The reference spawn yaw must be zero")
+    start = (spawn[0], spawn[1])
+    velocities = {"moving_obstacle_1": (0.0, 0.20), "moving_obstacle_2": (-0.25, 0.0)}
+    dynamic = []
+    for name, (vx, vy) in velocities.items():
+        radius = float(models[name].findtext("link/collision/geometry/cylinder/radius"))
+        dynamic.append(Obstacle(*poses[name][:2], radius=radius, vx=vx, vy=vy))
+    return grid, start, (6.5, 4.2), robotstate(x=start[0], y=start[1]), statics, dynamic
+~~~~~
+
+### codes_diploma/ros2_astar_dwa_gazebo/src/dwa_gazebo_sim/dwa_gazebo_sim/python_simulation_node.py
+
+~~~~~python
+"""Continuous Gazebo odometry and obstacle adapter; no physics stepping."""
+
+import copy
+import math
+import time
+
+import rclpy
+from geometry_msgs.msg import TransformStamped, Twist
+from nav_msgs.msg import Odometry
+from rclpy.node import Node
+from rclpy.qos import DurabilityPolicy, QoSProfile, qos_profile_sensor_data
+from rclpy.time import Time
+from sensor_msgs.msg import LaserScan
+from std_msgs.msg import Bool
+from tf2_ros import Buffer, StaticTransformBroadcaster, TransformBroadcaster, TransformListener
+
+from .python_reference import create_gazebo_scene
+from .gazebo_path_node import GazeboPathDisplay
+
+
+class GazeboSimulationAdapter:
+    def __init__(self, node):
+        self.node = node
+        self.ground_truth = None
+        self.last_diagnostic_wall = -math.inf
+        self.last_diagnostic_sim = None
+        self.last_tf_diagnostic_wall = -math.inf
+        self.last_odom_stamp = None
+        self.last_odom_child = None
+        self.tf_buffer = Buffer(node=node)
+        self.tf_listener = TransformListener(self.tf_buffer, node)
+        if not node.has_parameter("world_file"):
+            node.declare_parameter("world_file", "")
+        world_file = node.get_parameter("world_file").value
+        _, self.start, _, _, _, self.obstacles = create_gazebo_scene(world_file)
+        crossing_enabled = node.declare_parameter("enable_crossing_obstacle", False).value
+        obstacle_specs = [(f"moving_obstacle_{index + 1}", obstacle)
+                  for index, obstacle in enumerate(self.obstacles)
+                  if crossing_enabled or index == 1]
+        self.obstacles = [obstacle for _, obstacle in obstacle_specs]
+        self.obstacle_names = [name for name, _ in obstacle_specs]
+        self.oncoming_start_x = float(node.declare_parameter("oncoming_start_x", 2.4).value)
+        if not math.isfinite(self.oncoming_start_x):
+            raise ValueError("oncoming_start_x must be finite")
+        self.robot_odom_x = None
+        self.oncoming_started = False
+        self.active = False
+        self.last_time = node.get_clock().now().nanoseconds * 1e-9
+        self.odom_pub = node.create_publisher(Odometry, "/odom", 10)
+        self.obstacle_commands = [node.create_publisher(
+            Twist, f"/model/{name}/cmd_vel", 10) for name, _ in obstacle_specs]
+        latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
+        node.create_subscription(Bool, "/controller_active", self.set_active, latched)
+        node.create_subscription(Odometry, "/gazebo/wheel_odom", self.odom, qos_profile_sensor_data)
+        node.create_subscription(Odometry, "/gazebo/ground_truth_odom", self.record_ground_truth, qos_profile_sensor_data)
+        node.create_subscription(LaserScan, "/scan", self.inspect_scan_tf, qos_profile_sensor_data)
+        self.tf = TransformBroadcaster(node)
+        self.static_tf = StaticTransformBroadcaster(node)
+        self.odom_child = node.declare_parameter("odom_child_frame", "base_footprint").value
+        base_z = float(node.declare_parameter("base_link_z", 0.01).value)
+        laser_pose = node.declare_parameter("laser_pose", [-0.064, 0.0, 0.121]).value
+        base = TransformStamped()
+        base.header.frame_id, base.child_frame_id = self.odom_child, "base_link"
+        base.transform.translation.z, base.transform.rotation.w = base_z, 1.0
+        laser = TransformStamped()
+        laser.header.frame_id, laser.child_frame_id = "base_link", "base_scan"
+        laser.transform.translation.x, laser.transform.translation.y, laser.transform.translation.z = laser_pose
+        laser.transform.rotation.w = 1.0
+        self.static_tf.sendTransform([laser] if self.odom_child == "base_link" else [base, laser])
+        node.create_timer(0.10, self.tick)
+        node.get_logger().info(
+            "python-turtlebot-physical: odometry=wheel; obstacles=LiDAR; "
+            "simulation-only adapter; velocity-driven obstacles; physical cmd_vel control")
+        node.get_logger().info(
+            f"DIAG_SCENARIO crossing_enabled={crossing_enabled} "
+            f"moving_models={[name for name, _ in obstacle_specs]} "
+            f"oncoming_start_x={self.oncoming_start_x}")
+
+    def set_active(self, message):
+        self.active = message.data
+
+    def record_ground_truth(self, message):
+        self.ground_truth = message
+
+    def inspect_scan_tf(self, message):
+        wall_time = time.monotonic()
+        if wall_time - self.last_tf_diagnostic_wall < 2.0:
+            return
+        self.last_tf_diagnostic_wall = wall_time
+        stamp = Time.from_msg(message.header.stamp)
+        scan_age = (self.node.get_clock().now().nanoseconds - stamp.nanoseconds) * 1e-9
+        odom_delta = None if self.last_odom_stamp is None else (
+            self.last_odom_stamp - stamp.nanoseconds) * 1e-9
+        checks = []
+        for target, source in (("base_link", message.header.frame_id),
+                               ("odom", "base_link"), ("map", "odom")):
+            ready, detail = self.tf_buffer.can_transform(
+                target, source, stamp, return_debug_tuple=True)
+            latest = self.tf_buffer.can_transform(target, source, Time())
+            checks.append(f"{target}<-{source}:at_scan={ready},latest={latest},detail={detail}")
+        self.node.get_logger().info(
+            f"DIAG_TF scan_stamp={stamp.nanoseconds * 1e-9:.3f} scan_age={scan_age:.3f} "
+            f"scan_frame={message.header.frame_id} odom_received={self.last_odom_stamp is not None} "
+            f"wheel_publishers={self.node.count_publishers('/gazebo/wheel_odom')} "
+            f"odom_minus_scan={odom_delta} configured_child={self.odom_child} "
+            f"received_child={self.last_odom_child} checks={checks}")
+
+    def odom(self, message):
+        mapped = copy.deepcopy(message)
+        mapped.header.frame_id = "odom"
+        mapped.child_frame_id = message.child_frame_id or self.odom_child
+        mapped.pose.pose.position.x += self.start[0]
+        mapped.pose.pose.position.y += self.start[1]
+        self.robot_odom_x = mapped.pose.pose.position.x
+        self.odom_pub.publish(mapped)
+        transform = TransformStamped()
+        transform.header, transform.child_frame_id = mapped.header, mapped.child_frame_id
+        transform.transform.translation.x = mapped.pose.pose.position.x
+        transform.transform.translation.y = mapped.pose.pose.position.y
+        transform.transform.translation.z = mapped.pose.pose.position.z
+        transform.transform.rotation = mapped.pose.pose.orientation
+        self.tf.sendTransform(transform)
+        self.last_odom_stamp = Time.from_msg(mapped.header.stamp).nanoseconds
+        self.last_odom_child = mapped.child_frame_id
+        wall_time = time.monotonic()
+        if wall_time - self.last_diagnostic_wall >= 2.0:
+            stamp = message.header.stamp.sec + message.header.stamp.nanosec * 1e-9
+            real_time_factor = None if self.last_diagnostic_sim is None else (
+                (stamp - self.last_diagnostic_sim) / (wall_time - self.last_diagnostic_wall))
+            self.last_diagnostic_wall = wall_time
+            self.last_diagnostic_sim = stamp
+            truth_position = None
+            truth_delta = None
+            error = None
+            if self.ground_truth is not None:
+                truth = self.ground_truth
+                truth_stamp = truth.header.stamp.sec + truth.header.stamp.nanosec * 1e-9
+                truth_delta = stamp - truth_stamp
+                truth_position = (truth.pose.pose.position.x, truth.pose.pose.position.y)
+                if abs(truth_delta) <= 0.2:
+                    error = math.hypot(mapped.pose.pose.position.x - truth_position[0],
+                                       mapped.pose.pose.position.y - truth_position[1])
+            self.node.get_logger().info(
+                f"DIAG_ODOM stamp={stamp:.3f} source=wheel "
+                f"raw_xy=({message.pose.pose.position.x:.3f},{message.pose.pose.position.y:.3f}) "
+                f"spawn_offset={self.start} "
+                f"odom_xy=({mapped.pose.pose.position.x:.3f},{mapped.pose.pose.position.y:.3f}) "
+                f"truth_xy={truth_position} truth_dt={truth_delta} xy_error={error} "
+                f"real_time_factor={real_time_factor} "
+                f"child={mapped.child_frame_id}")
+
+    def tick(self):
+        now = self.node.get_clock().now().nanoseconds * 1e-9
+        dt, self.last_time = max(0.0, now - self.last_time), now
+        if (self.active and not self.oncoming_started and self.robot_odom_x is not None and
+                self.robot_odom_x >= self.oncoming_start_x):
+            self.oncoming_started = True
+            self.node.get_logger().info(
+                f"DIAG_SCENARIO event=oncoming_started sim_t={now:.3f} "
+                f"robot_odom_x={self.robot_odom_x:.3f} threshold={self.oncoming_start_x}")
+        for name, obstacle, publisher in zip(self.obstacle_names, self.obstacles, self.obstacle_commands):
+            moving = self.active and (name != "moving_obstacle_2" or self.oncoming_started)
+            if moving:
+                obstacle.move(dt)
+            command = Twist()
+            if moving:
+                command.linear.x, command.linear.y = obstacle.vx, obstacle.vy
+            publisher.publish(command)
+
+
+class PythonSimulationNode(Node):
+    def __init__(self):
+        super().__init__("python_simulation")
+        self.adapter = GazeboSimulationAdapter(self)
+        self.path_display = GazeboPathDisplay(self)
+
+
+def main(args=None):
+    rclpy.init(args=args)
+    node = PythonSimulationNode()
+    try:
+        rclpy.spin(node)
+    finally:
+        node.destroy_node()
+        if rclpy.ok():
+            rclpy.shutdown()
+~~~~~
+
+### codes_diploma/ros2_astar_dwa_gazebo/src/dwa_gazebo_sim/dwa_gazebo_sim/python_world.py
+
+~~~~~python
+"""Generate Gazebo geometry from the ROS copy of the unchanged Python scene."""
+
+import copy
+import math
+import tempfile
+import xml.etree.ElementTree as ET
+
+from codes_diploma.robot import robotconfig
+from .python_reference import PHYSICS_STEP, create_scene
+
+
+def element(parent, tag, value=None, **attributes):
+    child = ET.SubElement(parent, tag, attributes)
+    if value is not None:
+        child.text = str(value)
+    return child
+
+
+def inertial(link, mass, inertia):
+    node = element(link, "inertial")
+    element(node, "mass", mass)
+    tensor = element(node, "inertia")
+    for axis in ("ixx", "iyy", "izz"):
+        element(tensor, axis, inertia)
+    for axis in ("ixy", "ixz", "iyz"):
+        element(tensor, axis, 0)
+
+
+def cylinder(link, radius, length, color, pose="0 0 0 0 0 0"):
+    for name in ("collision", "visual"):
+        item = element(link, name, name=name)
+        element(item, "pose", pose)
+        geometry = element(item, "geometry")
+        shape = element(geometry, "cylinder")
+        element(shape, "radius", radius)
+        element(shape, "length", length)
+        if name == "visual":
+            material = element(item, "material")
+            element(material, "ambient", color)
+            element(material, "diffuse", color)
+
+
+def write_world_with_pose_odometry(world_file, model_file, enable_crossing_obstacle=True,
+                                   enable_camera=True):
+    tree = ET.parse(world_file)
+    world = tree.getroot().find("world")
+    if world is None:
+        raise ValueError("Missing Gazebo world")
+    include = world.find("include")
+    model = ET.parse(model_file).getroot().find("model")
+    if include is None or model is None:
+        raise ValueError("Missing TurtleBot model/include")
+    robot = copy.deepcopy(model)
+    if not enable_crossing_obstacle:
+        for obstacle_model in world.findall("model"):
+            if obstacle_model.get("name") == "moving_obstacle_1":
+                world.remove(obstacle_model)
+    if not enable_camera:
+        for link in robot.findall("link"):
+            for sensor in link.findall("sensor"):
+                if sensor.get("type") in ("camera", "depth_camera", "rgbd_camera"):
+                    link.remove(sensor)
+    robot.set("name", include.findtext("name", "turtlebot3_waffle"))
+    pose = robot.find("pose")
+    if pose is None:
+        pose = ET.SubElement(robot, "pose")
+    pose.text = include.findtext("pose", "0 0 0 0 0 0")
+    drive = robot.find("plugin[@name='gz::sim::systems::DiffDrive']")
+    if drive is None:
+        raise ValueError("Missing TurtleBot differential drive")
+    odometry = ET.SubElement(robot, "plugin", filename="gz-sim-odometry-publisher-system",
+                             name="gz::sim::systems::OdometryPublisher")
+    for key, value in {
+        "odom_frame": "odom", "robot_base_frame": drive.findtext("child_frame_id", "base_footprint"),
+        "odom_topic": "/world_pose_odom", "tf_topic": "/gazebo/world_pose_tf",
+        "dimensions": 2, "odom_publish_frequency": 50, "gaussian_noise": 0,
+    }.items():
+        element(odometry, key, value)
+    world.remove(include)
+    world.append(robot)
+    with tempfile.NamedTemporaryFile(suffix=".sdf", prefix="turtlebot_pose_", delete=False) as handle:
+        tree.write(handle, encoding="utf-8", xml_declaration=True)
+        return handle.name
+
+
+def write_world():
+    grid, start, _, _, statics, dynamic = create_scene()
+    config = robotconfig()
+    sdf = ET.Element("sdf", version="1.8")
+    world = element(sdf, "world", name="dwa_world")
+    physics = element(world, "physics", name="python_steps", type="ignored")
+    element(physics, "max_step_size", PHYSICS_STEP)
+    element(physics, "real_time_factor", 1)
+    for library, system in (("physics", "Physics"), ("scene-broadcaster", "SceneBroadcaster"),
+                            ("user-commands", "UserCommands")):
+        element(world, "plugin", filename=f"gz-sim-{library}-system", name=f"gz::sim::systems::{system}")
+    light = element(world, "light", name="sun", type="directional")
+    element(light, "pose", "0 0 10 0 0 0")
+    element(light, "direction", "-0.5 0.1 -0.9")
+    ground = element(world, "model", name="ground_plane")
+    element(ground, "static", "true")
+    link = element(ground, "link", name="link")
+    for kind in ("collision", "visual"):
+        item = element(link, kind, name=kind)
+        geometry = element(item, "geometry")
+        plane = element(geometry, "plane")
+        element(plane, "normal", "0 0 1")
+        element(plane, "size", f"{grid.width * grid.resolution} {grid.height * grid.resolution}")
+        if kind == "visual":
+            element(item, "pose", f"{grid.width * grid.resolution / 2} {grid.height * grid.resolution / 2} 0 0 0 0")
+            material = element(item, "material")
+            element(material, "ambient", "0.7 0.75 0.75 1")
+            element(material, "diffuse", "0.7 0.75 0.75 1")
+    for index, obstacle in enumerate(statics + dynamic):
+        moving = index >= len(statics)
+        name = f"moving_obstacle_{index - len(statics) + 1}" if moving else f"static_obstacle_{index}"
+        model = element(world, "model", name=name)
+        element(model, "static", "false" if moving else "true")
+        element(model, "pose", f"{obstacle.x} {obstacle.y} 0.45 0 0 0")
+        link = element(model, "link", name="link")
+        element(link, "gravity", "false")
+        inertial(link, 10, 0.1)
+        color = "0.1 0.4 0.9 1" if moving else ("0.9 0.7 0.1 1" if obstacle.x > 4 else "0.8 0.15 0.2 1")
+        cylinder(link, obstacle.radius, 0.9, color)
+    robot = element(world, "model", name="python_robot")
+    element(robot, "pose", f"{start[0]} {start[1]} {config.r_kerek} 0 0 0")
+    body = element(robot, "link", name="base_link")
+    inertial(body, 1, 0.005)
+    cylinder(body, config.rob_radius, 0.05, "0.1 0.6 0.6 1", "0 0 0.025 0 0 0")
+    for side, sign in (("left", 1), ("right", -1)):
+        wheel = element(robot, "link", name=f"{side}_wheel")
+        element(wheel, "pose", f"0 {sign * config.b} 0 0 0 0")
+        inertial(wheel, 0.05, 0.00003)
+        cylinder(wheel, config.r_kerek, 0.02, "0.1 0.1 0.1 1", f"0 0 0 {math.pi / 2} 0 0")
+        joint = element(robot, "joint", name=f"{side}_wheel_joint", type="revolute")
+        element(joint, "parent", "base_link")
+        element(joint, "child", f"{side}_wheel")
+        axis = element(joint, "axis")
+        element(axis, "xyz", "0 1 0")
+    for name, direction in (("front", 1), ("rear", -1)):
+        caster = element(robot, "link", name=f"{name}_caster")
+        element(caster, "pose", f"{direction * 0.075} 0 -0.023 0 0 0")
+        inertial(caster, 0.01, 0.000001)
+        collision = element(caster, "collision", name="collision")
+        sphere = element(element(collision, "geometry"), "sphere")
+        element(sphere, "radius", 0.01)
+        friction = element(element(element(collision, "surface"), "friction"), "ode")
+        element(friction, "mu", 0.01)
+        element(friction, "mu2", 0.01)
+        joint = element(robot, "joint", name=f"{name}_caster_joint", type="fixed")
+        element(joint, "parent", "base_link")
+        element(joint, "child", f"{name}_caster")
+    drive = element(robot, "plugin", filename="gz-sim-diff-drive-system", name="gz::sim::systems::DiffDrive")
+    for key, value in {
+        "left_joint": "left_wheel_joint", "right_joint": "right_wheel_joint",
+        "wheel_separation": 2 * config.b, "wheel_radius": config.r_kerek,
+        "topic": "/cmd_vel", "odom_topic": "/odom", "tf_topic": "/gazebo/tf",
+        "frame_id": "odom", "child_frame_id": "base_link", "odom_publish_frequency": 100,
+        "max_linear_acceleration": config.a_max,
+        "max_angular_acceleration": config.a_max / config.b,
+    }.items():
+        element(drive, key, value)
+    with tempfile.NamedTemporaryFile(suffix=".sdf", prefix="python_reference_", delete=False) as handle:
+        ET.ElementTree(sdf).write(handle, encoding="utf-8", xml_declaration=True)
+        return handle.name
+~~~~~
+
 ### codes_diploma/ros2_astar_dwa_gazebo/src/dwa_gazebo_sim/launch/bridge_and_controller.launch.py
 
 ~~~~~python
@@ -5289,89 +7249,195 @@ import xml.etree.ElementTree as ET
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, ExecuteProcess, OpaqueFunction, SetEnvironmentVariable
+from launch.actions import DeclareLaunchArgument, EmitEvent, ExecuteProcess, LogInfo, OpaqueFunction, RegisterEventHandler, SetEnvironmentVariable, SetLaunchConfiguration
 from launch.conditions import IfCondition
+from launch.events import matches_action
 from launch.substitutions import LaunchConfiguration
-from launch_ros.actions import Node
+from launch_ros.actions import LifecycleNode, Node
+from launch_ros.descriptions import ParameterFile
+from launch_ros.event_handlers import OnStateTransition
+from launch_ros.events.lifecycle import ChangeState
+from lifecycle_msgs.msg import Transition
 
 
-def start_simulation(context):
+def start_reference(context):
+    from dwa_gazebo_sim.python_world import write_world_with_pose_odometry
+
     package_share = get_package_share_directory("dwa_gazebo_sim")
-    controller_share = get_package_share_directory("astar_dwa_controller")
     model_root = os.path.join(get_package_share_directory("turtlebot3_gazebo"), "models")
-    model_file = os.path.join(model_root, "turtlebot3_waffle", "model.sdf")
-    world_file = os.path.join(package_share, "worlds", "dwa_world.sdf")
-    model = ET.parse(model_file).getroot()
+    world_path = os.path.join(package_share, "worlds", "dwa_world.sdf")
+    model = ET.parse(os.path.join(model_root, "turtlebot3_waffle", "model.sdf")).getroot()
     drive = model.find(".//plugin[@name='gz::sim::systems::DiffDrive']")
     laser = model.find(".//sensor[@type='gpu_lidar']")
     collision = model.find(".//link[@name='base_link']/collision")
     if drive is None or laser is None or collision is None:
-        raise RuntimeError("Installed TurtleBot Waffle model is missing DiffDrive, LiDAR or body geometry")
-    from dwa_gazebo_sim.gazebo_odometry_world import add_world_pose_odometry
-    runtime_world = add_world_pose_odometry(world_file, model_file)
+        raise RuntimeError("The installed TurtleBot Waffle model lacks drive, LiDAR or body geometry")
+    wheel_radius = float(drive.findtext("wheel_radius"))
+    wheel_base = float(drive.findtext("wheel_separation")) / 2
     body_pose = [float(value) for value in collision.findtext("pose", "0 0 0 0 0 0").split()]
-    body_size = [float(value) for value in collision.findtext("geometry/box/size").split()]
-    robot_radius = math.hypot(abs(body_pose[0]) + body_size[0] / 2,
-                              abs(body_pose[1]) + body_size[1] / 2)
+    size = [float(value) for value in collision.findtext("geometry/box/size").split()]
+    robot_radius = math.hypot(abs(body_pose[0]) + size[0] / 2, abs(body_pose[1]) + size[1] / 2)
     laser_pose = [float(value) for value in laser.findtext("pose", "0 0 0 0 0 0").split()]
+    if any(abs(value) > 1e-6 for value in laser_pose[3:]):
+        raise RuntimeError("The reference expects an unrotated TurtleBot LiDAR")
+    base_pose = [float(value) for value in model.findtext(
+        ".//joint[@name='base_joint']/pose", "0 0 0.01 0 0 0").split()]
+    start_environment = LaunchConfiguration("start_environment").perform(context).lower() == "true"
+    enable_crossing = LaunchConfiguration("enable_crossing_obstacle").perform(context).lower() == "true"
+    enable_camera = LaunchConfiguration("enable_camera").perform(context).lower() == "true"
+    slam_mode = LaunchConfiguration("slam_mode").perform(context)
+    map_file = LaunchConfiguration("map_file").perform(context).strip()
+    map_file = os.path.abspath(os.path.expanduser(map_file)) if map_file else ""
+    if start_environment and slam_mode == "localization" and not map_file:
+        raise RuntimeError("Localization requires map_file:=/absolute/path/prefix without an extension")
+    if start_environment and map_file:
+        for extension in (".posegraph", ".data"):
+            if not os.path.isfile(map_file + extension):
+                raise RuntimeError(f"Missing saved SLAM file: {map_file + extension}")
+    initial_pose = [float(LaunchConfiguration(name).perform(context))
+                    for name in ("initial_x", "initial_y", "initial_yaw")]
+    if not all(math.isfinite(value) for value in initial_pose):
+        raise RuntimeError("Initial map pose must contain finite values")
+    map_resolution = float(LaunchConfiguration("map_resolution").perform(context))
+    if not math.isfinite(map_resolution) or map_resolution <= 0:
+        raise RuntimeError("Map resolution must be finite and positive")
+    slam_executable = "localization_slam_toolbox_node" if slam_mode == "localization" else "async_slam_toolbox_node"
+    slam_config = os.path.join(package_share, "config", "slam.yaml")
+    if start_environment and not os.path.isfile(slam_config):
+        raise RuntimeError(
+            f"Installed SLAM config is missing: {slam_config}. "
+            "From the ROS workspace run: colcon build --symlink-install "
+            "--packages-select astar_dwa_controller dwa_gazebo_sim; "
+            "then source install/setup.bash and verify ros2 pkg prefix dwa_gazebo_sim. "
+            "Do not recreate the saved map: the missing file is package configuration.")
+    slam_node = LifecycleNode(
+        package="slam_toolbox", executable=slam_executable, name="slam_toolbox", namespace="",
+        output="screen", condition=IfCondition(LaunchConfiguration("start_environment")),
+        parameters=[ParameterFile(slam_config, allow_substs=True),
+                    {"use_sim_time": True, "mode": slam_mode, "map_file_name": map_file,
+                     "map_start_pose": initial_pose, "resolution": map_resolution,
+                     "odom_frame": "odom", "map_frame": "map", "base_frame": "base_link",
+                     "scan_topic": "/scan", "max_laser_range": 3.0,
+                     "use_lifecycle_manager": False}],
+    )
+    runtime_world = write_world_with_pose_odometry(
+        world_path, os.path.join(model_root, "turtlebot3_waffle", "model.sdf"),
+        enable_crossing_obstacle=enable_crossing, enable_camera=enable_camera) if start_environment else world_path
     return [
+        SetLaunchConfiguration("map_file", map_file),
+        SetLaunchConfiguration("initial_x", str(initial_pose[0])),
+        SetLaunchConfiguration("initial_y", str(initial_pose[1])),
+        SetLaunchConfiguration("initial_yaw", str(initial_pose[2])),
         SetEnvironmentVariable("GZ_SIM_RESOURCE_PATH", os.pathsep.join(
             [model_root, os.environ.get("GZ_SIM_RESOURCE_PATH", "")])),
         ExecuteProcess(cmd=["gz", "sim", "-r", "-v", LaunchConfiguration("verbose"), runtime_world],
-                       output="screen"),
+                   output="screen", condition=IfCondition(LaunchConfiguration("start_environment"))),
         Node(
             package="ros_gz_bridge", executable="parameter_bridge", output="screen",
+            condition=IfCondition(LaunchConfiguration("start_environment")),
             arguments=[
                 "/cmd_vel@geometry_msgs/msg/Twist]gz.msgs.Twist",
+                "/model/moving_obstacle_1/cmd_vel@geometry_msgs/msg/Twist]gz.msgs.Twist",
+                "/model/moving_obstacle_2/cmd_vel@geometry_msgs/msg/Twist]gz.msgs.Twist",
                 "/odom@nav_msgs/msg/Odometry[gz.msgs.Odometry",
                 "/world_pose_odom@nav_msgs/msg/Odometry[gz.msgs.Odometry",
                 "/scan@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan",
                 "/clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock",
+                "/world/dwa_world/create@ros_gz_interfaces/srv/SpawnEntity",
+                "/world/dwa_world/remove@ros_gz_interfaces/srv/DeleteEntity",
                 "/world/dwa_world/set_pose@ros_gz_interfaces/srv/SetEntityPose",
             ],
             remappings=[("/odom", "/gazebo/wheel_odom"),
-                        ("/world_pose_odom", "/odom")],
+                        ("/world_pose_odom", "/gazebo/ground_truth_odom")],
             parameters=[{"use_sim_time": True}],
         ),
         Node(
-            package="astar_dwa_controller", executable="astar_dwa_node", name="astar_dwa_node",
-            output="screen",
-            parameters=[
-                os.path.join(controller_share, "config", "rosbot.yaml"),
-                {"use_sim_time": True,
-                 "initial_pose_x": 0.0, "initial_pose_y": 0.0,
-                 "robot_radius": robot_radius,
-                 "wheel_radius": float(drive.findtext("wheel_radius")),
-                 "wheel_base": float(drive.findtext("wheel_separation")) / 2.0,
-                 "scan_offset_x": laser_pose[0],
-                 "scan_offset_y": laser_pose[1],
-                 "scan_offset_z": laser_pose[2],
-                 "acceleration_limit": float(drive.findtext("max_linear_acceleration", "1.0")),
-                 "max_linear_velocity": 0.22,
-                 "gazebo_world": "dwa_world"},
-            ],
+            package="dwa_gazebo_sim", executable="python_simulation_node", output="screen",
+            condition=IfCondition(LaunchConfiguration("start_environment")),
+            parameters=[{"use_sim_time": True, "world_file": world_path,
+                         "enable_crossing_obstacle": enable_crossing,
+                         "oncoming_start_x": float(LaunchConfiguration("oncoming_start_x").perform(context)),
+                         "laser_pose": laser_pose[:3], "base_link_z": base_pose[2],
+                         "odom_child_frame": drive.findtext("child_frame_id", "base_footprint")}],
         ),
-        Node(package="dwa_gazebo_sim", executable="moving_obstacle_node", output="screen",
-             parameters=[{"use_sim_time": True}]),
+        LogInfo(msg=f"DIAG_SLAM_CONFIG executable={slam_executable} mode={slam_mode} "
+                    f"map_file={map_file!r} initial_pose={initial_pose} "
+                    f"resolution={map_resolution} params_file={slam_config}",
+                condition=IfCondition(LaunchConfiguration("start_environment"))),
+        slam_node,
+        RegisterEventHandler(
+            OnStateTransition(target_lifecycle_node=slam_node, start_state="configuring",
+                              goal_state="inactive", entities=[EmitEvent(event=ChangeState(
+                                  lifecycle_node_matcher=matches_action(slam_node),
+                                  transition_id=Transition.TRANSITION_ACTIVATE))]),
+            condition=IfCondition(LaunchConfiguration("start_environment")),
+        ),
+        EmitEvent(event=ChangeState(lifecycle_node_matcher=matches_action(slam_node),
+                                   transition_id=Transition.TRANSITION_CONFIGURE),
+                  condition=IfCondition(LaunchConfiguration("start_environment"))),
+        Node(
+            package="astar_dwa_controller", executable="astar_dwa_node",
+            output="screen",
+            condition=IfCondition(LaunchConfiguration("start_planner")),
+            parameters=[{"use_sim_time": True, "r_kerek": wheel_radius, "b": wheel_base,
+                         "rob_radius": robot_radius, "map_inflation_radius": robot_radius + 0.03,
+                         "static_safety_margin": 0.03, "w_kerek_max": 0.26 / wheel_radius,
+                         "a_max": float(drive.findtext("max_linear_acceleration", "1.0"))}],
+        ),
+        Node(
+            package="dwa_gazebo_sim", executable="lidar_obstacle_node", output="screen",
+            condition=IfCondition(LaunchConfiguration("start_planner")),
+            parameters=[{"use_sim_time": True, "tracking_frame": "odom"}],
+        ),
     ]
 
 
 def generate_launch_description():
     return LaunchDescription([
-        DeclareLaunchArgument("verbose", default_value="4"),
-        DeclareLaunchArgument("software_rendering", default_value="true"),
-        SetEnvironmentVariable("LIBGL_ALWAYS_SOFTWARE", "1",
-                               condition=IfCondition(LaunchConfiguration("software_rendering"))),
+        DeclareLaunchArgument(
+            "verbose",
+            default_value="4",
+            description="Gazebo naplózási szintje (0-4)",
+        ),
+        DeclareLaunchArgument(
+            "software_rendering",
+            default_value="true",
+            description="Szoftveres Mesa renderelés bekapcsolása WSLg renderelési hibákhoz",
+        ),
+        DeclareLaunchArgument("start_planner", default_value="true",
+                      description="Set false for manual SLAM mapping without a cmd_vel controller"),
+        DeclareLaunchArgument("start_environment", default_value="true",
+                      description="Set false to start only the planner against an already running SLAM simulation"),
+        DeclareLaunchArgument("enable_crossing_obstacle", default_value="false", choices=["true", "false"],
+                      description="Include the crossing obstacle; false keeps only the oncoming obstacle"),
+        DeclareLaunchArgument("enable_camera", default_value="false", choices=["true", "false"],
+                      description="Enable unused camera rendering in the runtime TurtleBot model"),
+        DeclareLaunchArgument("oncoming_start_x", default_value="2.4",
+                      description="Start the oncoming obstacle after the robot reaches this odom x in metres"),
+        DeclareLaunchArgument("map_resolution", default_value="0.10",
+                      description="SLAM grid cell size in metres"),
+        DeclareLaunchArgument("slam_mode", default_value="mapping", choices=["mapping", "localization"],
+                      description="Build a map or localize against a saved pose graph"),
+        DeclareLaunchArgument("map_file", default_value="",
+                      description="Saved SLAM prefix without .posegraph or .data extension"),
+        DeclareLaunchArgument("initial_x", default_value="0.8", description="Initial x estimate in map metres"),
+        DeclareLaunchArgument("initial_y", default_value="0.8", description="Initial y estimate in map metres"),
+        DeclareLaunchArgument("initial_yaw", default_value="0.0", description="Initial map yaw estimate in radians"),
+        SetEnvironmentVariable(
+            "LIBGL_ALWAYS_SOFTWARE", "1", condition=IfCondition(LaunchConfiguration("software_rendering"))),
         SetEnvironmentVariable("ROS_AUTOMATIC_DISCOVERY_RANGE", "LOCALHOST"),
-        OpaqueFunction(function=start_simulation),
+        OpaqueFunction(function=start_reference),
     ])
+
 ~~~~~
 
 ### codes_diploma/ros2_astar_dwa_gazebo/src/dwa_gazebo_sim/launch/visualization.launch.py
 
 ~~~~~python
 from launch import LaunchDescription
-from launch.actions import SetEnvironmentVariable
+from launch.actions import DeclareLaunchArgument, LogInfo, SetEnvironmentVariable
+from launch.conditions import IfCondition
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from ament_index_python.packages import get_package_share_directory
 import os
@@ -5384,15 +7450,23 @@ def generate_launch_description():
         "astar_dwa.rviz",
     )
     return LaunchDescription([
+        DeclareLaunchArgument("software_rendering", default_value="true",
+                              description="Use software OpenGL for WSL map shader compatibility"),
         SetEnvironmentVariable("ROS_AUTOMATIC_DISCOVERY_RANGE", "LOCALHOST"),
         SetEnvironmentVariable("QT_QPA_PLATFORM", "xcb"),
         SetEnvironmentVariable("QT_X11_NO_MITSHM", "1"),
+        SetEnvironmentVariable("LIBGL_ALWAYS_SOFTWARE", "1",
+                       condition=IfCondition(LaunchConfiguration("software_rendering"))),
+        SetEnvironmentVariable("QT_OPENGL", "software",
+                       condition=IfCondition(LaunchConfiguration("software_rendering"))),
+        LogInfo(msg=["DIAG_RVIZ software_rendering=", LaunchConfiguration("software_rendering"),
+                 " fixed_frame=map config=", rviz_config]),
         Node(
             package="rviz2",
             executable="rviz2",
             name="rviz2",
             output="screen",
-            arguments=["-d", rviz_config, "-f", "odom"],
+            arguments=["-d", rviz_config, "-f", "map"],
             parameters=[{"use_sim_time": True}],
         )
     ])
@@ -5415,6 +7489,17 @@ def generate_launch_description():
   <depend>geometry_msgs</depend>
   <depend>nav_msgs</depend>
   <depend>sensor_msgs</depend>
+  <exec_depend>sensor_msgs_py</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+  <exec_depend>tf2_ros_py</exec_depend>
+  <exec_depend>visualization_msgs</exec_depend>
+  <exec_depend>python3-numpy</exec_depend>
+  <exec_depend>slam_toolbox</exec_depend>
+  <exec_depend>lifecycle_msgs</exec_depend>
+  <exec_depend>teleop_twist_keyboard</exec_depend>
+  <exec_depend>nav2_map_server</exec_depend>
+  <exec_depend>nav2_amcl</exec_depend>
+  <exec_depend>nav2_lifecycle_manager</exec_depend>
   <depend>ros_gz_interfaces</depend>
   <depend>ros_gz_bridge</depend>
   <depend>ros_gz_sim</depend>
@@ -5425,6 +7510,12 @@ def generate_launch_description():
     <build_type>ament_python</build_type>
   </export>
 </package>
+
+~~~~~
+
+### codes_diploma/ros2_astar_dwa_gazebo/src/dwa_gazebo_sim/resource/dwa_gazebo_sim
+
+~~~~~text
 
 ~~~~~
 
@@ -5454,8 +7545,12 @@ setup(
     data_files=[
         ("share/ament_index/resource_index/packages", ["resource/" + package_name]),
         ("share/" + package_name, ["package.xml"]),
-        (os.path.join("share", package_name, "launch"), glob("launch/*.py")),
-        (os.path.join("share", package_name, "config"), glob("config/*")),
+        (os.path.join("share", package_name, "launch"), [
+            "launch/bridge_and_controller.launch.py",
+            "launch/simulation.launch.py",
+            "launch/visualization.launch.py",
+        ]),
+        (os.path.join("share", package_name, "config"), ["config/slam.yaml"]),
         (os.path.join("share", package_name, "worlds"), glob("worlds/*.sdf")),
     ],
     install_requires=["setuptools"],
@@ -5463,6 +7558,8 @@ setup(
     entry_points={
         "console_scripts": [
             "moving_obstacle_node = dwa_gazebo_sim.moving_obstacle_node:main",
+            "python_simulation_node = dwa_gazebo_sim.python_simulation_node:main",
+            "lidar_obstacle_node = dwa_gazebo_sim.lidar_obstacle_node:main",
         ],
     },
 )
@@ -5557,6 +7654,9 @@ setup(
     <model name="moving_obstacle_1">
       <static>false</static>
       <pose>2.4 0.4 0.45 0 0 0</pose>
+      <plugin filename="gz-sim-velocity-control-system" name="gz::sim::systems::VelocityControl">
+        <topic>/model/moving_obstacle_1/cmd_vel</topic>
+      </plugin>
       <link name="link">
         <collision name="collision">
           <geometry><cylinder><radius>0.18</radius><length>0.9</length></cylinder></geometry>
@@ -5570,6 +7670,9 @@ setup(
     <model name="moving_obstacle_2">
       <static>false</static>
       <pose>6.8 2.1 0.45 0 0 0</pose>
+      <plugin filename="gz-sim-velocity-control-system" name="gz::sim::systems::VelocityControl">
+        <topic>/model/moving_obstacle_2/cmd_vel</topic>
+      </plugin>
       <link name="link">
         <collision name="collision">
           <geometry><cylinder><radius>0.18</radius><length>0.9</length></cylinder></geometry>
@@ -6288,10 +8391,6 @@ if __name__ == "__main__":
     run_simulation()
 
 ~~~~~
-
-## Archivált Önlab-források
-
-Ezek a fájlok a régi laborág pillanatképei, nem a cpp-rethink Gazebo launch részei.
 
 ### Önlab/DWA_py.py
 

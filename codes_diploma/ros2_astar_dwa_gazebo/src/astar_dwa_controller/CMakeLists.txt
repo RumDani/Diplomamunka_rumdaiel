@@ -12,22 +12,22 @@ find_package(rclcpp REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
+find_package(std_msgs REQUIRED)
 find_package(visualization_msgs REQUIRED)
+find_package(tf2 REQUIRED)
 find_package(tf2_ros REQUIRED)
 
-add_executable(astar_dwa_node src/astar_dwa_node.cpp)
-ament_target_dependencies(astar_dwa_node rclcpp geometry_msgs nav_msgs sensor_msgs visualization_msgs tf2_ros)
+add_executable(astar_dwa_node src/reference_controller.cpp)
+ament_target_dependencies(astar_dwa_node rclcpp geometry_msgs nav_msgs sensor_msgs std_msgs visualization_msgs tf2 tf2_ros)
 
 install(TARGETS astar_dwa_node DESTINATION lib/${PROJECT_NAME})
 install(DIRECTORY config launch rviz DESTINATION share/${PROJECT_NAME})
 ament_get_python_install_dir(PYTHON_INSTALL_DIR)
 set(PYTHON_REFERENCE_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/../../..")
 ament_python_install_module("${PYTHON_REFERENCE_SOURCE}/robot.py" DESTINATION_SUFFIX codes_diploma)
-install(FILES "${PYTHON_REFERENCE_SOURCE}/DWA.py" "${PYTHON_REFERENCE_SOURCE}/DWA+A.py"
-  DESTINATION "${PYTHON_INSTALL_DIR}/codes_diploma")
-install(DIRECTORY "${PYTHON_REFERENCE_SOURCE}/astar_project/"
-  DESTINATION "${PYTHON_INSTALL_DIR}/codes_diploma/astar_project"
-  FILES_MATCHING PATTERN "*.py" PATTERN "tests" EXCLUDE PATTERN "results" EXCLUDE)
+install(FILES "${PYTHON_REFERENCE_SOURCE}/astar_project/__init__.py"
+  "${PYTHON_REFERENCE_SOURCE}/astar_project/grid_map.py"
+  DESTINATION "${PYTHON_INSTALL_DIR}/codes_diploma/astar_project")
 if(BUILD_TESTING)
   enable_testing()
   add_executable(test_path_tracking test/test_path_tracking.cpp)

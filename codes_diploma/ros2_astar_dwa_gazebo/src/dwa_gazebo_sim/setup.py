@@ -24,7 +24,6 @@ setup(
     entry_points={
         "console_scripts": [
             "moving_obstacle_node = dwa_gazebo_sim.moving_obstacle_node:main",
-            "python_planner_node = dwa_gazebo_sim.python_planner_node:main",
             "python_simulation_node = dwa_gazebo_sim.python_simulation_node:main",
             "lidar_obstacle_node = dwa_gazebo_sim.lidar_obstacle_node:main",
         ],
