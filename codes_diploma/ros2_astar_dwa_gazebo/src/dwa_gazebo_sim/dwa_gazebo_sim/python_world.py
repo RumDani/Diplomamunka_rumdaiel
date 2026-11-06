@@ -40,7 +40,8 @@ def cylinder(link, radius, length, color, pose="0 0 0 0 0 0"):
             element(material, "diffuse", color)
 
 
-def write_world_with_pose_odometry(world_file, model_file):
+def write_world_with_pose_odometry(world_file, model_file, enable_crossing_obstacle=True,
+                                   enable_camera=True):
     tree = ET.parse(world_file)
     world = tree.getroot().find("world")
     if world is None:
@@ -50,6 +51,15 @@ def write_world_with_pose_odometry(world_file, model_file):
     if include is None or model is None:
         raise ValueError("Missing TurtleBot model/include")
     robot = copy.deepcopy(model)
+    if not enable_crossing_obstacle:
+        for obstacle_model in world.findall("model"):
+            if obstacle_model.get("name") == "moving_obstacle_1":
+                world.remove(obstacle_model)
+    if not enable_camera:
+        for link in robot.findall("link"):
+            for sensor in link.findall("sensor"):
+                if sensor.get("type") in ("camera", "depth_camera", "rgbd_camera"):
+                    link.remove(sensor)
     robot.set("name", include.findtext("name", "turtlebot3_waffle"))
     pose = robot.find("pose")
     if pose is None:

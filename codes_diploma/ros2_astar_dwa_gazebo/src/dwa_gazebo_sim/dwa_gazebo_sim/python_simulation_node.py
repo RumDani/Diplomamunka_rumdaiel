@@ -23,6 +23,7 @@ class GazeboSimulationAdapter:
         self.node = node
         self.ground_truth = None
         self.last_diagnostic_wall = -math.inf
+        self.last_diagnostic_sim = None
         self.last_tf_diagnostic_wall = -math.inf
         self.last_odom_stamp = None
         self.last_odom_child = None
@@ -32,12 +33,16 @@ class GazeboSimulationAdapter:
             node.declare_parameter("world_file", "")
         world_file = node.get_parameter("world_file").value
         _, self.start, _, _, _, self.obstacles = create_gazebo_scene(world_file)
+        crossing_enabled = node.declare_parameter("enable_crossing_obstacle", False).value
+        obstacle_specs = [(f"moving_obstacle_{index + 1}", obstacle)
+                  for index, obstacle in enumerate(self.obstacles)
+                  if crossing_enabled or index == 1]
+        self.obstacles = [obstacle for _, obstacle in obstacle_specs]
         self.active = False
         self.last_time = node.get_clock().now().nanoseconds * 1e-9
         self.odom_pub = node.create_publisher(Odometry, "/odom", 10)
         self.obstacle_commands = [node.create_publisher(
-            Twist, f"/model/moving_obstacle_{index + 1}/cmd_vel", 10)
-            for index in range(len(self.obstacles))]
+            Twist, f"/model/{name}/cmd_vel", 10) for name, _ in obstacle_specs]
         latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
         node.create_subscription(Bool, "/controller_active", self.set_active, latched)
         node.create_subscription(Odometry, "/gazebo/wheel_odom", self.odom, qos_profile_sensor_data)
@@ -60,6 +65,9 @@ class GazeboSimulationAdapter:
         node.get_logger().info(
             "python-turtlebot-physical: odometry=wheel; obstacles=LiDAR; "
             "simulation-only adapter; velocity-driven obstacles; physical cmd_vel control")
+        node.get_logger().info(
+            f"DIAG_SCENARIO crossing_enabled={crossing_enabled} "
+            f"moving_models={[name for name, _ in obstacle_specs]}")
 
     def set_active(self, message):
         self.active = message.data
@@ -108,8 +116,11 @@ class GazeboSimulationAdapter:
         self.last_odom_child = mapped.child_frame_id
         wall_time = time.monotonic()
         if wall_time - self.last_diagnostic_wall >= 2.0:
-            self.last_diagnostic_wall = wall_time
             stamp = message.header.stamp.sec + message.header.stamp.nanosec * 1e-9
+            real_time_factor = None if self.last_diagnostic_sim is None else (
+                (stamp - self.last_diagnostic_sim) / (wall_time - self.last_diagnostic_wall))
+            self.last_diagnostic_wall = wall_time
+            self.last_diagnostic_sim = stamp
             truth_position = None
             truth_delta = None
             error = None
@@ -127,6 +138,7 @@ class GazeboSimulationAdapter:
                 f"spawn_offset={self.start} "
                 f"odom_xy=({mapped.pose.pose.position.x:.3f},{mapped.pose.pose.position.y:.3f}) "
                 f"truth_xy={truth_position} truth_dt={truth_delta} xy_error={error} "
+                f"real_time_factor={real_time_factor} "
                 f"child={mapped.child_frame_id}")
 
     def tick(self):

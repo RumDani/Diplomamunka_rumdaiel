@@ -38,6 +38,8 @@ def start_reference(context):
     base_pose = [float(value) for value in model.findtext(
         ".//joint[@name='base_joint']/pose", "0 0 0.01 0 0 0").split()]
     start_environment = LaunchConfiguration("start_environment").perform(context).lower() == "true"
+    enable_crossing = LaunchConfiguration("enable_crossing_obstacle").perform(context).lower() == "true"
+    enable_camera = LaunchConfiguration("enable_camera").perform(context).lower() == "true"
     slam_mode = LaunchConfiguration("slam_mode").perform(context)
     map_file = LaunchConfiguration("map_file").perform(context).strip()
     map_file = os.path.abspath(os.path.expanduser(map_file)) if map_file else ""
@@ -74,7 +76,8 @@ def start_reference(context):
                      "use_lifecycle_manager": False}],
     )
     runtime_world = write_world_with_pose_odometry(
-        world_path, os.path.join(model_root, "turtlebot3_waffle", "model.sdf")) if start_environment else world_path
+        world_path, os.path.join(model_root, "turtlebot3_waffle", "model.sdf"),
+        enable_crossing_obstacle=enable_crossing, enable_camera=enable_camera) if start_environment else world_path
     return [
         SetLaunchConfiguration("map_file", map_file),
         SetLaunchConfiguration("initial_x", str(initial_pose[0])),
@@ -97,6 +100,7 @@ def start_reference(context):
                 "/clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock",
                 "/world/dwa_world/create@ros_gz_interfaces/srv/SpawnEntity",
                 "/world/dwa_world/remove@ros_gz_interfaces/srv/DeleteEntity",
+                "/world/dwa_world/set_pose@ros_gz_interfaces/srv/SetEntityPose",
             ],
             remappings=[("/odom", "/gazebo/wheel_odom"),
                         ("/world_pose_odom", "/gazebo/ground_truth_odom")],
@@ -106,6 +110,7 @@ def start_reference(context):
             package="dwa_gazebo_sim", executable="python_simulation_node", output="screen",
             condition=IfCondition(LaunchConfiguration("start_environment")),
             parameters=[{"use_sim_time": True, "world_file": world_path,
+                         "enable_crossing_obstacle": enable_crossing,
                          "laser_pose": laser_pose[:3], "base_link_z": base_pose[2],
                          "odom_child_frame": drive.findtext("child_frame_id", "base_footprint")}],
         ),
@@ -161,6 +166,10 @@ def generate_launch_description():
                       description="Vectorized cached DWA or unchanged Python reference"),
         DeclareLaunchArgument("start_environment", default_value="true",
                       description="Set false to start only the planner against an already running SLAM simulation"),
+        DeclareLaunchArgument("enable_crossing_obstacle", default_value="false", choices=["true", "false"],
+                      description="Include the crossing obstacle; false keeps only the oncoming obstacle"),
+        DeclareLaunchArgument("enable_camera", default_value="false", choices=["true", "false"],
+                      description="Enable unused camera rendering in the runtime TurtleBot model"),
         DeclareLaunchArgument("map_resolution", default_value="0.10",
                       description="SLAM grid cell size in metres"),
         DeclareLaunchArgument("slam_mode", default_value="mapping", choices=["mapping", "localization"],

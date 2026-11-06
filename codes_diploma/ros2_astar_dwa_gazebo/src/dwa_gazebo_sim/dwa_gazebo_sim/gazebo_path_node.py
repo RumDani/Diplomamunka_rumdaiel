@@ -9,7 +9,7 @@ import rclpy
 from nav_msgs.msg import Odometry, Path
 from rclpy.node import Node
 from rclpy.time import Time
-from ros_gz_interfaces.srv import DeleteEntity, SpawnEntity
+from ros_gz_interfaces.srv import DeleteEntity, SetEntityPose, SpawnEntity
 from tf2_ros import Buffer, TransformException, TransformListener
 
 
@@ -61,6 +61,8 @@ class GazeboPathDisplay:
     def __init__(self, node):
         self.node = node
         self.latest = self.drawn = self.pending = None
+        self.drawn_source = self.pending_source = None
+        self.model_pose = self.pending_model_pose = None
         self.path_frame = None
         self.odometry = deque(maxlen=200)
         self.ground_truth = None
@@ -69,6 +71,7 @@ class GazeboPathDisplay:
         self.busy, self.generation, self.deadline = False, 0, 0.0
         self.spawn = node.create_client(SpawnEntity, "/world/dwa_world/create")
         self.delete = node.create_client(DeleteEntity, "/world/dwa_world/remove")
+        self.move = node.create_client(SetEntityPose, "/world/dwa_world/set_pose")
         node.create_subscription(Path, "/astar_path", self.path, 10)
         node.create_subscription(Odometry, "/odom", self.record_odometry, 10)
         node.create_subscription(Odometry, "/gazebo/ground_truth_odom", self.record_ground_truth, 10)
@@ -127,6 +130,11 @@ class GazeboPathDisplay:
         if not all(math.isfinite(value) for point in projected for value in point):
             self.node.get_logger().warning("DIAG_PATH reason=nonfinite_projection", throttle_duration_sec=5.0)
             return None
+        anchors = project_path_points(((0.0, 0.0), (1.0, 0.0)), source_to_odom,
+                                      pose_2d(odom.pose.pose), pose_2d(truth.pose.pose))
+        self.model_pose = (anchors[0][0], anchors[0][1],
+                           math.atan2(anchors[1][1] - anchors[0][1],
+                                      anchors[1][0] - anchors[0][0]))
         return projected
 
     def tick(self):
@@ -139,33 +147,60 @@ class GazeboPathDisplay:
         projected = self.world_points()
         if projected is None:
             return
+        if not projected and not self.drawn:
+            return
         if self.drawn is not None and len(projected) == len(self.drawn) and all(
                 math.hypot(current[0] - previous[0], current[1] - previous[1]) < 0.02
                 for current, previous in zip(projected, self.drawn)):
             return
-        if not self.spawn.service_is_ready() or not self.delete.service_is_ready():
-            self.node.get_logger().warning("Waiting for Gazebo create/remove bridge.", throttle_duration_sec=5.0)
+        if not all(client.service_is_ready() for client in (self.spawn, self.delete, self.move)):
+            self.node.get_logger().warning("Waiting for Gazebo path services.", throttle_duration_sec=5.0)
             return
         self.pending = projected
+        self.pending_source = (self.path_frame, self.latest)
+        self.pending_model_pose = self.model_pose
         self.busy, self.deadline = True, time.monotonic() + 10.0
         self.generation += 1
         generation = self.generation
-        request = DeleteEntity.Request()
-        request.entity.name, request.entity.type = "python_global_path", request.entity.MODEL
-        future = self.delete.call_async(request)
+        def place_pose(pose):
+            pose.position.x, pose.position.y, yaw = self.pending_model_pose
+            pose.orientation.z, pose.orientation.w = math.sin(yaw / 2), math.cos(yaw / 2)
+
+        def failed(error):
+            self.busy = False
+            self.node.get_logger().warning(f"Gazebo path drawing failed: {error}", throttle_duration_sec=5.0)
+
+        if self.drawn and self.drawn_source == self.pending_source:
+            request = SetEntityPose.Request()
+            request.entity.name, request.entity.type = "python_global_path", request.entity.MODEL
+            place_pose(request.pose)
+
+            def moved(result):
+                if generation != self.generation:
+                    return
+                try:
+                    if not result.result().success:
+                        raise RuntimeError("Gazebo rejected path pose update")
+                    self.drawn, self.busy = self.pending, False
+                except Exception as error:
+                    failed(error)
+
+            self.move.call_async(request).add_done_callback(moved)
+            return
 
         def deleted(result):
             if generation != self.generation:
                 return
             try:
-                result.result()
+                if result is not None:
+                    result.result()
                 if len(self.pending) < 2:
                     self.drawn, self.busy = self.pending, False
                     return
                 create = SpawnEntity.Request()
                 create.entity_factory.name = "python_global_path"
-                create.entity_factory.sdf = path_sdf(self.pending)
-                create.entity_factory.pose.orientation.w = 1.0
+                create.entity_factory.sdf = path_sdf(self.pending_source[1])
+                place_pose(create.entity_factory.pose)
                 self.spawn.call_async(create).add_done_callback(created)
             except Exception as error:
                 failed(error)
@@ -177,6 +212,7 @@ class GazeboPathDisplay:
                 if not result.result().success:
                     raise RuntimeError("Gazebo rejected the path model")
                 self.drawn, self.busy = self.pending, False
+                self.drawn_source = self.pending_source
                 self.node.get_logger().info(
                     f"DIAG_PATH reason=drawn source_frame={self.path_frame} "
                     f"points={len(self.drawn)} first={self.drawn[0]} last={self.drawn[-1]} "
@@ -184,11 +220,12 @@ class GazeboPathDisplay:
             except Exception as error:
                 failed(error)
 
-        def failed(error):
-            self.busy = False
-            self.node.get_logger().warning(f"Gazebo path drawing failed: {error}", throttle_duration_sec=5.0)
-
-        future.add_done_callback(deleted)
+        if not self.drawn:
+            deleted(None)
+        else:
+            request = DeleteEntity.Request()
+            request.entity.name, request.entity.type = "python_global_path", request.entity.MODEL
+            self.delete.call_async(request).add_done_callback(deleted)
 
 
 class GazeboPathNode(Node):
