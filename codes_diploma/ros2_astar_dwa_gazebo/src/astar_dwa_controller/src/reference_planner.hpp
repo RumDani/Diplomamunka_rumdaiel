@@ -25,6 +25,7 @@ struct Config {
 	double wheel_resolution{1.0}, acceleration{1.0}, dt{0.1}, predict_time{3.0};
 	double radius{0.237}, safety_margin{0.15}, static_margin{0.03};
 	double alpha{5.0}, beta{2.0}, gamma{3.0};
+	double dynamic_clearance_weight{4.0};
 	bool waypoint_slowdown{false};
 };
 
@@ -64,23 +65,37 @@ inline void update(State & state, const Config & config, const Command & target)
 	state.angular = command.angular;
 }
 
-inline double trajectory_distance(const Config & config, const State & state,
+struct Trajectory {
+	double distance{10.0};
+	double dynamic_clearance{std::numeric_limits<double>::infinity()};
+	bool dynamic_collision{false};
+};
+
+inline Trajectory trajectory_distance(const Config & config, const State & state,
 																	const Command & command, const std::vector<Obstacle> & obstacles) {
 	State predicted = state;
 	double travelled = 0.0;
+	Trajectory result;
 	for (std::size_t step = 0; step * config.dt < config.predict_time; ++step) {
 		for (const auto & obstacle : obstacles) {
 			const bool moving = obstacle.vx != 0.0 || obstacle.vy != 0.0;
 			const double clearance = config.radius + obstacle.radius +
 				(moving ? config.safety_margin : config.static_margin);
-			if (std::hypot(predicted.x - obstacle.x - obstacle.vx * step * config.dt,
-										 predicted.y - obstacle.y - obstacle.vy * step * config.dt) <= clearance)
-				return travelled;
+			const double separation = std::hypot(predicted.x - obstacle.x - obstacle.vx * step * config.dt,
+				predicted.y - obstacle.y - obstacle.vy * step * config.dt) - clearance;
+			if (moving) result.dynamic_clearance = std::min(result.dynamic_clearance, separation);
+			if (separation <= 0.0) {
+				if (result.distance == 10.0) result.distance = travelled;
+				if (moving) {
+					result.dynamic_collision = true;
+					return result;
+				}
+			}
 		}
 		update(predicted, config, command);
 		travelled += std::abs(command.velocity) * config.dt;
 	}
-	return 10.0;
+	return result;
 }
 
 inline std::vector<double> wheel_samples(double measured, const Config & config) {
@@ -114,8 +129,9 @@ inline Result optimise(const Config & config, const State & state, Point goal,
 			++result.candidates;
 			const auto command = kinematics(left, right, config);
 			if (command.velocity < 0.0) continue;
-			const double collision_distance = trajectory_distance(config, state, command, visible);
-			if (command.velocity > std::sqrt(2.0 * config.acceleration * collision_distance)) continue;
+			const auto trajectory = trajectory_distance(config, state, command, visible);
+			if (trajectory.dynamic_collision ||
+					command.velocity > std::sqrt(2.0 * config.acceleration * trajectory.distance)) continue;
 			++result.admissible;
 			State predicted = state;
 			for (std::size_t step = 0; step * config.dt < horizon; ++step) update(predicted, config, command);
@@ -124,7 +140,10 @@ inline Result optimise(const Config & config, const State & state, Point goal,
 			const double target_velocity = std::min(maximum_velocity, std::max(0.08, goal_distance * 1.4));
 			const double velocity_score = !slowdown && goal_distance > slowdown_distance ?
 				command.velocity / maximum_velocity : 1.0 - std::abs(target_velocity - command.velocity) / maximum_velocity;
-			const double score = config.alpha * heading_score + config.beta * collision_distance + config.gamma * velocity_score;
+			const double dynamic_score = std::isfinite(trajectory.dynamic_clearance) ?
+				std::clamp(trajectory.dynamic_clearance / 0.6, 0.0, 1.0) : 0.0;
+			const double score = config.alpha * heading_score + config.beta * trajectory.distance +
+				config.gamma * velocity_score + config.dynamic_clearance_weight * dynamic_score;
 			if (score > best_score) { best_score = score; result.command = command; result.found = true; }
 		}
 	}

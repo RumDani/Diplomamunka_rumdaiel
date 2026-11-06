@@ -137,6 +137,7 @@ def start_reference(context):
             parameters=[{"use_sim_time": True, "r_kerek": wheel_radius, "b": wheel_base,
                          "rob_radius": robot_radius, "map_inflation_radius": robot_radius + 0.03,
                          "static_safety_margin": 0.03, "w_kerek_max": 0.26 / wheel_radius,
+                         "dynamic_clearance_weight": float(LaunchConfiguration("dynamic_clearance_weight").perform(context)),
                          "a_max": float(drive.findtext("max_linear_acceleration", "1.0"))}],
         ),
         Node(
@@ -161,6 +162,8 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument("start_planner", default_value="true",
                       description="Set false for manual SLAM mapping without a cmd_vel controller"),
+        DeclareLaunchArgument("dynamic_clearance_weight", default_value="4.0",
+                  description="DWA weight for predicted moving-obstacle clearance"),
         DeclareLaunchArgument("start_environment", default_value="true",
                       description="Set false to start only the planner against an already running SLAM simulation"),
         DeclareLaunchArgument("enable_crossing_obstacle", default_value="false", choices=["true", "false"],

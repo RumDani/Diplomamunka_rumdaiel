@@ -37,6 +37,7 @@ public:
     config_.alpha = declare_parameter("Alfa", config_.alpha);
     config_.beta = declare_parameter("Beta", config_.beta);
     config_.gamma = declare_parameter("Gamma", config_.gamma);
+    config_.dynamic_clearance_weight = declare_parameter("dynamic_clearance_weight", config_.dynamic_clearance_weight);
     config_.waypoint_slowdown = declare_parameter("enable_waypoint_slowdown", false);
     inflation_ = declare_parameter("map_inflation_radius", config_.radius + config_.static_margin);
     for (double value : {config_.wheel_radius, config_.half_axle, config_.wheel_max,
@@ -44,7 +45,7 @@ public:
                         config_.predict_time, config_.radius})
       if (!std::isfinite(value) || value <= 0.0) throw std::invalid_argument("Invalid robot parameter");
     for (double value : {inflation_, config_.safety_margin, config_.static_margin,
-                        config_.alpha, config_.beta, config_.gamma})
+                        config_.alpha, config_.beta, config_.gamma, config_.dynamic_clearance_weight})
       if (!std::isfinite(value) || value < 0.0) throw std::invalid_argument("Invalid margin or weight");
     buffer_ = std::make_unique<tf2_ros::Buffer>(get_clock());
     listener_ = std::make_unique<tf2_ros::TransformListener>(*buffer_);
@@ -79,9 +80,9 @@ public:
                                  [this]() { control(); });
     RCLCPP_INFO(get_logger(),
       "DIAG_CONFIG backend=cpp-python-reference dt=%.3f horizon=%.3f radius=%.3f "
-      "half_axle=%.4f wheel_max=%.3f weights=(%.1f,%.1f,%.1f)",
+      "half_axle=%.4f wheel_max=%.3f weights=(%.1f,%.1f,%.1f) dynamic_clearance_weight=%.1f",
       config_.dt, config_.predict_time, config_.radius, config_.half_axle,
-      config_.wheel_max, config_.alpha, config_.beta, config_.gamma);
+      config_.wheel_max, config_.alpha, config_.beta, config_.gamma, config_.dynamic_clearance_weight);
   }
 
   void shutdown_command() { command_pub_->publish(geometry_msgs::msg::Twist{}); }
