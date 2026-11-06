@@ -1,4 +1,5 @@
 #include "../src/path_tracking.hpp"
+#include "../src/reference_planner.hpp"
 
 #include <iostream>
 #include <stdexcept>
@@ -97,5 +98,19 @@ int main() {
       require(blocked.waypoint == 1, "Do not prune across an unreachable connector");
       const auto finish = path_tracking::prune_lookahead(dense, 29, 5.95, 0.0, 0.25, reachable);
       require(finish.target == dense.back(), "Clamp lookahead to the final goal");
+      reference_planner::Config sampling_config;
+      for (double measured : {0.0, sampling_config.wheel_max}) {
+        sampling_config.wheel_resolution = 0.5;
+        const auto fine_samples = reference_planner::wheel_samples(measured, sampling_config);
+        sampling_config.wheel_resolution = 1.0;
+        const auto coarse_samples = reference_planner::wheel_samples(measured, sampling_config);
+        require(fine_samples.size() > coarse_samples.size(), "Finer wheel lattice offers more arcs");
+        for (double coarse : coarse_samples)
+          require(std::any_of(fine_samples.begin(), fine_samples.end(), [coarse](double fine) {
+            return std::abs(fine - coarse) < 1e-9;
+          }), "Retain the previous wheel candidates");
+        for (double sample : fine_samples)
+          require(std::abs(sample) <= sampling_config.wheel_max + 1e-9, "Respect physical wheel limits");
+      }
       std::cout << "Path tracking regression checks passed\n";
 }

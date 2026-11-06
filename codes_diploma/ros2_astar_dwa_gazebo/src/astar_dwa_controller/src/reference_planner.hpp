@@ -23,10 +23,10 @@ inline double angle_error(double angle) {
 
 struct Config {
 	double wheel_radius{0.033}, half_axle{0.1435}, wheel_max{0.26 / 0.033};
-	double wheel_resolution{1.0}, acceleration{1.0}, dt{0.1}, predict_time{3.0};
+	double wheel_resolution{0.5}, acceleration{1.0}, dt{0.1}, predict_time{3.0};
 	double radius{0.237}, safety_margin{0.15}, static_margin{0.03};
 	double alpha{5.0}, beta{2.0}, gamma{3.0};
-	double dynamic_clearance_weight{4.0};
+	double dynamic_clearance_weight{8.0}, dynamic_clearance_distance{1.0};
 	bool waypoint_slowdown{false};
 };
 
@@ -186,7 +186,7 @@ inline Result optimise(const Config & config, const State & state, Point goal,
 				command.velocity / maximum_velocity :
 				1.0 - std::abs(target_velocity - command.velocity) / maximum_velocity;
 			const double dynamic_score = std::isfinite(trajectory.dynamic_clearance) ?
-				std::clamp(trajectory.dynamic_clearance / 0.6, 0.0, 1.0) : 0.0;
+				std::clamp(trajectory.dynamic_clearance / config.dynamic_clearance_distance, 0.0, 1.0) : 0.0;
 			const double score = config.alpha * heading_score + config.beta * trajectory.distance +
 				config.gamma * velocity_score + config.dynamic_clearance_weight * dynamic_score;
 			if (score > best_score) { best_score = score; result.command = command; result.found = true; }

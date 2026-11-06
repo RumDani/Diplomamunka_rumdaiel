@@ -21,12 +21,13 @@ A snapshot a követett forrás-, konfigurációs, csomagolási és tesztfájlok 
 - Kiinduló, korábban pusholt állapot: `d8bfb61`, ág: `cpp-rethink`. Az alábbi snapshot már az ezt követő C++-átállást tartalmazza.
 - VÉGLEGES CÉL: az eredeti, Matplotlibben a felhasználó szerint jól működő Python `DWA+A.py` A* + DWA megvalósítás ötleteinek és döntési logikájának átültetése C++ / ROS 2 / fizikai Gazebo környezetbe. A felhasználó a szimulációban kizárólag C++ navigációs vezérlőt kér. A DWA válassza a kitérő mozgást, majd folytatódjon az eredeti waypointkövetés. Külön kézzel kijelölt oldalsó kerülőcél és új kerülési algoritmus nem kell, ilyen nincs az aktív C++ magban.
 - Az eredeti `robot.py`, `DWA.py`, `DWA+A.py`, `simulation.py`, az `astar_project` és a védett A* folyamatábra nem módosítható e javításokhoz. Csak a ROS/Gazebo integráció változzon. Teszteket csak kérésre kell indítani; a felhasználó másik gépen tesztel. Dokumentációs és ábrafrissítések a kódcsomag kivételével halasztottak.
-- Legújabb futási bizonyíték: a pruningos változatban a robot kb. t=18 s-nél a (3,032; 1,673) lokalizált pozíción megáll, `reason=braking_no_pair pairs=64 admissible=0 reorient=0` mellett. Ez nem a külön visszafordulási ág fékezése. A Gazebo tényleges pozíciója ezután x=3,02-ről kb. 0,66 m-re változik, miközben a kerék-odometria (2,882; 2,007) és a vezérlő pozíciója lényegében állandó. Ez az eltolás és az érzékelt állapot befagyásának erős bizonyítéka. A jelölteket kizáró konkrét szűrő a régi naplóban még nem különíthető el. Teljes, sikeres kitérés-visszatérés-célbaérés továbbra sincs igazolva.
+- Legújabb futási bizonyíték: t=16,9 s-nél `pairs=64 admissible=0 reject_velocity=28 reject_dynamic=36 reject_dynamic_now=0 reject_braking=0 reorient=0`. Minden sebességszűrésen átjutó jelölt jövőbeli mozgóakadály-ütközés miatt kiesik, nem a fékút vagy a visszafordulás miatt. T=17,9 s-nél már `reject_dynamic_now=36`, tehát a robot a becsült mozgó akadály biztonsági zónáján belül van; ez még nem feltétlenül fizikai érintkezés. Később a Gazebo tényleges pozíciója az álló kerék-odometria mellett elmozdul, a lokalizált pozíció az új scan-feldolgozás mellett már részben követi. Teljes, sikeres kitérés-visszatérés-célbaérés továbbra sincs igazolva.
 - A korábbi NumPy-backend és annak eltérő pontozási/kerülési próbálkozásai törölve. A C++ mag nem tartalmazza a régi C++ külön visszatérési üzemmódját és pályabüntetéseit sem. A LiDAR-segédfolyamat felületi pontillesztéses sebességbecslése megmaradt; pontossága nincs fizikai méréssel igazolva.
 - Az eredeti Pythonhoz képest tudatos fizikai eltérés: a kerékminták nem léphetik túl a kerékhatárt, míg a NumPy arange végpontja túlcsúszhatott. A C++ és Python numerikus azonosságát nem ellenőriztük; azonos adatokon összehasonlítás szükséges.
 - Legújabb szimulációs hangolás: a szembejövő `moving_obstacle_2` pályája y=2,1 m helyett y=1,7 m. A y=2,4 m-nél kezdődő vízszintes fal és a 0,18 m sugarú akadály közti felületi rés így 0,12 m helyett 0,52 m. A falak változatlanok. Az aktív Gazebo-segédnode szembejövő akadálysebessége 0,25-ről 0,26 m/s-ra nőtt, tehát 4%-kal gyorsabb.
-- Legújabb DWA-hangolás: a teljes predikció alatt várható legkisebb, mozgó akadályhoz tartozó ráhagyáson felüli távolság külön pontszámot kap; 0 és 0,6 m között lineárisan nő, felette telítődik. A `dynamic_clearance_weight` ROS/launch-paraméter alapértéke 4,0. A mozgó akadállyal előre jelzett ütközés kizárja a jelöltet, nulla robotsebességnél is; a statikus fékút-szűrés, waypointkövetés és az eredeti három pontszám megmarad. Ez célzott fizikai hangolás, nem numerikusan azonos Python-port. Az új hangolás fizikai eredményessége még nem igazolt.
-- A 360 fokos, 3 méteres LiDAR-ellenőrzés megmarad. A célfüggvényben ismét a `6a38f98` változat méter alapú akadály-ívhossz pontszáma szerepel; a 10-zel osztott normalizálást visszavontuk. Ezért a pontszámok eltérő skálájának ismert kockázata jelenleg fennmarad. A `DIAG_CONFIG` jelölése `schema=cpp-dwa-5 lidar_fov=360 pruning=25`.
+- Korábbi kitérést célzó új hangolás: a predikció alatt várható legkisebb, a mozgó akadály biztonsági ráhagyásán felüli távolság külön pontszámot kap. A telítési távolság az új `dynamic_clearance_distance` ROS/launch-paraméter, alapértéke 1,0 m a korábbi 0,6 m helyett. A `dynamic_clearance_weight` alapértéke 8,0 a korábbi 4,0 helyett. Ez a puha célfüggvényt módosítja, nem növeli vagy csökkenti a merev ütközési sugarat. A mozgó akadállyal előre jelzett ütközés továbbra is kizárja a jelöltet, nulla robotsebességnél is; a statikus fékút-szűrés és a waypoint/pruning logika megmarad. A súlyozás önmagában nem tud segíteni, ha már nincs megengedett jelölt; a cél a korábbi kitérés. Az új hangolás fizikai eredményessége még nem igazolt.
+- Sűrűbb kerékmintavétel: az új `wheel_resolution` launch-argumentum a C++ `w_kerek_resolution` paramétert adja, alapértéke 0,5 rad/s a korábbi 1,0 helyett. Több görbületi/sebességjelölt kerül ugyanabba a dinamikus ablakba. A robot 0,26 m/s-os sebességhatára, gyorsulása, 3 másodperces predikciója és a biztonsági zóna változatlan. A sűrűbb mintázás több számítást jelent; a célgépen a `compute_ms` és `planner_deadline` figyelendő. A meglévő C++ ellenőrzőfájlhoz hozzáadtuk a régi minták megtartását és a fizikai kerékhatárokat ellenőrző eseteket, de ezeket nem futtattuk.
+- A 360 fokos, 3 méteres LiDAR-ellenőrzés megmarad. A célfüggvényben ismét a `6a38f98` változat méter alapú akadály-ívhossz pontszáma szerepel; a 10-zel osztott normalizálást visszavontuk. Ezért a pontszámok eltérő skálájának ismert kockázata jelenleg fennmarad. A `DIAG_CONFIG` jelölése `schema=cpp-dwa-6 lidar_fov=360 pruning=25`, és kiírja a `dynamic_clearance_weight`, `dynamic_clearance_distance`, `wheel_resolution` értékeket is.
 - Szűkített visszatérés új célpont nélkül: először a mozgó akadályok és a robot aktuális sebességének egyenletes továbbhaladásából várható ütközési veszélyt nézzük a predikciós horizonton. Ilyen veszélynél nincs waypoint-irányhibából eredő sebességkorlátozás, a korábbi DWA-pontozás választhat kitérőt. Külön lassítás/helyben forduló minta csak 90 foknál nagyobb waypoint-irányhibánál és ilyen veszély hiányában van. A fékezési korlát és minden jelölt ütközésszűrése megmarad, nincs kikényszerített előremenet. A globális útvonal és a waypointok sorrendje változatlan. Új naplómezők: `avoidance_priority`, `reorient`, továbbá a radiánban mért `goal_heading_error`.
 - Dinamikus pruning és lookahead már aktív: a `path_tracking::prune_lookahead` a jelenlegi waypoint előtti szakasztól legfeljebb 25 waypointtal előre keres elérhető, legközelebbi szakaszprojekciót. Az aktív index nem lép vissza, és egy ciklusban több elhagyott pontot is kihagyhat. A DWA célja a projekciótól előrefelé, a megmaradt pálya ívhosszán kijelölt pont; nem külön kézzel választott kerülőcél. A névleges lookahead 0,35 m plusz a sebesség abszolút értékének 1,2-szerese, legfeljebb 0,80 m. Például állva 0,35 m, 0,25 m/s-nál 0,65 m. Az eredeti Python előretekintési segédfüggvényétől ez eltér, hogy a lassabb fizikai robot sebessége is ténylegesen befolyásolja a távolságot.
 - Pruning-biztonság: a robot és a projekció, illetve a lookahead-cél közti egyenes összeköttetést az inflált térképen ellenőrizzük; falon vagy ismeretlen cellán át nem választunk új visszacsatlakozást. Blokkolt lookahead esetén a távolság felezhető, 0,05 m-ig vizsgálva, végül az elérhető projekció használható. Ha nincs elérhető projekció, nem történik pruning, az addigi waypoint marad; a DWA ütközésszűrése ekkor is aktív. A mozgó akadályok vizsgálata továbbra is a DWA feladata. A globális út és a waypointlista nem változik. Lejárt számításnál a pruning indexét az adapter visszaállítja.
@@ -5482,11 +5483,12 @@ public:
     config_.beta = declare_parameter("Beta", config_.beta);
     config_.gamma = declare_parameter("Gamma", config_.gamma);
     config_.dynamic_clearance_weight = declare_parameter("dynamic_clearance_weight", config_.dynamic_clearance_weight);
+    config_.dynamic_clearance_distance = declare_parameter("dynamic_clearance_distance", config_.dynamic_clearance_distance);
     config_.waypoint_slowdown = declare_parameter("enable_waypoint_slowdown", false);
     inflation_ = declare_parameter("map_inflation_radius", config_.radius + config_.static_margin);
     for (double value : {config_.wheel_radius, config_.half_axle, config_.wheel_max,
                         config_.wheel_resolution, config_.acceleration, config_.dt,
-                        config_.predict_time, config_.radius})
+                        config_.predict_time, config_.radius, config_.dynamic_clearance_distance})
       if (!std::isfinite(value) || value <= 0.0) throw std::invalid_argument("Invalid robot parameter");
     for (double value : {inflation_, config_.safety_margin, config_.static_margin,
                         config_.alpha, config_.beta, config_.gamma, config_.dynamic_clearance_weight})
@@ -5523,10 +5525,11 @@ public:
     timer_ = rclcpp::create_timer(this, get_clock(), rclcpp::Duration::from_seconds(config_.dt),
                                  [this]() { control(); });
     RCLCPP_INFO(get_logger(),
-      "DIAG_CONFIG backend=cpp-python-reference schema=cpp-dwa-5 lidar_fov=360 pruning=25 dt=%.3f horizon=%.3f radius=%.3f "
-      "half_axle=%.4f wheel_max=%.3f weights=(%.1f,%.1f,%.1f) dynamic_clearance_weight=%.1f",
+      "DIAG_CONFIG backend=cpp-python-reference schema=cpp-dwa-6 lidar_fov=360 pruning=25 dt=%.3f horizon=%.3f radius=%.3f "
+      "half_axle=%.4f wheel_max=%.3f weights=(%.1f,%.1f,%.1f) dynamic_clearance_weight=%.1f dynamic_clearance_distance=%.2f wheel_resolution=%.2f",
       config_.dt, config_.predict_time, config_.radius, config_.half_axle,
-      config_.wheel_max, config_.alpha, config_.beta, config_.gamma, config_.dynamic_clearance_weight);
+      config_.wheel_max, config_.alpha, config_.beta, config_.gamma, config_.dynamic_clearance_weight,
+      config_.dynamic_clearance_distance, config_.wheel_resolution);
   }
 
   void shutdown_command() { command_pub_->publish(geometry_msgs::msg::Twist{}); }
@@ -5839,10 +5842,10 @@ inline double angle_error(double angle) {
 
 struct Config {
 	double wheel_radius{0.033}, half_axle{0.1435}, wheel_max{0.26 / 0.033};
-	double wheel_resolution{1.0}, acceleration{1.0}, dt{0.1}, predict_time{3.0};
+	double wheel_resolution{0.5}, acceleration{1.0}, dt{0.1}, predict_time{3.0};
 	double radius{0.237}, safety_margin{0.15}, static_margin{0.03};
 	double alpha{5.0}, beta{2.0}, gamma{3.0};
-	double dynamic_clearance_weight{4.0};
+	double dynamic_clearance_weight{8.0}, dynamic_clearance_distance{1.0};
 	bool waypoint_slowdown{false};
 };
 
@@ -6002,7 +6005,7 @@ inline Result optimise(const Config & config, const State & state, Point goal,
 				command.velocity / maximum_velocity :
 				1.0 - std::abs(target_velocity - command.velocity) / maximum_velocity;
 			const double dynamic_score = std::isfinite(trajectory.dynamic_clearance) ?
-				std::clamp(trajectory.dynamic_clearance / 0.6, 0.0, 1.0) : 0.0;
+				std::clamp(trajectory.dynamic_clearance / config.dynamic_clearance_distance, 0.0, 1.0) : 0.0;
 			const double score = config.alpha * heading_score + config.beta * trajectory.distance +
 				config.gamma * velocity_score + config.dynamic_clearance_weight * dynamic_score;
 			if (score > best_score) { best_score = score; result.command = command; result.found = true; }
@@ -6156,6 +6159,7 @@ inline Path resample(const Path & path, double spacing = 0.2) {
 
 ~~~~~cpp
 #include "../src/path_tracking.hpp"
+#include "../src/reference_planner.hpp"
 
 #include <iostream>
 #include <stdexcept>
@@ -6254,6 +6258,20 @@ int main() {
       require(blocked.waypoint == 1, "Do not prune across an unreachable connector");
       const auto finish = path_tracking::prune_lookahead(dense, 29, 5.95, 0.0, 0.25, reachable);
       require(finish.target == dense.back(), "Clamp lookahead to the final goal");
+      reference_planner::Config sampling_config;
+      for (double measured : {0.0, sampling_config.wheel_max}) {
+        sampling_config.wheel_resolution = 0.5;
+        const auto fine_samples = reference_planner::wheel_samples(measured, sampling_config);
+        sampling_config.wheel_resolution = 1.0;
+        const auto coarse_samples = reference_planner::wheel_samples(measured, sampling_config);
+        require(fine_samples.size() > coarse_samples.size(), "Finer wheel lattice offers more arcs");
+        for (double coarse : coarse_samples)
+          require(std::any_of(fine_samples.begin(), fine_samples.end(), [coarse](double fine) {
+            return std::abs(fine - coarse) < 1e-9;
+          }), "Retain the previous wheel candidates");
+        for (double sample : fine_samples)
+          require(std::abs(sample) <= sampling_config.wheel_max + 1e-9, "Respect physical wheel limits");
+      }
       std::cout << "Path tracking regression checks passed\n";
 }
 ~~~~~
@@ -7563,6 +7581,8 @@ def start_reference(context):
                          "rob_radius": robot_radius, "map_inflation_radius": robot_radius + 0.03,
                          "static_safety_margin": 0.03, "w_kerek_max": 0.26 / wheel_radius,
                          "dynamic_clearance_weight": float(LaunchConfiguration("dynamic_clearance_weight").perform(context)),
+                         "dynamic_clearance_distance": float(LaunchConfiguration("dynamic_clearance_distance").perform(context)),
+                         "w_kerek_resolution": float(LaunchConfiguration("wheel_resolution").perform(context)),
                          "a_max": float(drive.findtext("max_linear_acceleration", "1.0"))}],
         ),
         Node(
@@ -7587,8 +7607,12 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument("start_planner", default_value="true",
                       description="Set false for manual SLAM mapping without a cmd_vel controller"),
-        DeclareLaunchArgument("dynamic_clearance_weight", default_value="4.0",
+        DeclareLaunchArgument("dynamic_clearance_weight", default_value="8.0",
                   description="DWA weight for predicted moving-obstacle clearance"),
+        DeclareLaunchArgument("dynamic_clearance_distance", default_value="1.0",
+              description="Soft predicted clearance target beyond the unchanged safety margin, in metres"),
+        DeclareLaunchArgument("wheel_resolution", default_value="0.5",
+              description="DWA wheel angular speed sampling interval in rad/s"),
         DeclareLaunchArgument("start_environment", default_value="true",
                       description="Set false to start only the planner against an already running SLAM simulation"),
         DeclareLaunchArgument("enable_crossing_obstacle", default_value="false", choices=["true", "false"],

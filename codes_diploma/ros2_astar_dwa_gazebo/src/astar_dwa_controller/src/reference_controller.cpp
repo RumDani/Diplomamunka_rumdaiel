@@ -38,11 +38,12 @@ public:
     config_.beta = declare_parameter("Beta", config_.beta);
     config_.gamma = declare_parameter("Gamma", config_.gamma);
     config_.dynamic_clearance_weight = declare_parameter("dynamic_clearance_weight", config_.dynamic_clearance_weight);
+    config_.dynamic_clearance_distance = declare_parameter("dynamic_clearance_distance", config_.dynamic_clearance_distance);
     config_.waypoint_slowdown = declare_parameter("enable_waypoint_slowdown", false);
     inflation_ = declare_parameter("map_inflation_radius", config_.radius + config_.static_margin);
     for (double value : {config_.wheel_radius, config_.half_axle, config_.wheel_max,
                         config_.wheel_resolution, config_.acceleration, config_.dt,
-                        config_.predict_time, config_.radius})
+                        config_.predict_time, config_.radius, config_.dynamic_clearance_distance})
       if (!std::isfinite(value) || value <= 0.0) throw std::invalid_argument("Invalid robot parameter");
     for (double value : {inflation_, config_.safety_margin, config_.static_margin,
                         config_.alpha, config_.beta, config_.gamma, config_.dynamic_clearance_weight})
@@ -79,10 +80,11 @@ public:
     timer_ = rclcpp::create_timer(this, get_clock(), rclcpp::Duration::from_seconds(config_.dt),
                                  [this]() { control(); });
     RCLCPP_INFO(get_logger(),
-      "DIAG_CONFIG backend=cpp-python-reference schema=cpp-dwa-5 lidar_fov=360 pruning=25 dt=%.3f horizon=%.3f radius=%.3f "
-      "half_axle=%.4f wheel_max=%.3f weights=(%.1f,%.1f,%.1f) dynamic_clearance_weight=%.1f",
+      "DIAG_CONFIG backend=cpp-python-reference schema=cpp-dwa-6 lidar_fov=360 pruning=25 dt=%.3f horizon=%.3f radius=%.3f "
+      "half_axle=%.4f wheel_max=%.3f weights=(%.1f,%.1f,%.1f) dynamic_clearance_weight=%.1f dynamic_clearance_distance=%.2f wheel_resolution=%.2f",
       config_.dt, config_.predict_time, config_.radius, config_.half_axle,
-      config_.wheel_max, config_.alpha, config_.beta, config_.gamma, config_.dynamic_clearance_weight);
+      config_.wheel_max, config_.alpha, config_.beta, config_.gamma, config_.dynamic_clearance_weight,
+      config_.dynamic_clearance_distance, config_.wheel_resolution);
   }
 
   void shutdown_command() { command_pub_->publish(geometry_msgs::msg::Twist{}); }
