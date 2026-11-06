@@ -64,7 +64,14 @@ class PythonPlannerNode(Node):
         self.obstacle_source = self.declare_parameter("obstacle_source", "scan").value
         if self.obstacle_source not in ("scan", "tracked"):
             raise ValueError("obstacle_source must be scan or tracked")
-        self.planner = load_planner_class()(self.grid, config=self.config, diagonal=True)
+        self.dwa_backend = self.declare_parameter("dwa_backend", "numpy").value
+        if self.dwa_backend not in ("reference", "numpy"):
+            raise ValueError("dwa_backend must be reference or numpy")
+        optimizer = None
+        if self.dwa_backend == "numpy":
+            from .python_dwa import optimisation
+            optimizer = optimisation
+        self.planner = load_planner_class(optimizer)(self.grid, config=self.config, diagonal=True)
         self.pending_goal = self.default_goal if self.declare_parameter("autostart", False).value else None
         self.requested_goal = None
         self.active = False
@@ -114,7 +121,7 @@ class PythonPlannerNode(Node):
             f"acceleration={self.config.a_max} dt={self.config.dt} horizon={self.config.predict_time} "
             f"safety_margin={self.config.safety_margin} static_margin={self.config.static_safety_margin} "
             f"weights=({self.config.Alfa},{self.config.Beta},{self.config.Gamma}) "
-            f"obstacle_source={self.obstacle_source}")
+            f"obstacle_source={self.obstacle_source} dwa_backend={self.dwa_backend}")
 
     def log_control(self, reason, state=None, result=None, visible=None,
                     observed=None, obstacle_stamp=None, command=None, compute_ms=0.0):
@@ -189,9 +196,10 @@ class PythonPlannerNode(Node):
             transform = self.tf_buffer.lookup_transform(
                 self.map_frame, source, Time.from_msg(stamp)
             ).transform
-        except TransformException:
+        except TransformException as error:
             self.get_logger().warning(
-                f"Waiting for TF: {source} -> {self.map_frame}", throttle_duration_sec=2.0)
+            f"DIAG_TF_PLANNER source={source} target={self.map_frame} "
+            f"stamp={self.seconds(stamp):.3f} error={error}", throttle_duration_sec=2.0)
             return None
         rotation = transform.rotation
         yaw = math.atan2(2 * (rotation.w * rotation.z + rotation.x * rotation.y),

@@ -12,13 +12,15 @@ from codes_diploma.robot import Obstacle, robotstate
 PHYSICS_STEP = 0.001
 
 
-def load_planner_class():
+def load_planner_class(optimizer=None):
     file_path = Path(robot_module.__file__).with_name("DWA+A.py")
     spec = importlib.util.spec_from_file_location("dwa_a_module", file_path)
     if spec is None or spec.loader is None:
         raise ImportError(f"Cannot load planner: {file_path}")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    if optimizer is not None:
+        module.optimisation = optimizer
     return module.AStarDWAPlanner
 
 

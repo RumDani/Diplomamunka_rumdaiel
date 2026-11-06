@@ -132,7 +132,8 @@ def start_reference(context):
                          "rob_radius": robot_radius, "map_inflation_radius": robot_radius + 0.03,
                          "static_safety_margin": 0.03, "w_kerek_max": 0.26 / wheel_radius,
                          "a_max": float(drive.findtext("max_linear_acceleration", "1.0")),
-                         "obstacle_source": "tracked", "autostart": False}],
+                         "obstacle_source": "tracked", "autostart": False,
+                         "dwa_backend": LaunchConfiguration("dwa_backend").perform(context)}],
         ),
         Node(
             package="dwa_gazebo_sim", executable="lidar_obstacle_node", output="screen",
@@ -156,6 +157,8 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument("start_planner", default_value="true",
                       description="Set false for manual SLAM mapping without a cmd_vel controller"),
+        DeclareLaunchArgument("dwa_backend", default_value="numpy", choices=["numpy", "reference"],
+                      description="Vectorized cached DWA or unchanged Python reference"),
         DeclareLaunchArgument("start_environment", default_value="true",
                       description="Set false to start only the planner against an already running SLAM simulation"),
         DeclareLaunchArgument("map_resolution", default_value="0.10",
