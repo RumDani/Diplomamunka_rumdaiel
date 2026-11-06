@@ -80,7 +80,7 @@ public:
     timer_ = rclcpp::create_timer(this, get_clock(), rclcpp::Duration::from_seconds(config_.dt),
                                  [this]() { control(); });
     RCLCPP_INFO(get_logger(),
-      "DIAG_CONFIG backend=cpp-python-reference schema=cpp-dwa-6 lidar_fov=360 pruning=25 dt=%.3f horizon=%.3f radius=%.3f "
+      "DIAG_CONFIG backend=cpp-python-reference schema=cpp-dwa-7 lidar_fov=360 pruning=25 dt=%.3f horizon=%.3f radius=%.3f "
       "half_axle=%.4f wheel_max=%.3f weights=(%.1f,%.1f,%.1f) dynamic_clearance_weight=%.1f dynamic_clearance_distance=%.2f wheel_resolution=%.2f",
       config_.dt, config_.predict_time, config_.radius, config_.half_axle,
       config_.wheel_max, config_.alpha, config_.beta, config_.gamma, config_.dynamic_clearance_weight,
@@ -178,6 +178,23 @@ private:
       geometry_msgs::msg::Transform conversion;
       if (!transform(message.header.frame_id, message.header.stamp, conversion)) continue;
       const auto position = project(message.pose.pose.position.x, message.pose.pose.position.y, conversion);
+      if (active_ && have_odom_) {
+        const double elapsed = std::max(0.0, seconds(message.header.stamp) - odom_stamp_);
+        const double jump = std::hypot(position.first - state_.x, position.second - state_.y);
+        const double limit = std::max(0.5, config_.wheel_max * config_.wheel_radius * elapsed + 0.2);
+        if (jump > limit) {
+          active_ = false;
+          pending_goal_.reset();
+          waypoints_.clear();
+          path_.clear();
+          publish_path();
+          stop("localization_jump");
+          RCLCPP_ERROR(get_logger(),
+            "DIAG_LOCALIZATION jump=%.3f limit=%.3f previous=(%.3f,%.3f) received=(%.3f,%.3f); "
+            "navigation cancelled; verify localization before sending a new goal",
+            jump, limit, state_.x, state_.y, position.first, position.second);
+        }
+      }
       state_.x = position.first;
       state_.y = position.second;
       state_.yaw = yaw(message.pose.pose.orientation) + yaw(conversion.rotation);
@@ -319,6 +336,7 @@ private:
       "DIAG_CONTROL cpp reason=%s pose=(%.3f,%.3f,%.3f) measured=(%.3f,%.3f) "
       "waypoint=%zu/%zu pruned=%zu lookahead=%.3f target_index=%zu target=(%.3f,%.3f) observed=%zu pairs=%zu admissible=%zu "
       "reject_velocity=%zu reject_dynamic=%zu reject_dynamic_now=%zu reject_braking=%zu forward_pairs=%zu moving_points=%zu max_obstacle_speed=%.3f "
+      "score_progress=%.3f score_dynamic=%.3f score_distance=%.3f "
       "cmd=(%.3f,%.3f) avoidance_priority=%d reorient=%d goal_heading_error=%.3f odom_age=%.3f obstacle_age=%.3f compute_ms=%.2f",
       result.found ? "command" : "braking_no_pair", state_.x, state_.y, state_.yaw,
       state_.velocity, state_.angular, waypoint_, waypoints_.size(), waypoint_ - previous_waypoint,
@@ -326,6 +344,7 @@ private:
       obstacles.size(), result.candidates, result.admissible,
       result.rejected_velocity, result.rejected_dynamic, result.rejected_dynamic_now, result.rejected_braking,
       result.forward_pairs, moving_points, max_obstacle_speed,
+      result.score_progress, result.score_dynamic, result.score_distance,
       command.linear.x, command.angular.z,
       result.approaching_obstacle, result.reorient,
       planner::angle_error(std::atan2(tracking.target.second - state_.y,

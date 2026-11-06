@@ -26,7 +26,7 @@ struct Config {
 	double wheel_resolution{0.5}, acceleration{1.0}, dt{0.1}, predict_time{3.0};
 	double radius{0.237}, safety_margin{0.15}, static_margin{0.03};
 	double alpha{5.0}, beta{2.0}, gamma{3.0};
-	double dynamic_clearance_weight{8.0}, dynamic_clearance_distance{1.0};
+	double dynamic_clearance_weight{4.0}, dynamic_clearance_distance{0.6};
 	bool waypoint_slowdown{false};
 };
 
@@ -42,6 +42,7 @@ struct Result {
 	std::size_t rejected_velocity{0}, rejected_dynamic{0}, rejected_braking{0};
 	std::size_t rejected_dynamic_now{0};
 	std::size_t forward_pairs{0};
+	double score_progress{0.0}, score_dynamic{0.0}, score_distance{0.0};
 	bool found{false};
 	bool reorient{false}, approaching_obstacle{false};
 };
@@ -181,15 +182,25 @@ inline Result optimise(const Config & config, const State & state, Point goal,
 			for (std::size_t step = 0; step * config.dt < horizon; ++step) update(predicted, config, command);
 			const double heading = std::atan2(goal.second - predicted.y, goal.first - predicted.x);
 			const double heading_score = (pi - std::abs(angle_error(heading - predicted.yaw))) / pi;
+			const double predicted_goal_distance = std::hypot(goal.first - predicted.x, goal.second - predicted.y);
+			const double progress_score = std::clamp(
+				(goal_distance - predicted_goal_distance) / (maximum_velocity * horizon), -1.0, 1.0);
 			const double target_velocity = std::min(target_speed, std::max(0.08, goal_distance * 1.4));
 			const double velocity_score = !slowdown && goal_distance > slowdown_distance ?
 				command.velocity / maximum_velocity :
 				1.0 - std::abs(target_velocity - command.velocity) / maximum_velocity;
 			const double dynamic_score = std::isfinite(trajectory.dynamic_clearance) ?
 				std::clamp(trajectory.dynamic_clearance / config.dynamic_clearance_distance, 0.0, 1.0) : 0.0;
-			const double score = config.alpha * heading_score + config.beta * trajectory.distance +
+			const double score = config.alpha * (heading_score + progress_score) + config.beta * trajectory.distance +
 				config.gamma * velocity_score + config.dynamic_clearance_weight * dynamic_score;
-			if (score > best_score) { best_score = score; result.command = command; result.found = true; }
+			if (score > best_score) {
+				best_score = score;
+				result.command = command;
+				result.found = true;
+				result.score_progress = config.alpha * progress_score;
+				result.score_dynamic = config.dynamic_clearance_weight * dynamic_score;
+				result.score_distance = config.beta * trajectory.distance;
+			}
 		}
 	}
 	return result;
