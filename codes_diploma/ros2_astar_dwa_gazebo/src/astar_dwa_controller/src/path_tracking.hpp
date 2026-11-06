@@ -78,7 +78,6 @@ inline TrackingTarget prune_lookahead(
     result.projection = projected;
     result.waypoint = std::max(current, index + (fraction > 1e-9 ? 1 : 0));
   }
-  if (!found) return result;
   const auto along_path = [&](double remaining) {
     auto start = result.projection;
     for (std::size_t index = segment + 1; index < path.size(); ++index) {
@@ -94,6 +93,12 @@ inline TrackingTarget prune_lookahead(
     }
     return std::make_pair(path.back(), path.size() - 1);
   };
+  if (!found) {
+    const auto fallback = along_path(result.lookahead);
+    result.target = fallback.first;
+    result.target_index = fallback.second;
+    return result;
+  }
   for (double lookahead = result.lookahead; lookahead >= 0.05; lookahead *= 0.5) {
     const auto candidate = along_path(lookahead);
     if (!reachable(candidate.first)) continue;
@@ -102,9 +107,9 @@ inline TrackingTarget prune_lookahead(
     result.lookahead = lookahead;
     return result;
   }
-  result.target = result.projection;
-  result.target_index = result.waypoint;
-  result.lookahead = 0.0;
+  const auto fallback = along_path(std::max(0.05, result.lookahead));
+  result.target = fallback.first;
+  result.target_index = fallback.second;
   return result;
 }
 

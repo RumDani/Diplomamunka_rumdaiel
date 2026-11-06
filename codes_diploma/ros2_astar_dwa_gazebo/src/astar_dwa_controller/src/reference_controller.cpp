@@ -146,8 +146,11 @@ private:
     grid_.origin_x = info.origin.position.x;
     grid_.origin_y = info.origin.position.y;
     grid_.blocked.resize(message->data.size());
-    for (std::size_t index = 0; index < message->data.size(); ++index)
+    static_occupied_.resize(message->data.size());
+    for (std::size_t index = 0; index < message->data.size(); ++index) {
+      static_occupied_[index] = message->data[index] >= 65;
       grid_.blocked[index] = message->data[index] < 0 ? 2 : message->data[index] >= 65 ? 1 : 0;
+    }
     const int radius = static_cast<int>(std::ceil(inflation_ / grid_.resolution));
     for (int row = 0; row < grid_.height; ++row) {
       for (int column = 0; column < grid_.width; ++column) {
@@ -213,6 +216,7 @@ private:
       geometry_msgs::msg::Transform conversion;
       if (!transform(message.header.frame_id, message.header.stamp, conversion)) continue;
       std::vector<planner::Obstacle> points;
+      std::vector<bool> represented_static_cells(static_occupied_.size(), false);
       const double heading = yaw(conversion.rotation);
       try {
         if (!message.data.empty()) {
@@ -222,6 +226,18 @@ private:
             if (!std::isfinite(*point_x) || !std::isfinite(*point_y) || !std::isfinite(*radius) ||
                 !std::isfinite(*velocity_x) || !std::isfinite(*velocity_y) || *radius < 0.0) continue;
             const auto position = project(*point_x, *point_y, conversion);
+            const auto [row, column] = grid_.cell(position);
+            if (row >= 0 && column >= 0 && row < grid_.height && column < grid_.width) {
+              const auto cell_index = static_cast<std::size_t>(row) * grid_.width + column;
+              if (cell_index < static_occupied_.size() && static_occupied_[cell_index]) {
+                if (represented_static_cells[cell_index]) continue;
+                represented_static_cells[cell_index] = true;
+                const auto cell_center = grid_.world(row, column);
+                points.push_back({cell_center.first, cell_center.second,
+                  grid_.resolution / std::sqrt(2.0), 0.0, 0.0});
+                continue;
+              }
+            }
             points.push_back({position.first, position.second, *radius,
               std::cos(heading) * *velocity_x - std::sin(heading) * *velocity_y,
               std::sin(heading) * *velocity_x + std::cos(heading) * *velocity_y});
@@ -358,6 +374,7 @@ private:
   planner::State state_;
   planner::Path path_, waypoints_;
   std::vector<planner::Obstacle> obstacles_;
+  std::vector<bool> static_occupied_;
   std::size_t waypoint_{0};
   double inflation_{0.0}, odom_stamp_{0.0}, obstacle_stamp_{0.0};
   bool have_map_{false}, have_odom_{false}, have_obstacles_{false}, active_{false};

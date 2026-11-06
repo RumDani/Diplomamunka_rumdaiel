@@ -14,6 +14,8 @@ from sensor_msgs_py import point_cloud2
 from std_msgs.msg import Header
 from tf2_ros import Buffer, TransformException, TransformListener
 
+MAX_TRACKED_OBSTACLE_SPEED = 0.35
+
 
 def estimate_cluster_translation(current, previous, initial):
     translation = np.asarray(initial, dtype=float)
@@ -78,6 +80,7 @@ class LidarObstacleNode(Node):
         dt = None if self.last_stamp is None else stamp - self.last_stamp
         tracks, points, used = [], [], set()
         motion_fits = 0
+        speed_rejections = 0
         for cluster in clusters:
             surface = np.asarray(cluster[::max(1, (len(cluster) + 63) // 64)], dtype=float)
             x = sum(point[0] for point in cluster) / len(cluster)
@@ -99,6 +102,9 @@ class LidarObstacleNode(Node):
                             vy = 0.6 * old[3] + 0.4 * float(translation[1]) / dt
                             if math.hypot(vx, vy) < 0.06:
                                 vx = vy = 0.0
+            if math.hypot(vx, vy) > MAX_TRACKED_OBSTACLE_SPEED:
+                vx = vy = 0.0
+                speed_rejections += 1
             tracks.append((x, y, vx, vy, surface))
             points.extend((point[0], point[1], 0.0, 0.0, vx, vy) for point in cluster)
         self.previous, self.last_stamp = tracks, stamp
@@ -117,7 +123,7 @@ class LidarObstacleNode(Node):
                 f"DIAG_LIDAR seq={self.scan_sequence} stamp={stamp:.3f} age={age:.3f} "
                 f"frame={self.tracking_frame} scan_dt={dt} rays={len(message.ranges)} "
                 f"points={len(points)} clusters={len(clusters)} matches={len(used)} "
-                f"motion_fits={motion_fits} "
+                f"motion_fits={motion_fits} speed_rejections={speed_rejections} "
                 f"moving_clusters={moving} max_speed={max_speed:.3f} "
                 f"sensor_xy=({transform.translation.x:.3f},{transform.translation.y:.3f})")
 

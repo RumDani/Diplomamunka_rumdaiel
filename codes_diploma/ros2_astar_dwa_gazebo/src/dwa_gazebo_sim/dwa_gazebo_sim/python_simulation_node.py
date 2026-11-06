@@ -33,17 +33,21 @@ class GazeboSimulationAdapter:
             node.declare_parameter("world_file", "")
         world_file = node.get_parameter("world_file").value
         _, self.start, _, _, _, self.obstacles = create_gazebo_scene(world_file)
-        crossing_enabled = node.declare_parameter("enable_crossing_obstacle", False).value
+        self.crossing_enabled = node.declare_parameter("enable_crossing_obstacle", False).value
         obstacle_specs = [(f"moving_obstacle_{index + 1}", obstacle)
                   for index, obstacle in enumerate(self.obstacles)
-                  if crossing_enabled or index == 1]
+                  if self.crossing_enabled or index == 1]
         self.obstacles = [obstacle for _, obstacle in obstacle_specs]
         self.obstacle_names = [name for name, _ in obstacle_specs]
         self.oncoming_start_x = float(node.declare_parameter("oncoming_start_x", 0.0).value)
         if not math.isfinite(self.oncoming_start_x):
             raise ValueError("oncoming_start_x must be finite")
+        self.crossing_start_x = float(node.declare_parameter("crossing_start_x", 0.8).value)
+        if not math.isfinite(self.crossing_start_x):
+            raise ValueError("crossing_start_x must be finite")
         self.robot_odom_x = None
         self.oncoming_started = False
+        self.crossing_started = False
         self.active = False
         self.last_time = node.get_clock().now().nanoseconds * 1e-9
         self.odom_pub = node.create_publisher(Odometry, "/odom", 10)
@@ -72,9 +76,10 @@ class GazeboSimulationAdapter:
             "python-turtlebot-physical: odometry=wheel; obstacles=LiDAR; "
             "simulation-only adapter; velocity-driven obstacles; physical cmd_vel control")
         node.get_logger().info(
-            f"DIAG_SCENARIO crossing_enabled={crossing_enabled} "
+            f"DIAG_SCENARIO crossing_enabled={self.crossing_enabled} "
             f"moving_models={[name for name, _ in obstacle_specs]} "
-            f"oncoming_start_x={self.oncoming_start_x}")
+            f"oncoming_start_x={self.oncoming_start_x} "
+            f"crossing_start_x={self.crossing_start_x}")
 
     def set_active(self, message):
         self.active = message.data
@@ -158,8 +163,15 @@ class GazeboSimulationAdapter:
             self.node.get_logger().info(
                 f"DIAG_SCENARIO event=oncoming_started sim_t={now:.3f} "
                 f"robot_odom_x={self.robot_odom_x:.3f} threshold={self.oncoming_start_x}")
+        if (self.crossing_enabled and self.active and not self.crossing_started and
+                self.robot_odom_x is not None and
+                self.robot_odom_x >= self.crossing_start_x):
+            self.crossing_started = True
+            self.node.get_logger().info(
+                f"DIAG_SCENARIO event=crossing_started sim_t={now:.3f} "
+                f"robot_odom_x={self.robot_odom_x:.3f} threshold={self.crossing_start_x}")
         for name, obstacle, publisher in zip(self.obstacle_names, self.obstacles, self.obstacle_commands):
-            moving = self.oncoming_started if name == "moving_obstacle_2" else self.active
+            moving = self.oncoming_started if name == "moving_obstacle_2" else self.crossing_started
             if moving:
                 obstacle.move(dt)
             command = Twist()

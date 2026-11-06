@@ -119,6 +119,30 @@ inline std::vector<double> wheel_samples(double measured, const Config & config)
 	return samples;
 }
 
+inline void add_rotation_samples(std::vector<double> & left_samples,
+								 std::vector<double> & right_samples,
+								 const State & state, const Config & config,
+								 double preferred_left) {
+	const double step = config.acceleration / config.wheel_radius * config.dt;
+	const double left_min = std::max(-config.wheel_max, state.left - step);
+	const double left_max = std::min(config.wheel_max, state.left + step);
+	const double right_min = std::max(-config.wheel_max, state.right - step);
+	const double right_max = std::min(config.wheel_max, state.right + step);
+	const double rotation_min = std::max(left_min, -right_max);
+	const double rotation_max = std::min(left_max, -right_min);
+	if (rotation_min > rotation_max) return;
+	const auto append_unique = [](std::vector<double> & samples, double value) {
+		if (std::none_of(samples.begin(), samples.end(), [value](double sample) {
+				return std::abs(sample - value) < 1e-9;
+			})) samples.push_back(value);
+	};
+	for (const double left : {rotation_min, rotation_max,
+							  std::clamp(preferred_left, rotation_min, rotation_max)}) {
+		append_unique(left_samples, left);
+		append_unique(right_samples, -left);
+	}
+}
+
 inline Result optimise(const Config & config, const State & state, Point goal,
 											 bool final_waypoint, const std::vector<Obstacle> & sensed,
 											 const Path * reference_path = nullptr, std::size_t waypoint = 0) {
@@ -156,17 +180,15 @@ inline Result optimise(const Config & config, const State & state, Point goal,
 	const double velocity_limit = reorient ? std::max(0.0, state.velocity - config.acceleration * config.dt) : maximum_velocity;
 	auto left_samples = wheel_samples(state.left, config);
 	auto right_samples = wheel_samples(state.right, config);
-	const double rotation_lower = std::max(left_samples.front(), -right_samples.back());
-	const double rotation_upper = std::min(left_samples.back(), -right_samples.front());
-	if (reorient && rotation_lower <= rotation_upper) {
-		const double rotation_left = std::clamp(-heading_error * config.half_axle / config.wheel_radius,
-			rotation_lower, rotation_upper);
-		left_samples.push_back(rotation_left);
-		right_samples.push_back(-rotation_left);
-	}
+	const double preferred_rotation = reorient ?
+		-heading_error * config.half_axle / config.wheel_radius : 0.0;
+	add_rotation_samples(left_samples, right_samples, state, config, preferred_rotation);
 	const bool slowdown = config.waypoint_slowdown || final_waypoint;
 	const double slowdown_distance = final_waypoint ? 0.5 : 0.35;
 	double best_score = -std::numeric_limits<double>::infinity();
+	double best_rotation_score = -std::numeric_limits<double>::infinity();
+	Command best_rotation;
+	bool have_rotation = false;
 	Result result;
 	result.reorient = reorient;
 	result.approaching_obstacle = approaching_obstacle;
@@ -211,6 +233,14 @@ inline Result optimise(const Config & config, const State & state, Point goal,
 			const bool clearance_preferred = approaching_obstacle && command.velocity > 0.01 && clearance_gain > 0.02;
 			const double score = config.alpha * (heading_scale * heading_score + progress_score) + config.beta * trajectory.distance +
 				config.gamma * velocity_score + config.dynamic_clearance_weight * dynamic_score;
+			if (std::abs(command.velocity) <= 1e-9 && std::abs(command.angular) > 1e-6) {
+				if (!have_rotation || score > best_rotation_score) {
+					best_rotation_score = score;
+					best_rotation = command;
+					have_rotation = true;
+				}
+				continue;
+			}
 			if (!result.found || path_tracking::prefer_candidate(
 					clearance_preferred, score, result.clearance_preferred, best_score)) {
 				best_score = score;
@@ -223,6 +253,10 @@ inline Result optimise(const Config & config, const State & state, Point goal,
 				result.score_distance = config.beta * trajectory.distance;
 			}
 		}
+	}
+	if (result.forward_pairs == 0 && have_rotation) {
+		result.command = best_rotation;
+		result.found = true;
 	}
 	return result;
 }

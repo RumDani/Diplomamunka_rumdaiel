@@ -92,6 +92,18 @@ int main() {
         "A crossing obstacle must still be detected");
       require(!path_tracking::collision_course(0.5, 0.0, 0.0, 0.0, 0.34, 2.0),
         "Constant safe separation is not a closing threat");
+      reference_planner::Config recovery_config;
+      reference_planner::State recovery_state;
+      recovery_state.velocity = 0.05;
+      recovery_state.left = recovery_state.right =
+        recovery_state.velocity / recovery_config.wheel_radius;
+      const auto recovery = reference_planner::optimise(
+        recovery_config, recovery_state, {2.0, 0.0}, false,
+        {{0.24, 0.0, 0.0, 0.0, 0.0}});
+      require(recovery.found && recovery.forward_pairs == 0 &&
+              std::abs(recovery.command.velocity) < 1e-9 &&
+              std::abs(recovery.command.angular) > 1e-6,
+        "Rotate safely when a close static obstacle blocks every forward command");
       path_tracking::Path dense;
       for (int index = 0; index <= 30; ++index) dense.emplace_back(index * 0.2, 0.0);
       const auto reachable = [](const std::pair<double, double> &) { return true; };
@@ -110,7 +122,9 @@ int main() {
       near(obstructed.target.first, 1.425, "Use only a reachable forward target");
       const auto blocked = path_tracking::prune_lookahead(dense, 1, 1.1, 0.4, 0.0,
         [](const std::pair<double, double> &) { return false; });
-      require(blocked.waypoint == 1, "Do not prune across an unreachable connector");
+      require(blocked.waypoint == 1, "Do not prune when the path projection is unreachable");
+      require(blocked.target.first > blocked.projection.first && blocked.lookahead > 0.0,
+        "Keep a forward path target when all direct connectors are blocked");
       const auto finish = path_tracking::prune_lookahead(dense, 29, 5.95, 0.0, 0.25, reachable);
       require(finish.target == dense.back(), "Clamp lookahead to the final goal");
       reference_planner::Config sampling_config;
