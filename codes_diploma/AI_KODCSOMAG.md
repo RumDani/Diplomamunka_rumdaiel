@@ -35,7 +35,7 @@ A snapshot a követett forrás-, konfigurációs, csomagolási és tesztfájlok 
 - Új pruning-naplómezők: `pruned`, `lookahead`, `target_index`; a `target` és `goal_heading_error` már a tényleges lookahead-célra vonatkozik. A meglévő `test_path_tracking.cpp` új esetei több pont elhagyását, monotonitást, sebességfüggést, blokkolt összeköttetést és végcélra korlátozást fednek le. Ezeket a felhasználó kérésének megfelelően nem futtattuk; helyi C++/ROS build és Gazebo-próba sem történt.
 - A LiDAR-illesztés visszaállt a `6a38f98` állapotra: közeli felületi pontok mediáneltolása, legalább két egyezés, az eredeti sebességsimítás. A kölcsönös párosítást, 50%-os átfedési küszöböt és a sebességtartást visszavontuk. A visszaállítás fájltartalmát Gittel összehasonlítottuk. A zajos becslések ismert kockázata fennmarad; ennek külön vizsgálatához friss futási adatok szükségesek.
 - A C++ adapter mért keréksebességből indul, pontos szenzoridőbélyeghez kér TF-et, késő transzformációhoz korlátos üzenetsorokat tart, az akadályokat a robotállapot idejére igazítja. Friss adatok és számítási határidő nélkül megáll. Ugyanabban a map koordinátakeretben érkező új térkép nem indít új globális tervezést.
-- Lokalizációs regresszió visszavétele: a felhasználó pontosítása szerint RVizben a térkép és a LiDAR-pontok csúsznak el egymáson, nem a Gazebo-útvonal rajzolásával van az aktuális probléma. A korábban lokalizációhoz bevezetett nullás mozgásküszöböt visszavontuk; a launch mindkét módban `minimum_travel_distance=0.1`, `minimum_travel_heading=0.1` értéket és `check_min_dist_and_heading_precisely=True` beállítást ad át. Ez az upstream kapuban a kellő forgást is elfogadja scan-feldolgozáshoz, miközben álló odometria mellett nem kér minden scanhez újraillesztést. A meglévő időkorlát 0,1 s. A `DIAG_SLAM_CONFIG` kiírja a `scan_motion_threshold=0.1` értéket. A Gazebo-rajzoló kódját és a DWA-t ebben a javításban nem változtattuk. A nullás küszöb hozzájárulása az elcsúszáshoz hipotézis, nem bizonyított kizárólagos ok.
+- Eredeti lokalizációs beállítások visszaállítása: a felhasználó kérésére a SLAM-indítási blokkot a `6a38f98` állapotra állítottuk vissza, karakterpontos Git-összevetéssel ellenőrizve. Töröltük a `minimum_travel_distance`, `minimum_travel_heading`, `check_min_dist_and_heading_precisely` utólagos launch-felülírásait és a `scan_motion_threshold` segédváltozót. Ismét az eredeti `slam.yaml` értékei és a SLAM Toolbox eredeti scan-kapu szabálya érvényesül; a távolság/irány küszöb a YAML szerint 0,1 m/rad, az időkorlát 0,1 s. Gittel ellenőriztük, hogy az alap-SLAM-konfiguráció, kerék-odometriai/TF-adapter, LiDAR-követő, világadapter, Gazebo-rajzoló és RViz-konfiguráció már eleve egyezett a `6a38f98` változattal. A DWA, pruning, falak és eredeti Python-kódok ebben a visszaállításban változatlanok. Ez a korábbi beállítások pontos visszaállítása, nem új hangolás vagy a célgépes térképilleszkedés futási igazolása.
 - Lokalizációs korlát: a visszaállított mozgásküszöb ismét megakadályozhatja a scan-feldolgozást kerékforgás nélküli fizikai eltoláskor; ezt ez a módosítás nem oldja meg. Az upstream kapu forrása: https://github.com/SteveMacenski/slam_toolbox/blob/ros2/src/slam_toolbox_common.cpp . A célgépen telepített verzió paramétertámogatását és a tényleges térkép–LiDAR illesztést újraindítás után ellenőrizni kell. Az elcsúszott futási állapottal ne írják felül a jó mentett térképet. Nincs navigációs ground truth visszacsatolás, és ez a beállítás nem oldja meg önmagában a DWA jelöltelfogyását.
 - Lokalizációs ugrásvédő: aktív követésnél két elfogadott odometriai időbélyeg közti lokalizált elmozdulást a maximális robotsebesség és az eltelt idő alapján ellenőrizzük. A megengedett ugrás a nagyobbik érték 0,5 m és a maximális sebességgel megtett út plusz 0,2 m közül. Ezt meghaladó ugrásnál a node nullás motorparancsot küld, megszakítja az aktív feladatot és törli annak útvonalát; `DIAG_LOCALIZATION` és `reason=localization_jump` jelzi. A lokalizáció ellenőrzése után új cél szükséges; ez nem javítja meg önmagában a scan matchinget. A meglévő szimulációs segédnode az inaktív állapot hatására az akadálymenetet is leállítja, ezért ez a megszakítás nem értékelhető sikeres kitérésnek.
 - Viselkedést nem módosító DWA-diagnosztika: `reject_velocity`, `reject_dynamic`, `reject_braking` a kizárási okokat számolja; ezek és az `admissible` összege adja a `pairs` értékét. A `reject_dynamic_now` a dinamikus kizárások azon része, amely már t=0-nál, a mozgó akadály biztonsági zónáján belül történik; ez nem feltétlenül fizikai érintkezés. A `forward_pairs` a megengedett, 0,01 m/s feletti jelöltek száma. A `moving_points` és `max_obstacle_speed` a DWA-nak átadott akadálybecslést mutatja. A biztonsági szűréseket és a pontozást e diagnosztikai csomag nem lazítja.
@@ -7530,7 +7530,6 @@ def start_reference(context):
     if not math.isfinite(map_resolution) or map_resolution <= 0:
         raise RuntimeError("Map resolution must be finite and positive")
     slam_executable = "localization_slam_toolbox_node" if slam_mode == "localization" else "async_slam_toolbox_node"
-    scan_motion_threshold = 0.1
     slam_config = os.path.join(package_share, "config", "slam.yaml")
     if start_environment and not os.path.isfile(slam_config):
         raise RuntimeError(
@@ -7547,9 +7546,6 @@ def start_reference(context):
                      "map_start_pose": initial_pose, "resolution": map_resolution,
                      "odom_frame": "odom", "map_frame": "map", "base_frame": "base_link",
                      "scan_topic": "/scan", "max_laser_range": 3.0,
-                     "minimum_travel_distance": scan_motion_threshold,
-                     "minimum_travel_heading": scan_motion_threshold,
-                     "check_min_dist_and_heading_precisely": True,
                      "use_lifecycle_manager": False}],
     )
     runtime_world = write_world_with_pose_odometry(
@@ -7594,7 +7590,7 @@ def start_reference(context):
         ),
         LogInfo(msg=f"DIAG_SLAM_CONFIG executable={slam_executable} mode={slam_mode} "
                     f"map_file={map_file!r} initial_pose={initial_pose} "
-                    f"resolution={map_resolution} scan_motion_threshold={scan_motion_threshold} params_file={slam_config}",
+                    f"resolution={map_resolution} params_file={slam_config}",
                 condition=IfCondition(LaunchConfiguration("start_environment"))),
         slam_node,
         RegisterEventHandler(
