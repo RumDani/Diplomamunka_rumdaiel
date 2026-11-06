@@ -70,9 +70,12 @@ class GazeboPathDisplay:
         self.spawn = node.create_client(SpawnEntity, "/world/dwa_world/create")
         self.delete = node.create_client(DeleteEntity, "/world/dwa_world/remove")
         node.create_subscription(Path, "/astar_path", self.path, 10)
-        node.create_subscription(Odometry, "/odom", self.odometry.append, 10)
+        node.create_subscription(Odometry, "/odom", self.record_odometry, 10)
         node.create_subscription(Odometry, "/gazebo/ground_truth_odom", self.record_ground_truth, 10)
         node.create_timer(0.5, self.tick)
+
+    def record_odometry(self, message):
+        self.odometry.append(message)
 
     def record_ground_truth(self, message):
         self.ground_truth = message
