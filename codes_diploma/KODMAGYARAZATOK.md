@@ -2904,3 +2904,118 @@ biztonságot bizonyíték nélkül; az eredeti Matplotlib Python-szimulátort
 változatlan referenciaként kezeld. Minden számot és állítást a jelenlegi
 forráshoz vagy tényleges méréshez köss.
 ```
+
+## 18. C++ DWA kerékállapot és blokkolt pályák
+
+Az `astar_dwa_node.cpp` `dwa()` függvénye a `wheel_left_` és `wheel_right_`
+parancsállapotból képez gyorsuláskorlátozott dinamikus ablakot. Ezek nem mért
+keréksebességek. A jelöltek bemenete a lokális cél és a LiDAR-ból becsült
+akadálylista; a kimenet a lineáris és szögsebesség parancspárja.
+
+A korábbi recovery-ág nullázta mindkét belső keréksebességet, majd mégis
+nem nulla szögsebességű forgást küldött. Emiatt a következő ciklus dinamikus
+ablaka nem a kiadott parancsból indult. A köztes javítás a tartalék forgásból
+számította vissza a kerékállapotot; az aktuális változat viszont megszünteti
+ezt az ellenőrizetlen forgást, és üres jelöltlistánál nullaparancsot ad ki.
+A mintavétel minden ciklusban tartalmazza az aktuális
+keréksebességet és a nullához legközelebbi, gyorsuláskorláton belül elérhető
+fékező értéket is, nem csak az egyenletes mintarácsot.
+
+A differenciális hajtásnál nulla előremenethez és `omega` forgáshoz a bal
+keréksebesség `-omega * wheel_base / wheel_radius`, a jobb ennek ellentettje.
+Az `omega` rad/s, a `wheel_base` a keréktávolság fele méterben, a
+`wheel_radius` méterben értendő; az eredmény kerék-szögsebesség rad/s-ban.
+Például `omega=0.6 rad/s`, `wheel_base=0.08 m`, `wheel_radius=0.033 m`
+esetén a két parancs `-1.455` és `1.455 rad/s`. Átlaguk nulla, így az
+előremenet nulla; különbségükből a `wheel_kinematics()` visszaadja a
+`0.6 rad/s` forgást. A launch által kiolvasott geometria ettől eltérhet.
+
+Ez nem igazolja a szembejövő akadály kikerülését. A C++ továbbra is elutasítja
+a teljes predikciós idő alatt ütköző jelölteket; a régi tartalék forgás nem
+esik át ezen a pályavizsgálaton, és önmagában nem véd egy közeledő akadálytól.
+A Python `simulation.py` üres `best_pair` esetén megállítja a robotot, tehát
+ott sem valósul meg feltétlenül sikeres menekülés. A Python akadályai ismert
+középpontot, sugarat és sebességet adnak, a C++ LiDAR-pontokat és becsült
+sebességet használ; a két bemenet nem azonos.
+
+Ellenőrzés: a módosított C++ fájl editor-diagnosztikája hibamentes.
+Teszt, ROS-build és Gazebo-futás nem történt. A további hibakereséshez a
+`DWA: ...`, `DWA: nincs elfogadhato jelolt` és `Vezerles: ...` futási sorok
+szükségesek az ütközést megelőző időszakból. A folyamatábrát a felhasználó
+korábbi megkötése miatt nem módosítottuk.
+
+A beküldött futási naplóban 23 blokkolt ciklus után újra megjelenik haladó
+parancs, ezért nem bizonyított a program végleges lefagyása. A
+`cmd=(0.00,-0.60)` a tartalék forgással egyezik, de az egymástól függetlenül
+ritkított DWA- és vezérlési sorok nem mindig ugyanazt a ciklust írják le.
+Az akadálysebesség becslése és a scan frissessége ebből a régi naplóból
+nem állapítható meg.
+
+A `Vezerles` napló ezért további diagnosztikai mezőket kapott:
+`sim_t` a ROS szimulációs idő másodpercben; `scan_kor` az aktuális ROS idő
+és a LaserScan időbélyegének különbsége másodpercben; `lidar_pont` a
+feldolgozott pontok száma; `mozgo_pont` a nem nulla becsült sebességű
+pontok száma; `kozeli_v` a legközelebbi LiDAR-pont becsült világkoordinátás
+sebessége m/s-ban. Ez nem az akadály ismert valódi sebessége. Például
+`sim_t=12.4` és `scan_kor=0.1` esetén a scan időbélyege `12.3 s`;
+`kozeli_v=(-0.2,0.0)` az x tengely negatív irányú becsült mozgását jelzi,
+nem feltétlenül a robothoz viszonyított közeledést. E mezők naplózása nem
+módosítja a vezérlési döntést; az új futási adatok még hiányoznak.
+
+## 19. A final_v1 alapján javított LiDAR-követés
+
+A `final_v1` tag a `8db40ea` commitra mutat. Annak `simulation.launch.py`
+fájlja a Python `python_planner_node` vezérlőt indította, nem a C++ DWA-t.
+A felhasználó ezt sikeres futásként jelölte meg; a Gitben tárolt ellenőrzési
+leírás azonban csak statikus ellenőrzést rögzít, ezért a futási eredményt
+nem állítjuk saját mérésként. Az aktuális C++ architektúrát megtartjuk.
+
+Az `astar_dwa_node.cpp` `obstacles()` függvénye a LaserScan érvényes,
+három méteren belüli elülső pontjait klaszterezi, majd az előző pontcsoportok
+alapján becsült világkoordinátás sebességet rendel hozzájuk. A visszatérés
+`std::vector<Obstacle>`: felületi pontok nulla akadálysugárral és becsült
+`vx`, `vy` sebességekkel, nem ismert testközéppontokkal.
+
+A régi C++ feldolgozás a vezérlő aktuális idejéből számította a követési
+időkülönbséget. Így ugyanaz a scan újra feldolgozható volt, és az azonos
+klaszterközéppont nulla elmozdulása a sebességbecslést csökkentette. A javítás
+a scan időbélyegét használja: egy már feldolgozott időbélyegnél a
+`sensed_cache_` kerül visszaadásra, a követési állapot nem változik.
+Új időbélyegnél az `obstacles()` frissít, a `control()` eltárolja az eredményt.
+
+A referencia `lidar_obstacle_node.py` mintájára a klaszterpárosítás az előző
+klaszter becsült jövőbeli helyéhez keres közeli csoportot, és a `used` lista
+egy korábbi csoportot legfeljebb egyszer enged felhasználni. A párosítás
+küszöbe `0.35 m`; becslés csak legalább kétpontos klaszternél és
+`0.02 < dt < 0.5 s` időközzel történik. A fal közelsége önmagában már nem
+nullázza a sebességet, mert az ott haladó dinamikus akadályt is elrejthette.
+
+A sebességbecslés tengelyenként `0.6 * előző_sebesség + 0.4 * elmozdulás / dt`.
+A sebességek m/s-ban, az elmozdulás méterben, a `dt` másodpercben értendő.
+Először két scan klaszterközéppontjának különbségét osztjuk a scan-időközzel,
+majd ezt simítjuk az előző becsléssel. Például `dt=0.1 s`,
+`elmozdulás=-0.025 m`, `előző_sebesség=-0.20 m/s` esetén
+`0.6*(-0.20)+0.4*(-0.025/0.1)=-0.22 m/s` az új x sebesség.
+Ugyanannak a scan-nek az újraolvasása ezt nem változtatja `-0.132 m/s`-ra.
+A `0.06 m/s` alatti becsült mozgás nullázódik, a C++ meglévő `0.6 m/s`
+felső sebességkorlátja megmarad. Ez heurisztikus követés, nem garantált
+objektumazonosítás; a falak felületi pontjai is adhatnak zajos becslést.
+
+A `control()` a referenciához hasonlóan megállítja a robotot, ha az odometria
+vagy a scan kora meghaladja `max(0.5, 3*dt_) s` értéket. Például
+`dt_=0.1 s` vezérlési periódusnál a határ `0.5 s`. A `dwa()` üres
+jelöltlistánál nullázza a kerékparancs-állapotot és `(0,0)` parancsot ad;
+nem hajt végre pályavizsgálat nélküli tartalék forgást. A nulla parancs nem
+véd meg attól, ha egy másik akadály a robotnak megy, ezért az időben történő
+felismerést és kikerülést külön kell mérni.
+
+Korlátok: a C++ továbbra is teljes horizontú ütközéselutasítást használ,
+míg a Python admisszibilitása nem azonos szabályú; a C++ pontátalakítása
+a feldolgozáskori robotpózt használja, nem a referencia TF-időbélyeges
+lekérdezését. A két megvalósítás nem lett azonossá téve. A scan frissességét,
+becsült akadálysebességet és blokkolt ciklusokat az új naplóval kell vizsgálni.
+
+Ellenőrzés: a C++ editor-diagnosztikája hibamentes. ROS-build, teszt és
+Gazebo-futás nem történt; a sikeres kikerülés nincs igazolva. Az új induló
+marker `cpp-world-pose-scan-tracking-v2`; ennek hiánya régi buildre utal.
+A Python-szimulátor és a felhasználó által védett folyamatábra változatlan.

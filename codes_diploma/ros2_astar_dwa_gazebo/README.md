@@ -39,9 +39,14 @@ export XDG_RUNTIME_DIR=/tmp/gazebo-runtime
 mkdir -p "$XDG_RUNTIME_DIR"
 chmod 700 "$XDG_RUNTIME_DIR"
 ros2 launch dwa_gazebo_sim simulation.launch.py software_rendering:=true
-# Elvart C++ indulo uzenet: A* + DWA: cpp-world-pose.
+# Elvart C++ indulo uzenet: A* + DWA: cpp-world-pose-scan-tracking-v2.
 # A robot az RViz 2D Goal Pose celra indul; a fizika folyamatos.
 ```
+
+Ha a regi indulo uzenet jelenik meg, a masik gepen pull es uj C++ build kell
+(Terminal 0). A `final_v1` Python-plannert inditott; itt a C++ megvalositas
+marad, a scan-idobelyeges kovetes es a frissessegi vedelem annak mintajat koveti.
+Az akadaly kikerulese meg Gazebo-futasban ellenorizendo; nincs futasi garancia.
 
 ## Terminal 2: RViz es celadas
 

@@ -107,7 +107,7 @@ public:
         RCLCPP_INFO(get_logger(), "Uj cel: x=%.2f m, y=%.2f m", goal_x_, goal_y_); });
     timer_ = rclcpp::create_timer(
       this, get_clock(), rclcpp::Duration::from_seconds(period), [this]() { control(); });
-    RCLCPP_INFO(get_logger(), "A* + DWA: cpp-world-pose (Gazebo tenyleges vilagpozicio)");
+    RCLCPP_INFO(get_logger(), "A* + DWA: cpp-world-pose-scan-tracking-v2");
   }
 
   ~AStarDwaNode() override {
@@ -203,6 +203,7 @@ private:
     transform.transform.rotation.z = 0.0;
     transform.transform.rotation.w = 1.0;
     tf_broadcaster_->sendTransform(transform);
+    last_odom_time_ = rclcpp::Time(msg->header.stamp).seconds();
     have_odom_ = true;
   }
 
@@ -244,6 +245,8 @@ private:
     std::vector<Obstacle> pts;
     std::vector<std::size_t> scan_index;
     if (!scan_) return pts;
+    const double scan_time = rclcpp::Time(scan_->header.stamp).seconds();
+    if (have_tracked_scan_ && scan_time == last_track_time_) return sensed_cache_;
     constexpr double max_dist = 3.0;
     constexpr double half_fov = 1.57079632679;
     for (std::size_t i = 0; i < scan_->ranges.size(); ++i) {
@@ -271,31 +274,30 @@ private:
       if (join) clusters.back().push_back(k); else clusters.push_back({k});
     }
 
-    const auto statics = planning_obstacles();
-    const double now_s = now().seconds();
-    const double dt = now_s - last_track_time_;
+    const double dt = scan_time - last_track_time_;
     std::vector<Track> new_tracks;
+    std::vector<bool> used(tracks_.size(), false);
     for (const auto & cl : clusters) {
       double cx = 0.0, cy = 0.0;
       for (auto k : cl) { cx += pts[k].x; cy += pts[k].y; }
       cx /= static_cast<double>(cl.size());
       cy /= static_cast<double>(cl.size());
-      const double extent = distance(pts[cl.front()].x, pts[cl.front()].y,
-                                     pts[cl.back()].x, pts[cl.back()].y);
-      bool near_static = false;
-      for (const auto & s : statics)
-        if (distance(cx, cy, s.x, s.y) < s.radius + 0.25) { near_static = true; break; }
       double vx = 0.0, vy = 0.0;
-      if (!near_static && extent < 0.6 && dt > 0.02 && dt < 0.5) {
-        const Track * best = nullptr;
+      if (have_tracked_scan_ && cl.size() >= 2 && dt > 0.02 && dt < 0.5) {
+        std::size_t best_index = tracks_.size();
         double best_d = 0.35;
-        for (const auto & t : tracks_) {
-          const double d = distance(cx, cy, t.x, t.y);
-          if (d < best_d) { best_d = d; best = &t; }
+        for (std::size_t index = 0; index < tracks_.size(); ++index) {
+          if (used[index]) continue;
+          const auto & track = tracks_[index];
+          const double d = distance(cx, cy, track.x + track.vx * dt,
+                                   track.y + track.vy * dt);
+          if (d < best_d) { best_d = d; best_index = index; }
         }
-        if (best) {
-          vx = 0.6 * best->vx + 0.4 * (cx - best->x) / dt;
-          vy = 0.6 * best->vy + 0.4 * (cy - best->y) / dt;
+        if (best_index < tracks_.size()) {
+          used[best_index] = true;
+          const auto & best = tracks_[best_index];
+          vx = 0.6 * best.vx + 0.4 * (cx - best.x) / dt;
+          vy = 0.6 * best.vy + 0.4 * (cy - best.y) / dt;
           const double sp = std::hypot(vx, vy);
           if (sp < 0.06) { vx = 0.0; vy = 0.0; }
           else if (sp > 0.6) { vx *= 0.6 / sp; vy *= 0.6 / sp; }
@@ -305,7 +307,8 @@ private:
       for (auto k : cl) { pts[k].vx = vx; pts[k].vy = vy; }
     }
     tracks_ = new_tracks;
-    last_track_time_ = now_s;
+    last_track_time_ = scan_time;
+    have_tracked_scan_ = true;
     return pts;
   }
 
@@ -520,14 +523,16 @@ private:
       left_samples.push_back(left);
     for (double right = right_min; right <= right_max + 1e-9; right += wheel_resolution_)
       right_samples.push_back(right);
+    left_samples.push_back(std::clamp(wheel_left_, left_min, left_max));
+    right_samples.push_back(std::clamp(wheel_right_, right_min, right_max));
+    left_samples.push_back(std::clamp(0.0, left_min, left_max));
+    right_samples.push_back(std::clamp(0.0, right_min, right_max));
     if (rejoin_active_) {
       // Include the reference and braking commands exactly, not only the sampling lattice.
       left_samples.push_back(std::clamp(
         (reference.first - reference.second * wheel_base_) / wheel_radius_, left_min, left_max));
       right_samples.push_back(std::clamp(
         (reference.first + reference.second * wheel_base_) / wheel_radius_, right_min, right_max));
-      left_samples.push_back(std::clamp(0.0, left_min, left_max));
-      right_samples.push_back(std::clamp(0.0, right_min, right_max));
     }
     double best_score = -std::numeric_limits<double>::infinity();
     double best_left = 0.0, best_right = 0.0;
@@ -673,18 +678,7 @@ private:
     ++blocked_cycles_;
     wheel_left_ = 0.0;
     wheel_right_ = 0.0;
-    const Obstacle * nearest = nullptr;
-    double nd = 1.2;
-    for (const auto & o : sensed) {
-      const double d = distance(pose_.x, pose_.y, o.x, o.y);
-      if (d < nd) { nd = d; nearest = &o; }
-    }
-    if (nearest) {
-      const double side = angle_error(
-        std::atan2(nearest->y - pose_.y, nearest->x - pose_.x) - pose_.yaw);
-      if (std::abs(side) > 0.15) recovery_dir_ = side > 0.0 ? -1 : 1;
-    }
-    return {0.0, recovery_dir_ * 0.6 * max_angular_velocity_};
+    return {0.0, 0.0};
   }
 
   // ------------------------------------------------------------ vizualizacio
@@ -808,6 +802,14 @@ private:
     publish_map();
     if (!have_scan_) {
       publish_debug({}, pose_.x, pose_.y, 0.0, 0.0);
+      return;
+    }
+    const double sensor_time = std::min(last_odom_time_,
+      rclcpp::Time(scan_->header.stamp).seconds());
+    if (now().seconds() - sensor_time > std::max(0.5, 3.0 * dt_)) {
+      stop_robot();
+      RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000,
+                           "Elavult odometria vagy scan; a robot megall.");
       return;
     }
     sensed_cache_ = obstacles();
@@ -950,8 +952,16 @@ private:
     double target_x = path[target_index].first, target_y = path[target_index].second;
 
     double nearest_obstacle = std::numeric_limits<double>::infinity();
-    for (const auto & o : sensed_obstacles)
-      nearest_obstacle = std::min(nearest_obstacle, distance(pose_.x, pose_.y, o.x, o.y));
+    const Obstacle * nearest_sensed = nullptr;
+    std::size_t moving_points = 0;
+    for (const auto & obstacle : sensed_obstacles) {
+      if (std::hypot(obstacle.vx, obstacle.vy) > 0.0) ++moving_points;
+      const double obstacle_distance = distance(pose_.x, pose_.y, obstacle.x, obstacle.y);
+      if (obstacle_distance < nearest_obstacle) {
+        nearest_obstacle = obstacle_distance;
+        nearest_sensed = &obstacle;
+      }
+    }
 
     const double target_heading = std::atan2(target_y - pose_.y, target_x - pose_.x);
     const double heading_error = angle_error(target_heading - pose_.yaw);
@@ -971,9 +981,14 @@ private:
     RCLCPP_INFO_THROTTLE(
       get_logger(), *get_clock(), 2000,
       "Vezerles: cel=(%.2f, %.2f), waypoint=(%.2f, %.2f), ut=%zu pont, akadaly_tav=%.2f, "
-      "utvonal_elteres=%.3f m, cmd=(%.2f, %.2f)",
+      "utvonal_elteres=%.3f m, cmd=(%.2f, %.2f), sim_t=%.3f scan_kor=%.3f s "
+      "lidar_pont=%zu mozgo_pont=%zu kozeli_v=(%.3f,%.3f) m/s",
       goal_x_, goal_y_, target_x, target_y, path.size(), nearest_obstacle,
-      path_error, velocity.first, velocity.second);
+      path_error, velocity.first, velocity.second, now().seconds(),
+      (now() - rclcpp::Time(scan_->header.stamp, get_clock()->get_clock_type())).seconds(),
+      sensed_obstacles.size(), moving_points,
+      nearest_sensed ? nearest_sensed->vx : 0.0,
+      nearest_sensed ? nearest_sensed->vy : 0.0);
     command.linear.x = std::clamp(velocity.first, 0.0, max_linear_velocity_);
     command.angular.z = std::clamp(velocity.second, -max_angular_velocity_, max_angular_velocity_);
     last_linear_velocity_ = command.linear.x;
@@ -994,6 +1009,7 @@ private:
   Pose pose_;
   sensor_msgs::msg::LaserScan::ConstSharedPtr scan_;
   bool have_odom_{false}, have_scan_{false}, has_goal_{false};
+  double last_odom_time_{0.0};
   double wheel_radius_{0.033}, wheel_base_{0.08}, wheel_max_{15.0};
   double wheel_resolution_{0.5}, acceleration_limit_{2.0};
   double predict_time_{2.5}, safety_margin_{0.08}, min_ttc_{1.0};
@@ -1010,8 +1026,8 @@ private:
   std::vector<Track> tracks_;
   std::vector<Obstacle> sensed_cache_;
   double last_track_time_{0.0};
+  bool have_tracked_scan_{false};
   double sensed_until_{0.0};
-  int recovery_dir_{1};
   int blocked_cycles_{0};
   double static_safety_margin_{0.03};
   double planning_margin_{0.30};
