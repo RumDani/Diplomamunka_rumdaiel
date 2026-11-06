@@ -1,8 +1,6 @@
 __pycache__/
 *.py[cod]
 *$py.class
-.venv/
-~$*
 
 # ROS 2 / Gazebo generated files
 build/
@@ -13,6 +11,3 @@ log/
 **/log/
 *.o
 *.so
-**/symlink_install_manifest.txt
-/codes_diploma/ros2_astar_dwa_gazebo/results/diagnostics/frames.gv
-/codes_diploma/ros2_astar_dwa_gazebo/results/diagnostics/frames.pdf

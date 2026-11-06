@@ -1,6 +1,6 @@
 # Diplomamunka és kód teljes összevetése
 
-**Ellenőrzés dátuma:** 2026-11-06
+**Ellenőrzés dátuma:** 2026-10-23  
 **Összevetett dolgozat:** `Rum Dániel Diplomamunka.docx`  
 **Összevetett kód:** `codes_diploma/` Python-projektje és a `ros2_astar_dwa_gazebo/` forráscsomagja
 
@@ -14,7 +14,7 @@ A dolgozat azonban jelen állapotában nem tekinthető teljesen kódhűnek. A le
 - a mérési és benchmark-eredményekhez nem található kész mérési futtató, metrikagyűjtés vagy eredményfájl;
 - a robotkinematikai fejezetből hiányzik a keréksebesség gyorsuláskorlátozása;
 - a robotkinematikai (31) és (32) képleteknél a deriváltjelölés szükséges;
-- a Pythonos referencia-szimuláció és a C++ ROS2/Gazebo vezérlő két külön megvalósítás; az egyik viselkedése nem bizonyítja automatikusan a másikét;
+- a Pythonos és a ROS2-es DWA két különböző részleges megvalósítás, nem ugyanannak a kódnak a közvetlen portja;
 - a dokumentumban szereplő algoritmusneveket és mérési számokat csak akkor szabad saját megvalósításként vagy saját eredményként bemutatni, ha külön kóddal és reprodukálható futással is igazolhatók.
 
 ## 2. Státuszjelölések
@@ -119,9 +119,9 @@ A dolgozat azonban jelen állapotában nem tekinthető teljesen kódhűnek. A le
 | Dolgozati állítás vagy témakör | Kód bizonyítéka | Státusz | Szükséges teendő |
 |---|---|---|---|
 | ROS2 + Gazebo szimuláció TurtleBot3 Waffle robottal működik. | [`dwa_world.sdf`](codes_diploma/ros2_astar_dwa_gazebo/src/dwa_gazebo_sim/worlds/dwa_world.sdf), launch- és csomagfájlok. | **Egyezik** | A futtatási környezetet, ROS2-disztribúciót és Gazebo-verziót pontosítsd. |
-| A ROS2-ben A* globális útvonal és DWA lokális vezérlés működik. | Az alapértelmezett `cpp-rethink` launch a C++ [`astar_dwa_node.cpp`](codes_diploma/ros2_astar_dwa_gazebo/src/astar_dwa_controller/src/astar_dwa_node.cpp) node-ot indítja. | **Részben egyezik** | A Python Matplotlib-szimuláció és a C++ ROS2/Gazebo vezérlő külön implementáció; viselkedésazonosságuk nincs igazolva. |
-| A ROS2-es DWA a Python DWA teljes változata. | A C++ node saját keréksebesség-mintavételezést és pontozást tartalmaz. | **Eltér** | A Python-algoritmust és C++ ROS2-megvalósítást külön rendszerként írd le; a C++ nem közvetlen Python-port. |
-| A LiDAR-adatok alapján lokális akadálytérkép készül. | A C++ `obstacles()` a `/scan` pontokat világkoordinátára alakítja és a DWA lokális ütközésvizsgálatának adja; a statikus A* rácsot a `rosbot.yaml` pontlistái adják. | **Eltér** | Ne írd, hogy a LiDAR frissíti a globális A* térképet: az aktuális C++ launchban a LiDAR a lokális DWA-bemenet. |
+| A ROS2-ben A* globális útvonal és DWA lokális vezérlés működik. | C++ [`astar_dwa_node.cpp`](codes_diploma/ros2_astar_dwa_gazebo/src/astar_dwa_controller/src/astar_dwa_node.cpp), Python `dwa_node.py`, `planner_node.py`. | **Részben egyezik** | A C++ és Python ágakat külön írd le; ne kezeld őket egyetlen azonos implementációként. |
+| A ROS2-es DWA a Python DWA teljes változata. | A ROS2 ág külön vezérlési kódot és saját sebességmintákat használ. | **Eltér** | „ROS2-kompatibilis prototípus” vagy „részleges integráció” a pontosabb megnevezés. |
+| A LiDAR-adatok alapján lokális akadálytérkép készül. | `planner_node.py` LiDAR-adatból rácsot épít és A*-t futtat; a launch konfigurációtól függően a C++ controller ág is használható. | **Részben egyezik** | A ténylegesen indított launch fájlt és a választott node-ot nevezd meg. |
 | A mozgó akadályt a globális A* elkerüli. | `moving_obstacle_node.py` mozgatja az akadályt, de a statikus globális térkép nem minden ciklusban tervez újra. | **Nincs implementálva** | Lokális akadályelkerülésként írd le, ne globális dinamikus újratervezésként. |
 | A ROS2/Gazebo futásból mérési eredmények származnak. | Forráskód és launch fájlok vannak, de a dolgozati eredményekhez kötött automatikus adatgyűjtés nem azonosítható. | **Nem igazolható** | A mérési naplókat, rosbaget vagy kiértékelő szkriptet csatolni kellene. |
 
@@ -162,15 +162,10 @@ A dolgozat és a kód összevetése során ellenőrzött fő források:
 - [`experiments.py`](codes_diploma/astar_project/experiments.py)
 - [`run_experiment.py`](codes_diploma/astar_project/run_experiment.py)
 - [`astar_dwa_node.cpp`](codes_diploma/ros2_astar_dwa_gazebo/src/astar_dwa_controller/src/astar_dwa_node.cpp)
+- [`planner_node.py`](codes_diploma/ros2_astar_dwa_gazebo/src/dwa_gazebo_sim/dwa_gazebo_sim/planner_node.py)
+- [`dwa_node.py`](codes_diploma/ros2_astar_dwa_gazebo/src/dwa_gazebo_sim/dwa_gazebo_sim/dwa_node.py)
 - [`moving_obstacle_node.py`](codes_diploma/ros2_astar_dwa_gazebo/src/dwa_gazebo_sim/dwa_gazebo_sim/moving_obstacle_node.py)
-- [`gazebo_odometry_world.py`](codes_diploma/ros2_astar_dwa_gazebo/src/dwa_gazebo_sim/dwa_gazebo_sim/gazebo_odometry_world.py)
-- [`simulation.launch.py`](codes_diploma/ros2_astar_dwa_gazebo/src/dwa_gazebo_sim/launch/simulation.launch.py)
-- [`rosbot.yaml`](codes_diploma/ros2_astar_dwa_gazebo/src/astar_dwa_controller/config/rosbot.yaml)
 - [`README.md`](codes_diploma/ros2_astar_dwa_gazebo/README.md)
-
-A `cpp-rethink` ágon a korábbi duplikált Python ROS-planner fájlok törölve
-lettek. Ez nem érinti a `codes_diploma/simulation.py` és a Python A*/DWA
-referencia működését.
 
 A DOCX képletei Word OMML matematikai objektumként szerepelnek; a robotkinematikai fejezet (27)–(37) képleteinek szerkezete külön ki lett olvasva. A teljes dolgozat vizuális tördelése, ábraaláírásai és minden külső szakirodalmi hivatkozás tartalmi hitelessége ebből a kód-auditból nem bizonyítható.
 

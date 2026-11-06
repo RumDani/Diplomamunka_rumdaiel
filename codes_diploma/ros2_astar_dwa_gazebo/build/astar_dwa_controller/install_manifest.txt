@@ -1,0 +1,14 @@
+/mnt/c/Users/Rum Dániel/Desktop/Diplomamunka/codes_diploma/ros2_astar_dwa_gazebo/install/astar_dwa_controller/lib/python3.12/site-packages/codes_diploma/astar_project/astar_baseline.py
+/mnt/c/Users/Rum Dániel/Desktop/Diplomamunka/codes_diploma/ros2_astar_dwa_gazebo/install/astar_dwa_controller/lib/python3.12/site-packages/codes_diploma/astar_project/astar_simulation.py
+/mnt/c/Users/Rum Dániel/Desktop/Diplomamunka/codes_diploma/ros2_astar_dwa_gazebo/install/astar_dwa_controller/lib/python3.12/site-packages/codes_diploma/astar_project/astar_variants.py
+/mnt/c/Users/Rum Dániel/Desktop/Diplomamunka/codes_diploma/ros2_astar_dwa_gazebo/install/astar_dwa_controller/lib/python3.12/site-packages/codes_diploma/astar_project/compose_simulation_obstacle_avoidance.py
+/mnt/c/Users/Rum Dániel/Desktop/Diplomamunka/codes_diploma/ros2_astar_dwa_gazebo/install/astar_dwa_controller/lib/python3.12/site-packages/codes_diploma/astar_project/experiments.py
+/mnt/c/Users/Rum Dániel/Desktop/Diplomamunka/codes_diploma/ros2_astar_dwa_gazebo/install/astar_dwa_controller/lib/python3.12/site-packages/codes_diploma/astar_project/generate_comparison_figures.py
+/mnt/c/Users/Rum Dániel/Desktop/Diplomamunka/codes_diploma/ros2_astar_dwa_gazebo/install/astar_dwa_controller/lib/python3.12/site-packages/codes_diploma/astar_project/generate_simulation_heuristic_comparison.py
+/mnt/c/Users/Rum Dániel/Desktop/Diplomamunka/codes_diploma/ros2_astar_dwa_gazebo/install/astar_dwa_controller/lib/python3.12/site-packages/codes_diploma/astar_project/grid_map.py
+/mnt/c/Users/Rum Dániel/Desktop/Diplomamunka/codes_diploma/ros2_astar_dwa_gazebo/install/astar_dwa_controller/lib/python3.12/site-packages/codes_diploma/astar_project/metrics.py
+/mnt/c/Users/Rum Dániel/Desktop/Diplomamunka/codes_diploma/ros2_astar_dwa_gazebo/install/astar_dwa_controller/lib/python3.12/site-packages/codes_diploma/astar_project/path_smoothing.py
+/mnt/c/Users/Rum Dániel/Desktop/Diplomamunka/codes_diploma/ros2_astar_dwa_gazebo/install/astar_dwa_controller/lib/python3.12/site-packages/codes_diploma/astar_project/plots.py
+/mnt/c/Users/Rum Dániel/Desktop/Diplomamunka/codes_diploma/ros2_astar_dwa_gazebo/install/astar_dwa_controller/lib/python3.12/site-packages/codes_diploma/astar_project/run_experiment.py
+/mnt/c/Users/Rum Dániel/Desktop/Diplomamunka/codes_diploma/ros2_astar_dwa_gazebo/install/astar_dwa_controller/lib/python3.12/site-packages/codes_diploma/astar_project/scenarios.py
+/mnt/c/Users/Rum Dániel/Desktop/Diplomamunka/codes_diploma/ros2_astar_dwa_gazebo/install/astar_dwa_controller/lib/python3.12/site-packages/codes_diploma/astar_project/__init__.py

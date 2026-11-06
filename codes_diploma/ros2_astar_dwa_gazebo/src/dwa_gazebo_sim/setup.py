@@ -19,6 +19,7 @@ setup(
     zip_safe=True,
     entry_points={
         "console_scripts": [
+            "planner_node = dwa_gazebo_sim.planner_node:main",
             "moving_obstacle_node = dwa_gazebo_sim.moving_obstacle_node:main",
         ],
     },

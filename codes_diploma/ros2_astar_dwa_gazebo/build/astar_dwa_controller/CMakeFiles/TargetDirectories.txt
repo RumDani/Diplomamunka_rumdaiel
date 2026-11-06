@@ -1,0 +1,11 @@
+/mnt/c/Users/Rum Dániel/Desktop/Diplomamunka/codes_diploma/ros2_astar_dwa_gazebo/build/astar_dwa_controller/CMakeFiles/uninstall.dir
+/mnt/c/Users/Rum Dániel/Desktop/Diplomamunka/codes_diploma/ros2_astar_dwa_gazebo/build/astar_dwa_controller/CMakeFiles/astar_dwa_controller_uninstall.dir
+/mnt/c/Users/Rum Dániel/Desktop/Diplomamunka/codes_diploma/ros2_astar_dwa_gazebo/build/astar_dwa_controller/CMakeFiles/astar_dwa_node.dir
+/mnt/c/Users/Rum Dániel/Desktop/Diplomamunka/codes_diploma/ros2_astar_dwa_gazebo/build/astar_dwa_controller/CMakeFiles/test_path_tracking.dir
+/mnt/c/Users/Rum Dániel/Desktop/Diplomamunka/codes_diploma/ros2_astar_dwa_gazebo/build/astar_dwa_controller/CMakeFiles/test.dir
+/mnt/c/Users/Rum Dániel/Desktop/Diplomamunka/codes_diploma/ros2_astar_dwa_gazebo/build/astar_dwa_controller/CMakeFiles/edit_cache.dir
+/mnt/c/Users/Rum Dániel/Desktop/Diplomamunka/codes_diploma/ros2_astar_dwa_gazebo/build/astar_dwa_controller/CMakeFiles/rebuild_cache.dir
+/mnt/c/Users/Rum Dániel/Desktop/Diplomamunka/codes_diploma/ros2_astar_dwa_gazebo/build/astar_dwa_controller/CMakeFiles/list_install_components.dir
+/mnt/c/Users/Rum Dániel/Desktop/Diplomamunka/codes_diploma/ros2_astar_dwa_gazebo/build/astar_dwa_controller/CMakeFiles/install.dir
+/mnt/c/Users/Rum Dániel/Desktop/Diplomamunka/codes_diploma/ros2_astar_dwa_gazebo/build/astar_dwa_controller/CMakeFiles/install/local.dir
+/mnt/c/Users/Rum Dániel/Desktop/Diplomamunka/codes_diploma/ros2_astar_dwa_gazebo/build/astar_dwa_controller/CMakeFiles/install/strip.dir
