@@ -3,11 +3,36 @@
 import math
 import time
 import xml.etree.ElementTree as ET
+from collections import deque
 
 import rclpy
-from nav_msgs.msg import Path
+from nav_msgs.msg import Odometry, Path
 from rclpy.node import Node
+from rclpy.time import Time
 from ros_gz_interfaces.srv import DeleteEntity, SpawnEntity
+from tf2_ros import Buffer, TransformException, TransformListener
+
+
+def project_path_points(points, source_to_odom, odom_pose, world_pose):
+    """Align display coordinates only; never correct the navigation state."""
+    offset_x, offset_y, source_yaw = source_to_odom
+    correction_yaw = world_pose[2] - odom_pose[2]
+    source_cos, source_sin = math.cos(source_yaw), math.sin(source_yaw)
+    world_cos, world_sin = math.cos(correction_yaw), math.sin(correction_yaw)
+    projected = []
+    for point_x, point_y in points:
+        delta_x = offset_x + source_cos * point_x - source_sin * point_y - odom_pose[0]
+        delta_y = offset_y + source_sin * point_x + source_cos * point_y - odom_pose[1]
+        projected.append((world_pose[0] + world_cos * delta_x - world_sin * delta_y,
+                          world_pose[1] + world_sin * delta_x + world_cos * delta_y))
+    return tuple(projected)
+
+
+def pose_2d(pose):
+    rotation = pose.orientation
+    yaw = math.atan2(2 * (rotation.w * rotation.z + rotation.x * rotation.y),
+                     1 - 2 * (rotation.y ** 2 + rotation.z ** 2))
+    return pose.position.x, pose.position.y, yaw
 
 
 def path_sdf(points):
@@ -36,18 +61,70 @@ class GazeboPathDisplay:
     def __init__(self, node):
         self.node = node
         self.latest = self.drawn = self.pending = None
+        self.path_frame = None
+        self.odometry = deque(maxlen=200)
+        self.ground_truth = None
+        self.tf_buffer = Buffer()
+        self.tf_listener = TransformListener(self.tf_buffer, node)
         self.busy, self.generation, self.deadline = False, 0, 0.0
         self.spawn = node.create_client(SpawnEntity, "/world/dwa_world/create")
         self.delete = node.create_client(DeleteEntity, "/world/dwa_world/remove")
         node.create_subscription(Path, "/astar_path", self.path, 10)
+        node.create_subscription(Odometry, "/odom", self.odometry.append, 10)
+        node.create_subscription(Odometry, "/gazebo/ground_truth_odom", self.record_ground_truth, 10)
         node.create_timer(0.5, self.tick)
 
+    def record_ground_truth(self, message):
+        self.ground_truth = message
+
     def path(self, message):
-        if message.header.frame_id != "odom":
-            return
         points = tuple((pose.pose.position.x, pose.pose.position.y) for pose in message.poses)
         if all(math.isfinite(value) for point in points for value in point):
             self.latest = points
+            self.path_frame = message.header.frame_id
+
+    def world_points(self):
+        if not self.latest:
+            return self.latest
+        if self.ground_truth is None or not self.odometry or not self.path_frame:
+            self.node.get_logger().warning(
+                "DIAG_PATH reason=waiting_alignment", throttle_duration_sec=5.0)
+            return None
+        truth = self.ground_truth
+        truth_time = Time.from_msg(truth.header.stamp).nanoseconds
+        odom = min(self.odometry, key=lambda message: abs(
+            Time.from_msg(message.header.stamp).nanoseconds - truth_time))
+        odom_time = Time.from_msg(odom.header.stamp).nanoseconds
+        if abs(odom_time - truth_time) > 50000000 or odom.child_frame_id != truth.child_frame_id:
+            self.node.get_logger().warning(
+                f"DIAG_PATH reason=alignment_mismatch odom_child={odom.child_frame_id} "
+                f"world_child={truth.child_frame_id}", throttle_duration_sec=5.0)
+            return None
+        age = self.node.get_clock().now().nanoseconds - truth_time
+        if age < 0 or age > 500000000:
+            self.node.get_logger().warning("DIAG_PATH reason=stale_alignment", throttle_duration_sec=5.0)
+            return None
+        if self.path_frame == odom.header.frame_id:
+            source_to_odom = (0.0, 0.0, 0.0)
+        else:
+            try:
+                transform = self.tf_buffer.lookup_transform(
+                    odom.header.frame_id, self.path_frame, Time.from_msg(odom.header.stamp)).transform
+            except TransformException as error:
+                self.node.get_logger().warning(
+                    f"DIAG_PATH reason=tf_missing frame={self.path_frame} error={error}",
+                    throttle_duration_sec=5.0)
+                return None
+            rotation = transform.rotation
+            yaw = math.atan2(2 * (rotation.w * rotation.z + rotation.x * rotation.y),
+                             1 - 2 * (rotation.y ** 2 + rotation.z ** 2))
+            source_to_odom = (transform.translation.x, transform.translation.y, yaw)
+        projected = project_path_points(self.latest, source_to_odom,
+                                        pose_2d(odom.pose.pose), pose_2d(truth.pose.pose))
+        if not all(math.isfinite(value) for point in projected for value in point):
+            self.node.get_logger().warning("DIAG_PATH reason=nonfinite_projection", throttle_duration_sec=5.0)
+            return None
+        return projected
 
     def tick(self):
         if self.busy:
@@ -56,12 +133,17 @@ class GazeboPathDisplay:
                 self.busy = False
                 self.node.get_logger().warning("Gazebo path service timed out.", throttle_duration_sec=5.0)
             return
-        if self.latest is None or self.latest == self.drawn:
+        projected = self.world_points()
+        if projected is None:
+            return
+        if self.drawn is not None and len(projected) == len(self.drawn) and all(
+                math.hypot(current[0] - previous[0], current[1] - previous[1]) < 0.02
+                for current, previous in zip(projected, self.drawn)):
             return
         if not self.spawn.service_is_ready() or not self.delete.service_is_ready():
             self.node.get_logger().warning("Waiting for Gazebo create/remove bridge.", throttle_duration_sec=5.0)
             return
-        self.pending = self.latest
+        self.pending = projected
         self.busy, self.deadline = True, time.monotonic() + 10.0
         self.generation += 1
         generation = self.generation
@@ -92,7 +174,10 @@ class GazeboPathDisplay:
                 if not result.result().success:
                     raise RuntimeError("Gazebo rejected the path model")
                 self.drawn, self.busy = self.pending, False
-                self.node.get_logger().info(f"Gazebo global path visible: {len(self.drawn)} points")
+                self.node.get_logger().info(
+                    f"DIAG_PATH reason=drawn source_frame={self.path_frame} "
+                    f"points={len(self.drawn)} first={self.drawn[0]} last={self.drawn[-1]} "
+                    "ground_truth_usage=visualization_only")
             except Exception as error:
                 failed(error)
 

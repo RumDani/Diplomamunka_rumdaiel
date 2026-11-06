@@ -4,7 +4,7 @@ import xml.etree.ElementTree as ET
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, ExecuteProcess, IncludeLaunchDescription, OpaqueFunction, SetEnvironmentVariable
+from launch.actions import DeclareLaunchArgument, ExecuteProcess, IncludeLaunchDescription, OpaqueFunction, SetEnvironmentVariable, SetLaunchConfiguration
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
@@ -34,9 +34,27 @@ def start_reference(context):
     base_pose = [float(value) for value in model.findtext(
         ".//joint[@name='base_joint']/pose", "0 0 0.01 0 0 0").split()]
     start_environment = LaunchConfiguration("start_environment").perform(context).lower() == "true"
+    slam_mode = LaunchConfiguration("slam_mode").perform(context)
+    map_file = LaunchConfiguration("map_file").perform(context).strip()
+    map_file = os.path.abspath(os.path.expanduser(map_file)) if map_file else ""
+    if start_environment and slam_mode == "localization" and not map_file:
+        raise RuntimeError("Localization requires map_file:=/absolute/path/prefix without an extension")
+    if start_environment and map_file:
+        for extension in (".posegraph", ".data"):
+            if not os.path.isfile(map_file + extension):
+                raise RuntimeError(f"Missing saved SLAM file: {map_file + extension}")
+    initial_pose = [float(LaunchConfiguration(name).perform(context))
+                    for name in ("initial_x", "initial_y", "initial_yaw")]
+    if not all(math.isfinite(value) for value in initial_pose):
+        raise RuntimeError("Initial map pose must contain finite values")
+    slam_launch = "localization_launch.py" if slam_mode == "localization" else "online_async_launch.py"
     runtime_world = write_world_with_pose_odometry(
         world_path, os.path.join(model_root, "turtlebot3_waffle", "model.sdf")) if start_environment else world_path
     return [
+        SetLaunchConfiguration("map_file", map_file),
+        SetLaunchConfiguration("initial_x", str(initial_pose[0])),
+        SetLaunchConfiguration("initial_y", str(initial_pose[1])),
+        SetLaunchConfiguration("initial_yaw", str(initial_pose[2])),
         SetEnvironmentVariable("GZ_SIM_RESOURCE_PATH", os.pathsep.join(
             [model_root, os.environ.get("GZ_SIM_RESOURCE_PATH", "")])),
         ExecuteProcess(cmd=["gz", "sim", "-r", "-v", LaunchConfiguration("verbose"), runtime_world],
@@ -68,7 +86,7 @@ def start_reference(context):
         ),
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource(os.path.join(
-                get_package_share_directory("slam_toolbox"), "launch", "online_async_launch.py")),
+                get_package_share_directory("slam_toolbox"), "launch", slam_launch)),
             launch_arguments={"use_sim_time": "true", "autostart": "true",
                               "use_lifecycle_manager": "false",
                               "slam_params_file": os.path.join(package_share, "config", "slam.yaml")}.items(),
@@ -110,6 +128,13 @@ def generate_launch_description():
                       description="Set false to start only the planner against an already running SLAM simulation"),
         DeclareLaunchArgument("map_resolution", default_value="0.10",
                       description="SLAM grid cell size in metres"),
+        DeclareLaunchArgument("slam_mode", default_value="mapping", choices=["mapping", "localization"],
+                      description="Build a map or localize against a saved pose graph"),
+        DeclareLaunchArgument("map_file", default_value="",
+                      description="Saved SLAM prefix without .posegraph or .data extension"),
+        DeclareLaunchArgument("initial_x", default_value="0.8", description="Initial x estimate in map metres"),
+        DeclareLaunchArgument("initial_y", default_value="0.8", description="Initial y estimate in map metres"),
+        DeclareLaunchArgument("initial_yaw", default_value="0.0", description="Initial map yaw estimate in radians"),
         SetEnvironmentVariable(
             "LIBGL_ALWAYS_SOFTWARE", "1", condition=IfCondition(LaunchConfiguration("software_rendering"))),
         SetEnvironmentVariable("ROS_AUTOMATIC_DISCOVERY_RANGE", "LOCALHOST"),

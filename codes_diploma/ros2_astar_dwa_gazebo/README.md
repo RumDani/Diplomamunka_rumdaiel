@@ -1,6 +1,7 @@
 # Rövid indítás: Gazebo + SLAM + Python A*/DWA
 
 **Sorrend: frissítés/build → SLAM → RViz → kézi térképezés → waypointos navigáció.**
+Ezt csak az első térkép elkészítésekor kell végigcsinálni; utána a 12. pont szerint indulhatsz a mentett térképpel a kezdőhelyről.
 A SLAM eleinte csak a belátott területet mutatja; nincs automatikus felfedezés.
 Minden parancsot soronként futtass, és hiba esetén állj meg.
 
@@ -152,7 +153,7 @@ Hiányzó csomag: `sudo apt install ros-jazzy-rqt-graph`.
 
 ```bash
 mkdir -p "$HOME/maps"
-MAP="$HOME/maps/palya_$(date +%Y%m%d_%H%M%S)"
+MAP="$HOME/maps/palya"
 ros2 run nav2_map_server map_saver_cli -f "$MAP"
 ros2 service call /slam_toolbox/serialize_map slam_toolbox/srv/SerializePoseGraph "{filename: '$MAP'}"
 ls -lh "$MAP"*
@@ -162,16 +163,17 @@ ls -lh "$MAP"*
 - `.posegraph` és `.data`: SLAM-pózgráf és mérési adatok a térképezés folytatásához.
 - A serialize válaszában `result: 0` sikert jelent; hiba esetén a teljes kimenetet küldd vissza.
 
-A fájlok a WSL `~/maps` mappájába kerülnek, időbélyeges névvel; új térképezés előtt ments, ha a jelenlegi térképet meg akarod őrizni.
+A fájlok a WSL `~/maps` mappájába kerülnek, állandó `palya` néven; ha már van ilyen mentés, előbb készíts biztonsági másolatot a 13. pont szerint.
+A 12. pont a `.posegraph` és `.data` állapotot használja, nem a térképképet; mindkét SLAM-fájlt együtt őrizd meg.
 
 ## 11. Új térkép építése a nulláról
 
-Leállítás és újraindítás után a jelenlegi launch üres SLAM-térképet kezd, a korábban mentett fájlok törlése nélkül.
+Üres térképet épít a nulláról; a meglévő mentések ettől még nem törlődnek vagy íródnak felül.
 
 Először állítsd meg a robotot, zárd be a teleopot/plannert, majd a Gazebo–SLAM termináljában is nyomj Ctrl+C-t; ezután előkészített WSL-terminálban:
 
 ```bash
-ros2 launch dwa_gazebo_sim simulation.launch.py start_planner:=false map_resolution:=0.10
+ros2 launch dwa_gazebo_sim simulation.launch.py slam_mode:=mapping start_planner:=false map_resolution:=0.10
 ```
 
 Másik előkészített terminálban járd körbe újra a pályát:
@@ -180,18 +182,74 @@ Másik előkészített terminálban járd körbe újra a pályát:
 ros2 run teleop_twist_keyboard teleop_twist_keyboard --ros-args -p speed:=0.15 -p turn:=0.5
 ```
 
-A mentett térkép automatikus visszatöltése és a mentett SLAM-munkamenet folytatása még nincs bekötve a projekt launch-ába; a mentés önmagában ezt nem kapcsolja be.
+## 12. Későbbi használat: újraindítás a kezdőhelyről, mentett térképpel
+
+Lokalizációs módban a korábban mentett térképet használja, újraindított Gazebóban a robot eredeti kezdőhelyéről; nincs új kézi feltérképezés.
+
+Először állítsd meg a robotot, zárd be a teleopot/plannert, az RViz-t és a régi Gazebo–SLAM launch-t Ctrl+C-vel; új WSL-terminálban futtasd a fenti közös előkészítést, majd:
+
+```bash
+ros2 launch dwa_gazebo_sim simulation.launch.py slam_mode:=localization map_file:="$HOME/maps/palya" initial_x:=0.8 initial_y:=0.8 initial_yaw:=0.0 2>&1 | tee "results/diagnostics/localization_$(date +%Y%m%d_%H%M%S).log"
+```
+
+A `map_file` a kiterjesztés nélküli teljes előtag; ne `.yaml`, `.posegraph` vagy `.data` fájlnevet adj meg.
+Hiányzó `.posegraph` vagy `.data` esetén az indítás hibával megáll; ilyenkor ne indíts újabb példányt.
+
+Másik előkészített terminálban indítsd az RViz-t:
+
+```bash
+ros2 launch dwa_gazebo_sim visualization.launch.py
+```
+
+Ellenőrizd a robot helyét a mentett térképen; az `initial_x/y/yaw` csak map-frame-beli kezdőpóz-becslés, nem a Gazebo robotjának áthelyezése.
+A `(0.8,0.8,0)` a példapálya feltételezett induló becslése; ha a térképen máshol jelenik meg a robot, használd a **2D Pose Estimate** eszközt a mentett térképen a helyes kezdőhelyen és irányban, vagy javítsd az argumentumokat.
+Csak sikeres lokalizáció és a `map → odom → base_link` TF megléte után adj **2D Goal Pose** célt.
+
+Ez az indítás a plannert is elindítja; ne indíts mellé külön `start_environment:=false` példányt vagy teleopot.
+Új célra készül a globális út, utána a régi waypointos DWA-logika követi; nincs automatikus globális újratervezés.
+Lokalizációs módban a mentett pózgráf nem épül újra, és új pózgráf-mentést sem ebből a módból kell kérni.
+
+## Globális útvonal RViz-ben és Gazebóban
+
+Az RViz a `/astar_path` map-frame útját mutatja, a Gazebo ugyanennek a vizuális, ütközésmentes vonalát rajzolja a padlóra, külön indítóparancs nélkül.
+A rajzoló a SLAM-TF-et és időben illesztett odom/Gazebo-pózokat használ csak a megjelenítés illesztésére; ettől nem módosul a vezérlő helyzetbecslése vagy az A*/DWA.
+Ha nem jelenik meg, küldd a `DIAG_PATH` sorokat: `waiting_alignment`, `alignment_mismatch`, `tf_missing`, `stale_alignment` vagy `drawn` segít az ok elkülönítésében.
+Hiányzó frame-illesztéskor inkább nem rajzol, mint hogy téves helyen mutassa az utat; a valós megjelenítést Gazebo-futásban még ellenőrizni kell.
+
+## 13. A mentett térkép későbbi frissítése vagy felülírása
+
+Előbb ments másolatot a régi térképfájlokról, majd új térképezési futásból ugyanarra a `palya` névre ments; az aktív lokalizáció nem frissíti a mentett térképet.
+
+```bash
+MAP="$HOME/maps/palya"
+BACKUP="$HOME/maps/backup_$(date +%Y%m%d_%H%M%S)"
+mkdir -p "$BACKUP"
+cp -p "$MAP".* "$BACKUP/"
+```
+
+Csak sikeres másolat után állítsd le a régi futást, végezd el a 11. pont szerinti új feltérképezést, majd álló robot és futó **mapping** mód mellett írd felül az állandó mentést:
+
+```bash
+MAP="$HOME/maps/palya"
+ros2 run nav2_map_server map_saver_cli -f "$MAP"
+ros2 service call /slam_toolbox/serialize_map slam_toolbox/srv/SerializePoseGraph "{filename: '$MAP'}"
+ls -lh "$MAP"*
+```
+
+Ha bármelyik mentés hibás, ne használd az esetleg részleges fájlkészletet: a régi teljes készlet megvan a `BACKUP` mappában.
+A következő használathoz állítsd le a mapping futást és indítsd újra a 12. pont lokalizációs parancsával; a fájl felülírása nem cseréli le egy már futó node memóriájában lévő térképet.
 
 ## Naplók és leállítás
 
-Hibánál a `results/diagnostics/slam_*.log` és `planner_*.log` fájlt küldd vissza az indulástól az esetig, RViz-problémánál képernyőképpel.
+Hibánál a `results/diagnostics/slam_*.log`, `planner_*.log` vagy `localization_*.log` fájlt küldd vissza az indulástól az esetig, RViz-problémánál képernyőképpel.
 Leállítás: előbb teleop/planner, majd RViz és Gazebo/SLAM termináljában Ctrl+C; egyszerre csak egy szimuláció fusson.
 
-**Korlát:** a Gazebo-padlóra rajzolt SLAM-es globális út még nincs bekötve; az RViz-út aktív.
-A sikeres kikerülés és SLAM-pontosság még nincs futással igazolva.
+**Ellenőrzési korlát:** az indítás és rajzolás editor-/konfigurációs ellenőrzésen ment át; a mentett térképes lokalizáció, a megjelenítés, a kikerülés és a SLAM-pontosság még nincs ROS/Gazebo-futással igazolva.
 
 <details>
 <summary>Korábbi részletes referencia és hibakeresés</summary>
+
+Ez a blokk korábbi indítási állapotot is tartalmaz; a mentett térképhez és útvonalrajzhoz a fenti rövid útmutató az irányadó.
 
 ## Python A* + DWA, LiDAR es SLAM Gazeboban
 

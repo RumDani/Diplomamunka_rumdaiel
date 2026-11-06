@@ -13,6 +13,7 @@ from std_msgs.msg import Bool
 from tf2_ros import StaticTransformBroadcaster, TransformBroadcaster
 
 from .python_reference import create_gazebo_scene
+from .gazebo_path_node import GazeboPathDisplay
 
 
 class GazeboSimulationAdapter:
@@ -112,6 +113,7 @@ class PythonSimulationNode(Node):
     def __init__(self):
         super().__init__("python_simulation")
         self.adapter = GazeboSimulationAdapter(self)
+        self.path_display = GazeboPathDisplay(self)
 
 
 def main(args=None):
