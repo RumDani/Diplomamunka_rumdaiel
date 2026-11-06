@@ -41,6 +41,23 @@ chmod 700 "$XDG_RUNTIME_DIR"
 
 Másik gépen az útvonalat cseréld a sajátodra, az idézőjeleket megtartva; hiba esetén állj meg.
 
+## Tiszta újraindítás hiba után
+
+1. Állítsd meg a robotot, majd Ctrl+C-vel zárd be a teleopot/plannert, az RViz-t és végül a Gazebo–SLAM futást.
+2. Nyiss új WSL-terminált, és futtasd a fenti **Minden új WSL-terminál elején** blokkot.
+3. Az alábbi paranccsal indíts új feltérképezést; ez az 1. fázis A termináljának indítása helyett használandó, ne indíts két szimulációt.
+
+```bash
+ros2 daemon stop
+ros2 daemon start
+ros2 launch dwa_gazebo_sim simulation.launch.py slam_mode:=mapping start_planner:=false map_resolution:=0.10 2>&1 | tee "results/diagnostics/mapping_$(date +%Y%m%d_%H%M%S).log"
+```
+
+Ezután az 1. fázis **B és C termináljával** folytasd: RViz, majd kézi mozgatás.
+A daemon újraindítása nem állítja le a régi node-okat és nem hoz létre hiányzó TF-et; ezért szükséges előtte a Ctrl+C-s leállítás.
+A `queue is full` nem megtelt tárhely: hiányzó/késő TF miatt is betelhet a mérések várakozási sora.
+Ha friss indítás után is `odom ... does not exist` vagy tartós TF-hiba látszik, ne ments és ne indíts lokalizációt; küldd a `mapping_*.log` fájlt a `DIAG_TF`, `DIAG_ODOM` és SLAM sorokkal.
+
 ## 1. Feltérképezés
 
 **A terminál: Gazebo + új SLAM-térkép** – a planner még nem vezérli a robotot.
