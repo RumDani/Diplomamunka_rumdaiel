@@ -137,9 +137,58 @@ Külön előkészített WSL-terminálban a következő parancsokat egyesével fu
 ros2 lifecycle get /slam_toolbox
 ros2 run tf2_ros tf2_echo odom base_scan
 ros2 run tf2_ros tf2_echo map odom
+```
+
+**Jelenlegi korlát:** a felhasználói naplóban az `odom` frame hiánya miatt nem épült térkép; a teljes ROS/Gazebo működés még nincs igazolva, a leírás átrendezése ezt nem javítja meg.
+
+## TF-fa és rqt_graph – külön terminálokban
+
+A Gazebo és a SLAM maradjon futva; minden alábbi eszközhöz új WSL-terminált nyiss, és először ezt futtasd:
+
+```bash
+source /opt/ros/jazzy/setup.bash
+cd "/mnt/c/Users/Rum Dániel/Desktop/Diplomamunka/codes_diploma/ros2_astar_dwa_gazebo"
+source install/setup.bash
+export ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST
+export DISPLAY=:0
+export QT_QPA_PLATFORM=xcb
+export QT_X11_NO_MITSHM=1
+export XDG_RUNTIME_DIR=/tmp/gazebo-runtime
+mkdir -p "$XDG_RUNTIME_DIR" results/diagnostics
+chmod 700 "$XDG_RUNTIME_DIR"
+```
+
+### TF-fa rajzolása és megnyitása
+
+A koordinátakeretek geometriai kapcsolatait PDF-be menti és megnyitja.
+
+```bash
+cd results/diagnostics
+ros2 run tf2_tools view_frames --output frames
+xdg-open frames.pdf
+```
+
+### Élő TF-adatok
+
+A robot térképbeli becsült helyzetét mutatja; néhány sor után Ctrl+C-vel állítható le.
+
+```bash
+ros2 run tf2_ros tf2_echo map base_link
+```
+
+Ha hibát jelez, külön-külön ellenőrizd a láncot, a parancsok között Ctrl+C-vel:
+
+```bash
+ros2 run tf2_ros tf2_echo odom base_scan
+ros2 run tf2_ros tf2_echo map odom
+```
+
+### rqt_graph megnyitása
+
+A ROS node-ok és topicok adatkapcsolatait rajzolja ki; ez nem a geometriai TF-fa.
+
+```bash
 ros2 run rqt_graph rqt_graph
 ```
 
-TF-fa mentése: `cd results/diagnostics`, majd `ros2 run tf2_tools view_frames --output frames` és `xdg-open frames.pdf`.
-
-**Jelenlegi korlát:** a felhasználói naplóban az `odom` frame hiánya miatt nem épült térkép; a teljes ROS/Gazebo működés még nincs igazolva, a leírás átrendezése ezt nem javítja meg.
+Ha hiányzik valamelyik eszköz: `sudo apt install ros-jazzy-tf2-tools ros-jazzy-rqt-graph graphviz xdg-utils`.
