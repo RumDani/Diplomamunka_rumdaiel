@@ -4,11 +4,15 @@
 A SLAM eleinte csak a belátott területet mutatja; nincs automatikus felfedezés.
 Minden parancsot soronként futtass, és hiba esetén állj meg.
 
+Az útvonalak a tesztgép `C:\Users\Rum Dániel\Desktop\Diplomamunka` mappáját
+használják; másik gépen ezt cseréld a saját projektmappádra, az idézőjeleket megtartva.
+
 ## 0. Frissítés: VS Code PowerShell Extension terminál
 
 A pull a követett távoli ágból frissít; a merge önmagában nem tölt le változást.
 
 ```powershell
+Set-Location "C:\Users\Rum Dániel\Desktop\Diplomamunka"
 git rev-parse --show-toplevel
 git status --short --branch
 git fetch --all
@@ -26,7 +30,7 @@ A remote neve lehet `master` is; a `final_v1` a commit szövegében nem a HEAD v
 Ez telepíti a függőségeket és a friss forrásból újraépíti a futtatott csomagokat.
 
 ```bash
-cd "$(git rev-parse --show-toplevel)/codes_diploma/ros2_astar_dwa_gazebo"
+cd "/mnt/c/Users/Rum Dániel/Desktop/Diplomamunka/codes_diploma/ros2_astar_dwa_gazebo"
 source /opt/ros/jazzy/setup.bash
 rosdep install --from-paths src --ignore-src --rosdistro jazzy -r -y
 colcon build --symlink-install --packages-select astar_dwa_controller dwa_gazebo_sim
@@ -38,9 +42,11 @@ WSL-ben ugyanazt a projektmásolatot használd; külön WSL-klónban külön pul
 
 Ez az adott terminált a megfelelő ROS-workspace-re és helyi kommunikációra állítja.
 
+Az alábbi blokk a `~` mappából is indítható; nem feltételezi, hogy már egy Git-repóban állsz.
+
 ```bash
 source /opt/ros/jazzy/setup.bash
-cd "$(git rev-parse --show-toplevel)/codes_diploma/ros2_astar_dwa_gazebo"
+cd "/mnt/c/Users/Rum Dániel/Desktop/Diplomamunka/codes_diploma/ros2_astar_dwa_gazebo"
 source install/setup.bash
 export ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST
 export DISPLAY=:0
@@ -115,7 +121,7 @@ Elvárt: SLAM `active`, planner `map_source=topic`, `/tracked_obstacles` publish
 A futó rendszer koordinátakapcsolatait PDF-be menti és megnyitja.
 
 ```bash
-cd results/diagnostics
+cd "/mnt/c/Users/Rum Dániel/Desktop/Diplomamunka/codes_diploma/ros2_astar_dwa_gazebo/results/diagnostics"
 ros2 run tf2_tools view_frames --output frames
 xdg-open frames.pdf
 ```
@@ -272,7 +278,7 @@ ros2 daemon start
 
 ```bash
 source /opt/ros/jazzy/setup.bash
-cd "$(git rev-parse --show-toplevel)/codes_diploma/ros2_astar_dwa_gazebo"
+cd "/mnt/c/Users/Rum Dániel/Desktop/Diplomamunka/codes_diploma/ros2_astar_dwa_gazebo"
 git fetch --all
 git switch cpp-rethink
 git pull --ff-only
@@ -289,7 +295,7 @@ telepiti, ezert ezt is buildelni kell. Az ottani C++ binaris nem az aktiv planne
 
 ```bash
 source /opt/ros/jazzy/setup.bash
-cd "$(git rev-parse --show-toplevel)/codes_diploma/ros2_astar_dwa_gazebo"
+cd "/mnt/c/Users/Rum Dániel/Desktop/Diplomamunka/codes_diploma/ros2_astar_dwa_gazebo"
 source install/setup.bash
 export ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST
 export DISPLAY=:0
@@ -324,7 +330,7 @@ Gazebo-futassal vagy valos roboton igazolva.
 
 ```bash
 source /opt/ros/jazzy/setup.bash
-cd "$(git rev-parse --show-toplevel)/codes_diploma/ros2_astar_dwa_gazebo"
+cd "/mnt/c/Users/Rum Dániel/Desktop/Diplomamunka/codes_diploma/ros2_astar_dwa_gazebo"
 source install/setup.bash
 export ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST
 export DISPLAY=:0
@@ -346,7 +352,7 @@ mert a SLAM `map` koordinatai nem azonosithatok vakon Gazebo-vilagkoordinatakkal
 
 ```bash
 source /opt/ros/jazzy/setup.bash
-cd "$(git rev-parse --show-toplevel)/codes_diploma/ros2_astar_dwa_gazebo"
+cd "/mnt/c/Users/Rum Dániel/Desktop/Diplomamunka/codes_diploma/ros2_astar_dwa_gazebo"
 source install/setup.bash
 export ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST
 ros2 node list
@@ -383,7 +389,7 @@ diagnosztikai mappabol inditsd:
 
 ```bash
 source /opt/ros/jazzy/setup.bash
-cd "$(git rev-parse --show-toplevel)/codes_diploma/ros2_astar_dwa_gazebo/results/diagnostics"
+cd "/mnt/c/Users/Rum Dániel/Desktop/Diplomamunka/codes_diploma/ros2_astar_dwa_gazebo/results/diagnostics"
 export ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST
 export DISPLAY=:0
 ros2 run tf2_tools view_frames --output frames
@@ -409,7 +415,7 @@ kozotti ROS topic-kapcsolatokat mutatja; nem azonos a fenti geometriai TF-faval.
 
 ```bash
 source /opt/ros/jazzy/setup.bash
-cd "$(git rev-parse --show-toplevel)/codes_diploma/ros2_astar_dwa_gazebo"
+cd "/mnt/c/Users/Rum Dániel/Desktop/Diplomamunka/codes_diploma/ros2_astar_dwa_gazebo"
 source install/setup.bash
 export ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST
 export DISPLAY=:0
