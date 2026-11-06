@@ -4,11 +4,15 @@ import xml.etree.ElementTree as ET
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, ExecuteProcess, IncludeLaunchDescription, OpaqueFunction, SetEnvironmentVariable, SetLaunchConfiguration
+from launch.actions import DeclareLaunchArgument, EmitEvent, ExecuteProcess, LogInfo, OpaqueFunction, RegisterEventHandler, SetEnvironmentVariable, SetLaunchConfiguration
 from launch.conditions import IfCondition
-from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch.events import matches_action
 from launch.substitutions import LaunchConfiguration
-from launch_ros.actions import Node
+from launch_ros.actions import LifecycleNode, Node
+from launch_ros.descriptions import ParameterFile
+from launch_ros.event_handlers import OnStateTransition
+from launch_ros.events.lifecycle import ChangeState
+from lifecycle_msgs.msg import Transition
 
 
 def start_reference(context):
@@ -47,7 +51,21 @@ def start_reference(context):
                     for name in ("initial_x", "initial_y", "initial_yaw")]
     if not all(math.isfinite(value) for value in initial_pose):
         raise RuntimeError("Initial map pose must contain finite values")
-    slam_launch = "localization_launch.py" if slam_mode == "localization" else "online_async_launch.py"
+    map_resolution = float(LaunchConfiguration("map_resolution").perform(context))
+    if not math.isfinite(map_resolution) or map_resolution <= 0:
+        raise RuntimeError("Map resolution must be finite and positive")
+    slam_executable = "localization_slam_toolbox_node" if slam_mode == "localization" else "async_slam_toolbox_node"
+    slam_config = os.path.join(package_share, "config", "slam.yaml")
+    slam_node = LifecycleNode(
+        package="slam_toolbox", executable=slam_executable, name="slam_toolbox", namespace="",
+        output="screen", condition=IfCondition(LaunchConfiguration("start_environment")),
+        parameters=[ParameterFile(slam_config, allow_substs=True),
+                    {"use_sim_time": True, "mode": slam_mode, "map_file_name": map_file,
+                     "map_start_pose": initial_pose, "resolution": map_resolution,
+                     "odom_frame": "odom", "map_frame": "map", "base_frame": "base_link",
+                     "scan_topic": "/scan", "max_laser_range": 3.0,
+                     "use_lifecycle_manager": False}],
+    )
     runtime_world = write_world_with_pose_odometry(
         world_path, os.path.join(model_root, "turtlebot3_waffle", "model.sdf")) if start_environment else world_path
     return [
@@ -84,14 +102,21 @@ def start_reference(context):
                          "laser_pose": laser_pose[:3], "base_link_z": base_pose[2],
                          "odom_child_frame": drive.findtext("child_frame_id", "base_footprint")}],
         ),
-        IncludeLaunchDescription(
-            PythonLaunchDescriptionSource(os.path.join(
-                get_package_share_directory("slam_toolbox"), "launch", slam_launch)),
-            launch_arguments={"use_sim_time": "true", "autostart": "true",
-                              "use_lifecycle_manager": "false",
-                              "slam_params_file": os.path.join(package_share, "config", "slam.yaml")}.items(),
+        LogInfo(msg=f"DIAG_SLAM_CONFIG executable={slam_executable} mode={slam_mode} "
+                    f"map_file={map_file!r} initial_pose={initial_pose} "
+                    f"resolution={map_resolution} params_file={slam_config}",
+                condition=IfCondition(LaunchConfiguration("start_environment"))),
+        slam_node,
+        RegisterEventHandler(
+            OnStateTransition(target_lifecycle_node=slam_node, start_state="configuring",
+                              goal_state="inactive", entities=[EmitEvent(event=ChangeState(
+                                  lifecycle_node_matcher=matches_action(slam_node),
+                                  transition_id=Transition.TRANSITION_ACTIVATE))]),
             condition=IfCondition(LaunchConfiguration("start_environment")),
         ),
+        EmitEvent(event=ChangeState(lifecycle_node_matcher=matches_action(slam_node),
+                                   transition_id=Transition.TRANSITION_CONFIGURE),
+                  condition=IfCondition(LaunchConfiguration("start_environment"))),
         Node(
             package="dwa_gazebo_sim", executable="python_planner_node", output="screen",
             condition=IfCondition(LaunchConfiguration("start_planner")),
