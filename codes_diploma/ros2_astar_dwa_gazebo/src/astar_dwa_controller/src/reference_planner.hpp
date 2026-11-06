@@ -113,22 +113,35 @@ inline Result optimise(const Config & config, const State & state, Point goal,
 											 bool final_waypoint, const std::vector<Obstacle> & sensed) {
 	std::vector<Obstacle> visible;
 	for (const auto & obstacle : sensed) {
-		if (std::hypot(obstacle.x - state.x, obstacle.y - state.y) <= 3.0 &&
-				std::abs(angle_error(std::atan2(obstacle.y - state.y, obstacle.x - state.x) - state.yaw)) <= pi / 2.0)
+		if (std::hypot(obstacle.x - state.x, obstacle.y - state.y) <= 3.0)
 			visible.push_back(obstacle);
 	}
 	const double goal_distance = std::hypot(goal.first - state.x, goal.second - state.y);
 	const double horizon = goal_distance < 1.0 ? std::max(0.5, goal_distance * 2.0) : config.predict_time;
 	const double maximum_velocity = config.wheel_max * config.wheel_radius;
+	const double heading_error = angle_error(std::atan2(goal.second - state.y, goal.first - state.x) - state.yaw);
+	const double turning_velocity = maximum_velocity * std::max(0.0, std::cos(heading_error));
+	const double velocity_limit = std::max(turning_velocity,
+		std::max(0.0, state.velocity - config.acceleration * config.dt));
+	auto left_samples = wheel_samples(state.left, config);
+	auto right_samples = wheel_samples(state.right, config);
+	const double rotation_lower = std::max(left_samples.front(), -right_samples.back());
+	const double rotation_upper = std::min(left_samples.back(), -right_samples.front());
+	if (rotation_lower <= rotation_upper) {
+		const double rotation_left = std::clamp(-heading_error * config.half_axle / config.wheel_radius,
+			rotation_lower, rotation_upper);
+		left_samples.push_back(rotation_left);
+		right_samples.push_back(-rotation_left);
+	}
 	const bool slowdown = config.waypoint_slowdown || final_waypoint;
 	const double slowdown_distance = final_waypoint ? 0.5 : 0.35;
 	double best_score = -std::numeric_limits<double>::infinity();
 	Result result;
-	for (double left : wheel_samples(state.left, config)) {
-		for (double right : wheel_samples(state.right, config)) {
+	for (double left : left_samples) {
+		for (double right : right_samples) {
 			++result.candidates;
 			const auto command = kinematics(left, right, config);
-			if (command.velocity < 0.0) continue;
+			if (command.velocity < 0.0 || command.velocity > velocity_limit + 1e-9) continue;
 			const auto trajectory = trajectory_distance(config, state, command, visible);
 			if (trajectory.dynamic_collision ||
 					command.velocity > std::sqrt(2.0 * config.acceleration * trajectory.distance)) continue;
@@ -137,12 +150,14 @@ inline Result optimise(const Config & config, const State & state, Point goal,
 			for (std::size_t step = 0; step * config.dt < horizon; ++step) update(predicted, config, command);
 			const double heading = std::atan2(goal.second - predicted.y, goal.first - predicted.x);
 			const double heading_score = (pi - std::abs(angle_error(heading - predicted.yaw))) / pi;
-			const double target_velocity = std::min(maximum_velocity, std::max(0.08, goal_distance * 1.4));
+			const double target_velocity = std::min(turning_velocity, std::max(0.08, goal_distance * 1.4));
 			const double velocity_score = !slowdown && goal_distance > slowdown_distance ?
-				command.velocity / maximum_velocity : 1.0 - std::abs(target_velocity - command.velocity) / maximum_velocity;
+				1.0 - std::abs(turning_velocity - command.velocity) / maximum_velocity :
+				1.0 - std::abs(target_velocity - command.velocity) / maximum_velocity;
 			const double dynamic_score = std::isfinite(trajectory.dynamic_clearance) ?
 				std::clamp(trajectory.dynamic_clearance / 0.6, 0.0, 1.0) : 0.0;
-			const double score = config.alpha * heading_score + config.beta * trajectory.distance +
+			const double distance_score = std::clamp(trajectory.distance / 10.0, 0.0, 1.0);
+			const double score = config.alpha * heading_score + config.beta * distance_score +
 				config.gamma * velocity_score + config.dynamic_clearance_weight * dynamic_score;
 			if (score > best_score) { best_score = score; result.command = command; result.found = true; }
 		}

@@ -74,7 +74,7 @@ def create_gazebo_scene(world_file, resolution=0.2, inflation_radius=0.27):
     if abs(spawn[5]) > 1e-6:
         raise ValueError("The reference spawn yaw must be zero")
     start = (spawn[0], spawn[1])
-    velocities = {"moving_obstacle_1": (0.0, 0.20), "moving_obstacle_2": (-0.25, 0.0)}
+    velocities = {"moving_obstacle_1": (0.0, 0.20), "moving_obstacle_2": (-0.26, 0.0)}
     dynamic = []
     for name, (vx, vy) in velocities.items():
         radius = float(models[name].findtext("link/collision/geometry/cylinder/radius"))
