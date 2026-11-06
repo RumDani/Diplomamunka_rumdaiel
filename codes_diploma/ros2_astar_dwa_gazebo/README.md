@@ -146,6 +146,42 @@ ros2 run rqt_graph rqt_graph
 
 Hiányzó csomag: `sudo apt install ros-jazzy-rqt-graph`.
 
+## 10. Terminál H: az elkészült térkép mentése
+
+Álló robot és továbbra is futó SLAM mellett, egy előkészített WSL-terminálból elmenti a térképképet és a később folytatható SLAM-állapotot.
+
+```bash
+mkdir -p "$HOME/maps"
+MAP="$HOME/maps/palya_$(date +%Y%m%d_%H%M%S)"
+ros2 run nav2_map_server map_saver_cli -f "$MAP"
+ros2 service call /slam_toolbox/serialize_map slam_toolbox/srv/SerializePoseGraph "{filename: '$MAP'}"
+ls -lh "$MAP"*
+```
+
+- `.yaml` és térképkép: foglaltsági térkép, például navigációhoz.
+- `.posegraph` és `.data`: SLAM-pózgráf és mérési adatok a térképezés folytatásához.
+- A serialize válaszában `result: 0` sikert jelent; hiba esetén a teljes kimenetet küldd vissza.
+
+A fájlok a WSL `~/maps` mappájába kerülnek, időbélyeges névvel; új térképezés előtt ments, ha a jelenlegi térképet meg akarod őrizni.
+
+## 11. Új térkép építése a nulláról
+
+Leállítás és újraindítás után a jelenlegi launch üres SLAM-térképet kezd, a korábban mentett fájlok törlése nélkül.
+
+Először állítsd meg a robotot, zárd be a teleopot/plannert, majd a Gazebo–SLAM termináljában is nyomj Ctrl+C-t; ezután előkészített WSL-terminálban:
+
+```bash
+ros2 launch dwa_gazebo_sim simulation.launch.py start_planner:=false map_resolution:=0.10
+```
+
+Másik előkészített terminálban járd körbe újra a pályát:
+
+```bash
+ros2 run teleop_twist_keyboard teleop_twist_keyboard --ros-args -p speed:=0.15 -p turn:=0.5
+```
+
+A mentett térkép automatikus visszatöltése és a mentett SLAM-munkamenet folytatása még nincs bekötve a projekt launch-ába; a mentés önmagában ezt nem kapcsolja be.
+
 ## Naplók és leállítás
 
 Hibánál a `results/diagnostics/slam_*.log` és `planner_*.log` fájlt küldd vissza az indulástól az esetig, RViz-problémánál képernyőképpel.
