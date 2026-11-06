@@ -11,6 +11,36 @@
 namespace path_tracking {
 using Path = std::vector<std::pair<double, double>>;
 
+struct PathPosition {
+  double along{0.0};
+  double distance{std::numeric_limits<double>::infinity()};
+};
+
+inline PathPosition project_position(const Path & path, std::size_t first, std::size_t last,
+                                     double x, double y) {
+  PathPosition result;
+  if (path.empty()) return result;
+  first = std::min(first, path.size() - 1);
+  last = std::clamp(last, first, path.size() - 1);
+  result.distance = std::hypot(x - path[first].first, y - path[first].second);
+  double accumulated = 0.0;
+  for (std::size_t index = first; index < last; ++index) {
+    const double delta_x = path[index + 1].first - path[index].first;
+    const double delta_y = path[index + 1].second - path[index].second;
+    const double length = std::hypot(delta_x, delta_y);
+    const double fraction = length > 0.0 ? std::clamp(
+      ((x - path[index].first) * delta_x + (y - path[index].second) * delta_y) / (length * length), 0.0, 1.0) : 0.0;
+    const double distance = std::hypot(x - path[index].first - fraction * delta_x,
+                                       y - path[index].second - fraction * delta_y);
+    if (distance < result.distance) {
+      result.distance = distance;
+      result.along = accumulated + fraction * length;
+    }
+    accumulated += length;
+  }
+  return result;
+}
+
 struct TrackingTarget {
   std::size_t waypoint{0}, target_index{0};
   std::pair<double, double> projection, target;

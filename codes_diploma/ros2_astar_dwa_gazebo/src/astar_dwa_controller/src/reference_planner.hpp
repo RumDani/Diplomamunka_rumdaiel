@@ -43,7 +43,9 @@ struct Result {
 	std::size_t rejected_dynamic_now{0};
 	std::size_t forward_pairs{0};
 	double score_progress{0.0}, score_dynamic{0.0}, score_distance{0.0};
+	double clearance_gain{0.0};
 	bool found{false};
+	bool clearance_preferred{false};
 	bool reorient{false}, approaching_obstacle{false};
 };
 
@@ -118,27 +120,37 @@ inline std::vector<double> wheel_samples(double measured, const Config & config)
 }
 
 inline Result optimise(const Config & config, const State & state, Point goal,
-											 bool final_waypoint, const std::vector<Obstacle> & sensed) {
+											 bool final_waypoint, const std::vector<Obstacle> & sensed,
+											 const Path * reference_path = nullptr, std::size_t waypoint = 0) {
 	std::vector<Obstacle> visible;
 	for (const auto & obstacle : sensed) {
 		if (std::hypot(obstacle.x - state.x, obstacle.y - state.y) <= 3.0)
 			visible.push_back(obstacle);
 	}
 	const double goal_distance = std::hypot(goal.first - state.x, goal.second - state.y);
-	const double horizon = goal_distance < 1.0 ? std::max(0.5, goal_distance * 2.0) : config.predict_time;
+	const double near_goal_horizon = goal_distance < 1.0 ? std::max(0.5, goal_distance * 2.0) : config.predict_time;
 	const double maximum_velocity = config.wheel_max * config.wheel_radius;
+	const bool track_path = reference_path != nullptr && !reference_path->empty();
+	const std::size_t first = track_path ? std::min(waypoint > 0 ? waypoint - 1 : 0, reference_path->size() - 1) : 0;
+	const std::size_t last = track_path ? std::min(first + 25, reference_path->size() - 1) : 0;
+	const double initial_path_position = track_path ?
+		path_tracking::project_position(*reference_path, first, last, state.x, state.y).along : 0.0;
 	const double heading_error = angle_error(std::atan2(goal.second - state.y, goal.first - state.x) - state.yaw);
 	bool approaching_obstacle = false;
 	for (const auto & obstacle : visible) {
 		if (obstacle.vx == 0.0 && obstacle.vy == 0.0) continue;
 		if (path_tracking::collision_course(obstacle.x - state.x, obstacle.y - state.y,
-				obstacle.vx - state.velocity * std::cos(state.yaw),
-				obstacle.vy - state.velocity * std::sin(state.yaw),
+				obstacle.vx - maximum_velocity * std::cos(state.yaw + heading_error),
+				obstacle.vy - maximum_velocity * std::sin(state.yaw + heading_error),
 				config.radius + obstacle.radius + config.safety_margin, config.predict_time)) {
 			approaching_obstacle = true;
 			break;
 		}
 	}
+	const double horizon = approaching_obstacle ? config.predict_time : near_goal_horizon;
+	const double heading_scale = approaching_obstacle ? 0.25 : 1.0;
+	const auto braking_trajectory = approaching_obstacle ?
+		trajectory_distance(config, state, Command{}, visible) : Trajectory{};
 	const bool reorient = std::abs(heading_error) > pi / 2.0 && !approaching_obstacle;
 	const double target_speed = reorient ? 0.0 : maximum_velocity;
 	const double velocity_limit = reorient ? std::max(0.0, state.velocity - config.acceleration * config.dt) : maximum_velocity;
@@ -183,20 +195,29 @@ inline Result optimise(const Config & config, const State & state, Point goal,
 			const double heading = std::atan2(goal.second - predicted.y, goal.first - predicted.x);
 			const double heading_score = (pi - std::abs(angle_error(heading - predicted.yaw))) / pi;
 			const double predicted_goal_distance = std::hypot(goal.first - predicted.x, goal.second - predicted.y);
+			const double progress = track_path ?
+				path_tracking::project_position(*reference_path, first, last, predicted.x, predicted.y).along - initial_path_position :
+				goal_distance - predicted_goal_distance;
 			const double progress_score = std::clamp(
-				(goal_distance - predicted_goal_distance) / (maximum_velocity * horizon), -1.0, 1.0);
+				progress / (maximum_velocity * horizon), -1.0, 1.0);
 			const double target_velocity = std::min(target_speed, std::max(0.08, goal_distance * 1.4));
 			const double velocity_score = !slowdown && goal_distance > slowdown_distance ?
 				command.velocity / maximum_velocity :
 				1.0 - std::abs(target_velocity - command.velocity) / maximum_velocity;
 			const double dynamic_score = std::isfinite(trajectory.dynamic_clearance) ?
 				std::clamp(trajectory.dynamic_clearance / config.dynamic_clearance_distance, 0.0, 1.0) : 0.0;
-			const double score = config.alpha * (heading_score + progress_score) + config.beta * trajectory.distance +
+			const double clearance_gain = approaching_obstacle && std::isfinite(braking_trajectory.dynamic_clearance) ?
+				trajectory.dynamic_clearance - braking_trajectory.dynamic_clearance : 0.0;
+			const bool clearance_preferred = approaching_obstacle && command.velocity > 0.01 && clearance_gain > 0.02;
+			const double score = config.alpha * (heading_scale * heading_score + progress_score) + config.beta * trajectory.distance +
 				config.gamma * velocity_score + config.dynamic_clearance_weight * dynamic_score;
-			if (score > best_score) {
+			if (!result.found || path_tracking::prefer_candidate(
+					clearance_preferred, score, result.clearance_preferred, best_score)) {
 				best_score = score;
 				result.command = command;
 				result.found = true;
+				result.clearance_preferred = clearance_preferred;
+				result.clearance_gain = clearance_gain;
 				result.score_progress = config.alpha * progress_score;
 				result.score_dynamic = config.dynamic_clearance_weight * dynamic_score;
 				result.score_distance = config.beta * trajectory.distance;

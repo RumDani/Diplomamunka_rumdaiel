@@ -28,6 +28,21 @@ int main() {
   const path_tracking::Path hairpin{{0.0, 0.0}, {2.0, 0.0}, {2.0, 0.5}, {0.0, 0.5}};
   near(distance_to_path(hairpin, 0, 1, 0.5, 0.5), 0.5, "Do not reward a future return branch");
 
+    const auto initial_position = path_tracking::project_position(straight, 0, 2, 0.5, 0.0);
+    const auto detour_position = path_tracking::project_position(straight, 0, 2, 0.8, 0.8);
+    near(initial_position.along, 0.5, "Locate the robot by path arc length");
+    near(detour_position.along, 0.8, "Lateral detour can still advance along the path");
+    require(detour_position.along > initial_position.along,
+      "Do not penalize forward detours for moving away from a nearby goal");
+    near(path_tracking::project_position(corner, 0, 2, 1.0, 0.6).along, 1.6,
+      "Accumulate arc length around a corner");
+    near(path_tracking::project_position(repeated, 0, 2, 0.5, 0.2).along, 0.5,
+      "Project safely over duplicate path points");
+    near(path_tracking::project_position(hairpin, 0, 1, 0.5, 0.5).along, 0.5,
+      "Respect the local projection window");
+    require(std::isinf(path_tracking::project_position({}, 0, 0, 0.0, 0.0).distance),
+      "An empty reference path has no projection");
+
   const double parallel_cost = tracking_cost(straight, 0, 2, 0.8, 0.4, 1.0, 0.0, 6.0, 2.0);
   const double returning_cost = tracking_cost(straight, 0, 2, 0.75, 0.1, 1.0, 0.0, 6.0, 2.0);
   require(returning_cost < parallel_cost, "Prefer return over parallel offset");
