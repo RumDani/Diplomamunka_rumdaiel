@@ -21,11 +21,8 @@ def estimate_cluster_translation(current, previous, initial):
         offsets = current[:, None, :] - (previous[None, :, :] + translation)
         squared_distances = np.sum(offsets * offsets, axis=2)
         nearest = np.argmin(squared_distances, axis=1)
-        reverse_nearest = np.argmin(squared_distances, axis=0)
-        matched = ((squared_distances[np.arange(len(current)), nearest] <= 0.15 ** 2) &
-                   (reverse_nearest[nearest] == np.arange(len(current))))
-        required_matches = max(3, math.ceil(0.5 * min(len(current), len(previous))))
-        if np.count_nonzero(matched) < required_matches:
+        matched = squared_distances[np.arange(len(current)), nearest] <= 0.15 ** 2
+        if np.count_nonzero(matched) < 2:
             return None
         translation = np.median(current[matched] - previous[nearest[matched]], axis=0)
     return translation
@@ -86,7 +83,6 @@ class LidarObstacleNode(Node):
             x = sum(point[0] for point in cluster) / len(cluster)
             y = sum(point[1] for point in cluster) / len(cluster)
             vx = vy = 0.0
-            velocity_stamp = stamp
             if dt is not None and 0.02 < dt < 0.5 and len(cluster) >= 2:
                 matches = [(math.hypot(x - old[0] - old[2] * dt, y - old[1] - old[3] * dt), index)
                            for index, old in enumerate(self.previous) if index not in used]
@@ -95,20 +91,15 @@ class LidarObstacleNode(Node):
                     if error < 0.35:
                         old = self.previous[index]
                         used.add(index)
-                        vx, vy = old[2], old[3]
-                        velocity_stamp = old[5]
                         translation = estimate_cluster_translation(
                             surface, old[4], (old[2] * dt, old[3] * dt))
                         if translation is not None:
                             motion_fits += 1
-                            velocity_stamp = stamp
                             vx = 0.6 * old[2] + 0.4 * float(translation[0]) / dt
                             vy = 0.6 * old[3] + 0.4 * float(translation[1]) / dt
                             if math.hypot(vx, vy) < 0.06:
                                 vx = vy = 0.0
-            if stamp - velocity_stamp > 0.3:
-                vx = vy = 0.0
-            tracks.append((x, y, vx, vy, surface, velocity_stamp))
+            tracks.append((x, y, vx, vy, surface))
             points.extend((point[0], point[1], 0.0, 0.0, vx, vy) for point in cluster)
         self.previous, self.last_stamp = tracks, stamp
         fields = [PointField(name=name, offset=4 * index, datatype=PointField.FLOAT32, count=1)

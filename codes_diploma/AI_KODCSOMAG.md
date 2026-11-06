@@ -21,14 +21,14 @@ A snapshot a követett forrás-, konfigurációs, csomagolási és tesztfájlok 
 - Kiinduló, korábban pusholt állapot: `d8bfb61`, ág: `cpp-rethink`. Az alábbi snapshot már az ezt követő C++-átállást tartalmazza.
 - VÉGLEGES CÉL: az eredeti, Matplotlibben a felhasználó szerint jól működő Python `DWA+A.py` A* + DWA megvalósítás ötleteinek és döntési logikájának átültetése C++ / ROS 2 / fizikai Gazebo környezetbe. A felhasználó a szimulációban kizárólag C++ navigációs vezérlőt kér. A DWA válassza a kitérő mozgást, majd folytatódjon az eredeti waypointkövetés. Külön kézzel kijelölt oldalsó kerülőcél és új kerülési algoritmus nem kell, ilyen nincs az aktív C++ magban.
 - Az eredeti `robot.py`, `DWA.py`, `DWA+A.py`, `simulation.py`, az `astar_project` és a védett A* folyamatábra nem módosítható e javításokhoz. Csak a ROS/Gazebo integráció változzon. Teszteket csak kérésre kell indítani; a felhasználó másik gépen tesztel. Dokumentációs és ábrafrissítések a kódcsomag kivételével halasztottak.
-- A legutóbbi felhasználói próba szerint a kitérés már javult, de a waypoint felé visszatéréskor a robot elfordulva rossz irányba indult. A naplóban kb. 163 fokos célirányhiba mellett is pozitív 0,26 m/s parancs látszott; ez nem negatív sebességű tolatás. Korábban akadálykontaktus és odometriai eltérés is előfordult. Teljes, sikeres kitérés-visszatérés-célbaérés még nincs igazolva.
+- Regressziós állapot: a `6a38f98` változatnál a felhasználó jobb kitérést, de hibás visszatérést jelzett. Az `eef1d43` csomag után teljes megállást és az akadály általi eltolást jelentett. Ehhez az új próbához friss napló nem érkezett, ezért a konkrét megállási ok nem bizonyított. A legújabb módosítás visszaveszi az általános ráfordulási sebességkorlátot, a pontozási normalizálást és a LiDAR-szigorítást. Teljes, sikeres kitérés-visszatérés-célbaérés még nincs igazolva.
 - A korábbi NumPy-backend és annak eltérő pontozási/kerülési próbálkozásai törölve. A C++ mag nem tartalmazza a régi C++ külön visszatérési üzemmódját és pályabüntetéseit sem. A LiDAR-segédfolyamat felületi pontillesztéses sebességbecslése megmaradt; pontossága nincs fizikai méréssel igazolva.
 - Az eredeti Pythonhoz képest tudatos fizikai eltérés: a kerékminták nem léphetik túl a kerékhatárt, míg a NumPy arange végpontja túlcsúszhatott. A C++ és Python numerikus azonosságát nem ellenőriztük; azonos adatokon összehasonlítás szükséges.
 - Legújabb szimulációs hangolás: a szembejövő `moving_obstacle_2` pályája y=2,1 m helyett y=1,7 m. A y=2,4 m-nél kezdődő vízszintes fal és a 0,18 m sugarú akadály közti felületi rés így 0,12 m helyett 0,52 m. A falak változatlanok. Az aktív Gazebo-segédnode szembejövő akadálysebessége 0,25-ről 0,26 m/s-ra nőtt, tehát 4%-kal gyorsabb.
 - Legújabb DWA-hangolás: a teljes predikció alatt várható legkisebb, mozgó akadályhoz tartozó ráhagyáson felüli távolság külön pontszámot kap; 0 és 0,6 m között lineárisan nő, felette telítődik. A `dynamic_clearance_weight` ROS/launch-paraméter alapértéke 4,0. A mozgó akadállyal előre jelzett ütközés kizárja a jelöltet, nulla robotsebességnél is; a statikus fékút-szűrés, waypointkövetés és az eredeti három pontszám megmarad. Ez célzott fizikai hangolás, nem numerikusan azonos Python-port. Az új hangolás fizikai eredményessége még nem igazolt.
-- Új biztonsági és pontozási javítás: a DWA minden 3 méteren belüli LiDAR-pontot használ, 360 fokban; az oldalsó és hátsó akadályok nem esnek ki forduláskor. A fékút-ellenőrzéshez továbbra is méterben mért ívhossz tartozik, de annak pontszáma 10-zel osztva és 0-1 közé szorítva szerepel a célfüggvényben, a többi komponenssel azonos skálán. A `DIAG_CONFIG` új jelölése `schema=cpp-dwa-2 lidar_fov=360`.
-- Visszatérési javítás új célpont nélkül: a waypoint irányhibájának koszinusza csökkenti a kívánt előremenetet; az egy lépésben elérhető fékezési sebességet is figyelembe vesszük. Az ennél gyorsabb jelöltek kiesnek. A két kerék dinamikus ablakából elérhető, cél felé forgó mintát külön felvesszük, változatlan ütközésellenőrzéssel. A waypointok és azok sorrendje változatlan. Az új `goal_heading_error` naplómező radiánban mutatja az irányhibát.
-- LiDAR-illesztési javítás: kölcsönösen legközelebbi pontpárok, legalább három pár és a kisebb mintafelület legalább 50%-os illeszkedése szükséges új sebességbecsléshez. Gyenge illesztésnél az utolsó becsült sebesség legfeljebb 0,3 másodpercig marad meg, utána nullázódik. Az összes mért akadálypont továbbra is bekerül az ütközésvizsgálatba; nincs önkényes sebességplafon. A becslés pontossága továbbra is célgépes ellenőrzést igényel, és a bizonytalan mozgásra nincs teljes körű modell.
+- A 360 fokos, 3 méteres LiDAR-ellenőrzés megmarad. A célfüggvényben ismét a `6a38f98` változat méter alapú akadály-ívhossz pontszáma szerepel; a 10-zel osztott normalizálást visszavontuk. Ezért a pontszámok eltérő skálájának ismert kockázata jelenleg fennmarad. A `DIAG_CONFIG` jelölése `schema=cpp-dwa-3 lidar_fov=360`.
+- Szűkített visszatérés új célpont nélkül: először a mozgó akadályok és a robot aktuális sebességének egyenletes továbbhaladásából várható ütközési veszélyt nézzük a predikciós horizonton. Ilyen veszélynél nincs waypoint-irányhibából eredő sebességkorlátozás, a korábbi DWA-pontozás választhat kitérőt. Külön lassítás/helyben forduló minta csak 90 foknál nagyobb waypoint-irányhibánál és ilyen veszély hiányában van. A fékezési korlát és minden jelölt ütközésszűrése megmarad, nincs kikényszerített előremenet. A globális útvonal és a waypointok sorrendje változatlan. Új naplómezők: `avoidance_priority`, `reorient`, továbbá a radiánban mért `goal_heading_error`.
+- A LiDAR-illesztés visszaállt a `6a38f98` állapotra: közeli felületi pontok mediáneltolása, legalább két egyezés, az eredeti sebességsimítás. A kölcsönös párosítást, 50%-os átfedési küszöböt és a sebességtartást visszavontuk. A visszaállítás fájltartalmát Gittel összehasonlítottuk. A zajos becslések ismert kockázata fennmarad; ennek külön vizsgálatához friss futási adatok szükségesek.
 - A C++ adapter mért keréksebességből indul, pontos szenzoridőbélyeghez kér TF-et, késő transzformációhoz korlátos üzenetsorokat tart, az akadályokat a robotállapot idejére igazítja. Friss adatok és számítási határidő nélkül megáll. Ugyanabban a map koordinátakeretben érkező új térkép nem indít új globális tervezést.
 - A fizikai illesztés bemenete nem a Matplotlib pontos akadálymodellje: LiDAR-felületi pontok, becsült akadálysebesség, kerék-odometria és késleltetett TF érkezik. A megállás okát friss `DIAG_CONTROL cpp`, `DIAG_LIDAR`, `DIAG_TF_CPP` adatokkal kell elkülöníteni; lehet elégtelen sebességbecslés, üres megengedett jelölthalmaz, célfüggvény vagy késleltetés. Az új javítások eredményessége még nincs futással igazolva.
 - Következő munka: C++/ROS build és Gazebo-futtatás a célgépen; `DIAG_CONFIG backend=cpp-python-reference`, `DIAG_CONTROL cpp`, `DIAG_TF_CPP` és `DIAG_LIDAR` naplók értékelése. Ne helyettesítsd a hibakeresést vak előremenettel, akadályadatok elhagyásával vagy biztonsági időkorlátok kikapcsolásával.
@@ -5450,7 +5450,7 @@ public:
     timer_ = rclcpp::create_timer(this, get_clock(), rclcpp::Duration::from_seconds(config_.dt),
                                  [this]() { control(); });
     RCLCPP_INFO(get_logger(),
-      "DIAG_CONFIG backend=cpp-python-reference schema=cpp-dwa-2 lidar_fov=360 dt=%.3f horizon=%.3f radius=%.3f "
+      "DIAG_CONFIG backend=cpp-python-reference schema=cpp-dwa-3 lidar_fov=360 dt=%.3f horizon=%.3f radius=%.3f "
       "half_axle=%.4f wheel_max=%.3f weights=(%.1f,%.1f,%.1f) dynamic_clearance_weight=%.1f",
       config_.dt, config_.predict_time, config_.radius, config_.half_axle,
       config_.wheel_max, config_.alpha, config_.beta, config_.gamma, config_.dynamic_clearance_weight);
@@ -5682,11 +5682,12 @@ private:
     RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000,
       "DIAG_CONTROL cpp reason=%s pose=(%.3f,%.3f,%.3f) measured=(%.3f,%.3f) "
       "waypoint=%zu/%zu target=(%.3f,%.3f) observed=%zu pairs=%zu admissible=%zu "
-      "cmd=(%.3f,%.3f) goal_heading_error=%.3f odom_age=%.3f obstacle_age=%.3f compute_ms=%.2f",
+      "cmd=(%.3f,%.3f) avoidance_priority=%d reorient=%d goal_heading_error=%.3f odom_age=%.3f obstacle_age=%.3f compute_ms=%.2f",
       result.found ? "command" : "braking_no_pair", state_.x, state_.y, state_.yaw,
       state_.velocity, state_.angular, waypoint_, waypoints_.size(), waypoints_[waypoint_].first,
       waypoints_[waypoint_].second, obstacles.size(), result.candidates, result.admissible,
       command.linear.x, command.angular.z,
+      result.approaching_obstacle, result.reorient,
       planner::angle_error(std::atan2(waypoints_[waypoint_].second - state_.y,
                   waypoints_[waypoint_].first - state_.x) - state_.yaw),
       now().seconds() - odom_stamp_, now().seconds() - obstacle_stamp_, compute_ms);
@@ -5743,6 +5744,7 @@ int main(int argc, char ** argv) {
 #include <tuple>
 #include <utility>
 #include <vector>
+#include "path_tracking.hpp"
 
 namespace reference_planner {
 constexpr double pi = 3.14159265358979323846;
@@ -5772,6 +5774,7 @@ struct Result {
 	Command command;
 	std::size_t candidates{0}, admissible{0};
 	bool found{false};
+	bool reorient{false}, approaching_obstacle{false};
 };
 
 inline Command kinematics(double left, double right, const Config & config) {
@@ -5853,14 +5856,25 @@ inline Result optimise(const Config & config, const State & state, Point goal,
 	const double horizon = goal_distance < 1.0 ? std::max(0.5, goal_distance * 2.0) : config.predict_time;
 	const double maximum_velocity = config.wheel_max * config.wheel_radius;
 	const double heading_error = angle_error(std::atan2(goal.second - state.y, goal.first - state.x) - state.yaw);
-	const double turning_velocity = maximum_velocity * std::max(0.0, std::cos(heading_error));
-	const double velocity_limit = std::max(turning_velocity,
-		std::max(0.0, state.velocity - config.acceleration * config.dt));
+	bool approaching_obstacle = false;
+	for (const auto & obstacle : visible) {
+		if (obstacle.vx == 0.0 && obstacle.vy == 0.0) continue;
+		if (path_tracking::collision_course(obstacle.x - state.x, obstacle.y - state.y,
+				obstacle.vx - state.velocity * std::cos(state.yaw),
+				obstacle.vy - state.velocity * std::sin(state.yaw),
+				config.radius + obstacle.radius + config.safety_margin, config.predict_time)) {
+			approaching_obstacle = true;
+			break;
+		}
+	}
+	const bool reorient = std::abs(heading_error) > pi / 2.0 && !approaching_obstacle;
+	const double target_speed = reorient ? 0.0 : maximum_velocity;
+	const double velocity_limit = reorient ? std::max(0.0, state.velocity - config.acceleration * config.dt) : maximum_velocity;
 	auto left_samples = wheel_samples(state.left, config);
 	auto right_samples = wheel_samples(state.right, config);
 	const double rotation_lower = std::max(left_samples.front(), -right_samples.back());
 	const double rotation_upper = std::min(left_samples.back(), -right_samples.front());
-	if (rotation_lower <= rotation_upper) {
+	if (reorient && rotation_lower <= rotation_upper) {
 		const double rotation_left = std::clamp(-heading_error * config.half_axle / config.wheel_radius,
 			rotation_lower, rotation_upper);
 		left_samples.push_back(rotation_left);
@@ -5870,6 +5884,8 @@ inline Result optimise(const Config & config, const State & state, Point goal,
 	const double slowdown_distance = final_waypoint ? 0.5 : 0.35;
 	double best_score = -std::numeric_limits<double>::infinity();
 	Result result;
+	result.reorient = reorient;
+	result.approaching_obstacle = approaching_obstacle;
 	for (double left : left_samples) {
 		for (double right : right_samples) {
 			++result.candidates;
@@ -5883,14 +5899,13 @@ inline Result optimise(const Config & config, const State & state, Point goal,
 			for (std::size_t step = 0; step * config.dt < horizon; ++step) update(predicted, config, command);
 			const double heading = std::atan2(goal.second - predicted.y, goal.first - predicted.x);
 			const double heading_score = (pi - std::abs(angle_error(heading - predicted.yaw))) / pi;
-			const double target_velocity = std::min(turning_velocity, std::max(0.08, goal_distance * 1.4));
+			const double target_velocity = std::min(target_speed, std::max(0.08, goal_distance * 1.4));
 			const double velocity_score = !slowdown && goal_distance > slowdown_distance ?
-				1.0 - std::abs(turning_velocity - command.velocity) / maximum_velocity :
+				command.velocity / maximum_velocity :
 				1.0 - std::abs(target_velocity - command.velocity) / maximum_velocity;
 			const double dynamic_score = std::isfinite(trajectory.dynamic_clearance) ?
 				std::clamp(trajectory.dynamic_clearance / 0.6, 0.0, 1.0) : 0.0;
-			const double distance_score = std::clamp(trajectory.distance / 10.0, 0.0, 1.0);
-			const double score = config.alpha * heading_score + config.beta * distance_score +
+			const double score = config.alpha * heading_score + config.beta * trajectory.distance +
 				config.gamma * velocity_score + config.dynamic_clearance_weight * dynamic_score;
 			if (score > best_score) { best_score = score; result.command = command; result.found = true; }
 		}
@@ -6586,11 +6601,8 @@ def estimate_cluster_translation(current, previous, initial):
         offsets = current[:, None, :] - (previous[None, :, :] + translation)
         squared_distances = np.sum(offsets * offsets, axis=2)
         nearest = np.argmin(squared_distances, axis=1)
-        reverse_nearest = np.argmin(squared_distances, axis=0)
-        matched = ((squared_distances[np.arange(len(current)), nearest] <= 0.15 ** 2) &
-                   (reverse_nearest[nearest] == np.arange(len(current))))
-        required_matches = max(3, math.ceil(0.5 * min(len(current), len(previous))))
-        if np.count_nonzero(matched) < required_matches:
+        matched = squared_distances[np.arange(len(current)), nearest] <= 0.15 ** 2
+        if np.count_nonzero(matched) < 2:
             return None
         translation = np.median(current[matched] - previous[nearest[matched]], axis=0)
     return translation
@@ -6651,7 +6663,6 @@ class LidarObstacleNode(Node):
             x = sum(point[0] for point in cluster) / len(cluster)
             y = sum(point[1] for point in cluster) / len(cluster)
             vx = vy = 0.0
-            velocity_stamp = stamp
             if dt is not None and 0.02 < dt < 0.5 and len(cluster) >= 2:
                 matches = [(math.hypot(x - old[0] - old[2] * dt, y - old[1] - old[3] * dt), index)
                            for index, old in enumerate(self.previous) if index not in used]
@@ -6660,20 +6671,15 @@ class LidarObstacleNode(Node):
                     if error < 0.35:
                         old = self.previous[index]
                         used.add(index)
-                        vx, vy = old[2], old[3]
-                        velocity_stamp = old[5]
                         translation = estimate_cluster_translation(
                             surface, old[4], (old[2] * dt, old[3] * dt))
                         if translation is not None:
                             motion_fits += 1
-                            velocity_stamp = stamp
                             vx = 0.6 * old[2] + 0.4 * float(translation[0]) / dt
                             vy = 0.6 * old[3] + 0.4 * float(translation[1]) / dt
                             if math.hypot(vx, vy) < 0.06:
                                 vx = vy = 0.0
-            if stamp - velocity_stamp > 0.3:
-                vx = vy = 0.0
-            tracks.append((x, y, vx, vy, surface, velocity_stamp))
+            tracks.append((x, y, vx, vy, surface))
             points.extend((point[0], point[1], 0.0, 0.0, vx, vy) for point in cluster)
         self.previous, self.last_stamp = tracks, stamp
         fields = [PointField(name=name, offset=4 * index, datatype=PointField.FLOAT32, count=1)
