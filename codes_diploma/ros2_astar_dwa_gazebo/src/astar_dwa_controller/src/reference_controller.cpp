@@ -79,7 +79,7 @@ public:
     timer_ = rclcpp::create_timer(this, get_clock(), rclcpp::Duration::from_seconds(config_.dt),
                                  [this]() { control(); });
     RCLCPP_INFO(get_logger(),
-      "DIAG_CONFIG backend=cpp-python-reference schema=cpp-dwa-3 lidar_fov=360 dt=%.3f horizon=%.3f radius=%.3f "
+      "DIAG_CONFIG backend=cpp-python-reference schema=cpp-dwa-4 lidar_fov=360 pruning=25 dt=%.3f horizon=%.3f radius=%.3f "
       "half_axle=%.4f wheel_max=%.3f weights=(%.1f,%.1f,%.1f) dynamic_clearance_weight=%.1f",
       config_.dt, config_.predict_time, config_.radius, config_.half_axle,
       config_.wheel_max, config_.alpha, config_.beta, config_.gamma, config_.dynamic_clearance_weight);
@@ -277,22 +277,20 @@ private:
     const double tolerance = std::max(0.05, std::min(0.2, goal_distance * 0.2));
     if (goal_distance <= tolerance) { active_ = false; stop("finished"); return; }
     const auto previous_waypoint = waypoint_;
-    if (waypoint_ + 1 < waypoints_.size()) {
-      const auto & current = waypoints_[waypoint_];
-      const auto & next = waypoints_[waypoint_ + 1];
-      const bool passed = (current.first - state_.x) * (next.first - current.first) +
-        (current.second - state_.y) * (next.second - current.second) < 0.0;
-      if ((std::hypot(current.first - state_.x, current.second - state_.y) <= tolerance || passed) &&
-          std::abs(state_.velocity) <= 0.3) ++waypoint_;
-    }
+    const auto tracking = path_tracking::prune_lookahead(
+      waypoints_, waypoint_, state_.x, state_.y, state_.velocity,
+      [this](const planner::Point & point) {
+        return grid_.safe(planner::Path{{state_.x, state_.y}, point});
+      });
+    waypoint_ = tracking.waypoint;
     auto obstacles = obstacles_;
     for (auto & obstacle : obstacles) {
       obstacle.x += obstacle.vx * (odom_stamp_ - obstacle_stamp_);
       obstacle.y += obstacle.vy * (odom_stamp_ - obstacle_stamp_);
     }
     const auto start = std::chrono::steady_clock::now();
-    const auto result = planner::optimise(config_, state_, waypoints_[waypoint_],
-                                          waypoint_ + 1 == waypoints_.size(), obstacles);
+    const auto result = planner::optimise(config_, state_, tracking.target,
+                        tracking.target == waypoints_.back(), obstacles);
     const double compute_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
     if (now().seconds() - std::min(odom_stamp_, obstacle_stamp_) > std::max(0.5, 3.0 * config_.dt)) {
       waypoint_ = previous_waypoint;
@@ -310,15 +308,16 @@ private:
     active_pub_->publish(status);
     RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000,
       "DIAG_CONTROL cpp reason=%s pose=(%.3f,%.3f,%.3f) measured=(%.3f,%.3f) "
-      "waypoint=%zu/%zu target=(%.3f,%.3f) observed=%zu pairs=%zu admissible=%zu "
+      "waypoint=%zu/%zu pruned=%zu lookahead=%.3f target_index=%zu target=(%.3f,%.3f) observed=%zu pairs=%zu admissible=%zu "
       "cmd=(%.3f,%.3f) avoidance_priority=%d reorient=%d goal_heading_error=%.3f odom_age=%.3f obstacle_age=%.3f compute_ms=%.2f",
       result.found ? "command" : "braking_no_pair", state_.x, state_.y, state_.yaw,
-      state_.velocity, state_.angular, waypoint_, waypoints_.size(), waypoints_[waypoint_].first,
-      waypoints_[waypoint_].second, obstacles.size(), result.candidates, result.admissible,
+      state_.velocity, state_.angular, waypoint_, waypoints_.size(), waypoint_ - previous_waypoint,
+      tracking.lookahead, tracking.target_index, tracking.target.first, tracking.target.second,
+      obstacles.size(), result.candidates, result.admissible,
       command.linear.x, command.angular.z,
       result.approaching_obstacle, result.reorient,
-      planner::angle_error(std::atan2(waypoints_[waypoint_].second - state_.y,
-                  waypoints_[waypoint_].first - state_.x) - state_.yaw),
+      planner::angle_error(std::atan2(tracking.target.second - state_.y,
+          tracking.target.first - state_.x) - state_.yaw),
       now().seconds() - odom_stamp_, now().seconds() - obstacle_stamp_, compute_ms);
   }
 

@@ -3,12 +3,80 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <functional>
 #include <limits>
 #include <utility>
 #include <vector>
 
 namespace path_tracking {
 using Path = std::vector<std::pair<double, double>>;
+
+struct TrackingTarget {
+  std::size_t waypoint{0}, target_index{0};
+  std::pair<double, double> projection, target;
+  double lookahead{0.35};
+};
+
+inline TrackingTarget prune_lookahead(
+  const Path & path, std::size_t current, double x, double y, double velocity,
+  const std::function<bool(const std::pair<double, double> &)> & reachable) {
+  TrackingTarget result;
+  if (path.empty()) return result;
+  current = std::min(current, path.size() - 1);
+  result.waypoint = result.target_index = current;
+  result.projection = result.target = path[current];
+  result.lookahead = std::clamp(0.35 + std::abs(velocity) * 1.2, 0.35, 0.80);
+  if (path.size() == 1) return result;
+  const std::size_t first = current > 0 ? current - 1 : 0;
+  const std::size_t end = std::min(path.size() - 1, current + 25);
+  std::size_t segment = first;
+  bool found = false;
+  double nearest = std::numeric_limits<double>::infinity();
+  for (std::size_t index = first; index < end; ++index) {
+    const double delta_x = path[index + 1].first - path[index].first;
+    const double delta_y = path[index + 1].second - path[index].second;
+    const double length_squared = delta_x * delta_x + delta_y * delta_y;
+    const double fraction = length_squared > 0.0 ? std::clamp(
+      ((x - path[index].first) * delta_x + (y - path[index].second) * delta_y) / length_squared, 0.0, 1.0) : 0.0;
+    const std::pair<double, double> projected{
+      path[index].first + fraction * delta_x, path[index].second + fraction * delta_y};
+    const double distance = std::hypot(projected.first - x, projected.second - y);
+    if (distance >= nearest || !reachable(projected)) continue;
+    nearest = distance;
+    found = true;
+    segment = index;
+    result.projection = projected;
+    result.waypoint = std::max(current, index + (fraction > 1e-9 ? 1 : 0));
+  }
+  if (!found) return result;
+  const auto along_path = [&](double remaining) {
+    auto start = result.projection;
+    for (std::size_t index = segment + 1; index < path.size(); ++index) {
+      const double delta_x = path[index].first - start.first;
+      const double delta_y = path[index].second - start.second;
+      const double length = std::hypot(delta_x, delta_y);
+      if (length > 0.0 && remaining < length) {
+        return std::make_pair(std::pair<double, double>{start.first + remaining / length * delta_x,
+                                                       start.second + remaining / length * delta_y}, index);
+      }
+      remaining -= length;
+      start = path[index];
+    }
+    return std::make_pair(path.back(), path.size() - 1);
+  };
+  for (double lookahead = result.lookahead; lookahead >= 0.05; lookahead *= 0.5) {
+    const auto candidate = along_path(lookahead);
+    if (!reachable(candidate.first)) continue;
+    result.target = candidate.first;
+    result.target_index = candidate.second;
+    result.lookahead = lookahead;
+    return result;
+  }
+  result.target = result.projection;
+  result.target_index = result.waypoint;
+  result.lookahead = 0.0;
+  return result;
+}
 
 inline double distance_to_path(const Path & path, std::size_t first, std::size_t last,
                                double x, double y) {

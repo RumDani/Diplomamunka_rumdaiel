@@ -76,5 +76,26 @@ int main() {
         "A crossing obstacle must still be detected");
       require(!path_tracking::collision_course(0.5, 0.0, 0.0, 0.0, 0.34, 2.0),
         "Constant safe separation is not a closing threat");
+      path_tracking::Path dense;
+      for (int index = 0; index <= 30; ++index) dense.emplace_back(index * 0.2, 0.0);
+      const auto reachable = [](const std::pair<double, double> &) { return true; };
+      const auto pruned = path_tracking::prune_lookahead(dense, 1, 1.1, 0.4, 0.0, reachable);
+      require(pruned.waypoint == 6, "Prune multiple passed points after a detour");
+      near(pruned.projection.first, 1.1, "Project onto the nearest forward segment");
+      near(pruned.target.first, 1.45, "Look ahead along arc length from the projection");
+      const auto faster = path_tracking::prune_lookahead(dense, 1, 1.1, 0.4, 0.25, reachable);
+      near(faster.lookahead, 0.65, "Increase lookahead with actual TurtleBot speeds");
+      near(faster.target.first, 1.75, "Move the DWA target forward with speed");
+      require(path_tracking::prune_lookahead(dense, 8, 1.1, 0.4, 0.0, reachable).waypoint >= 8,
+        "Never move the pruning index backward");
+      const auto obstructed = path_tracking::prune_lookahead(dense, 1, 1.1, 0.4, 0.25,
+        [](const std::pair<double, double> & point) { return point.first <= 1.7; });
+      near(obstructed.lookahead, 0.325, "Shorten a blocked lookahead connector");
+      near(obstructed.target.first, 1.425, "Use only a reachable forward target");
+      const auto blocked = path_tracking::prune_lookahead(dense, 1, 1.1, 0.4, 0.0,
+        [](const std::pair<double, double> &) { return false; });
+      require(blocked.waypoint == 1, "Do not prune across an unreachable connector");
+      const auto finish = path_tracking::prune_lookahead(dense, 29, 5.95, 0.0, 0.25, reachable);
+      require(finish.target == dense.back(), "Clamp lookahead to the final goal");
       std::cout << "Path tracking regression checks passed\n";
 }

@@ -26,8 +26,11 @@ A snapshot a követett forrás-, konfigurációs, csomagolási és tesztfájlok 
 - Az eredeti Pythonhoz képest tudatos fizikai eltérés: a kerékminták nem léphetik túl a kerékhatárt, míg a NumPy arange végpontja túlcsúszhatott. A C++ és Python numerikus azonosságát nem ellenőriztük; azonos adatokon összehasonlítás szükséges.
 - Legújabb szimulációs hangolás: a szembejövő `moving_obstacle_2` pályája y=2,1 m helyett y=1,7 m. A y=2,4 m-nél kezdődő vízszintes fal és a 0,18 m sugarú akadály közti felületi rés így 0,12 m helyett 0,52 m. A falak változatlanok. Az aktív Gazebo-segédnode szembejövő akadálysebessége 0,25-ről 0,26 m/s-ra nőtt, tehát 4%-kal gyorsabb.
 - Legújabb DWA-hangolás: a teljes predikció alatt várható legkisebb, mozgó akadályhoz tartozó ráhagyáson felüli távolság külön pontszámot kap; 0 és 0,6 m között lineárisan nő, felette telítődik. A `dynamic_clearance_weight` ROS/launch-paraméter alapértéke 4,0. A mozgó akadállyal előre jelzett ütközés kizárja a jelöltet, nulla robotsebességnél is; a statikus fékút-szűrés, waypointkövetés és az eredeti három pontszám megmarad. Ez célzott fizikai hangolás, nem numerikusan azonos Python-port. Az új hangolás fizikai eredményessége még nem igazolt.
-- A 360 fokos, 3 méteres LiDAR-ellenőrzés megmarad. A célfüggvényben ismét a `6a38f98` változat méter alapú akadály-ívhossz pontszáma szerepel; a 10-zel osztott normalizálást visszavontuk. Ezért a pontszámok eltérő skálájának ismert kockázata jelenleg fennmarad. A `DIAG_CONFIG` jelölése `schema=cpp-dwa-3 lidar_fov=360`.
+- A 360 fokos, 3 méteres LiDAR-ellenőrzés megmarad. A célfüggvényben ismét a `6a38f98` változat méter alapú akadály-ívhossz pontszáma szerepel; a 10-zel osztott normalizálást visszavontuk. Ezért a pontszámok eltérő skálájának ismert kockázata jelenleg fennmarad. A `DIAG_CONFIG` jelölése `schema=cpp-dwa-4 lidar_fov=360 pruning=25`.
 - Szűkített visszatérés új célpont nélkül: először a mozgó akadályok és a robot aktuális sebességének egyenletes továbbhaladásából várható ütközési veszélyt nézzük a predikciós horizonton. Ilyen veszélynél nincs waypoint-irányhibából eredő sebességkorlátozás, a korábbi DWA-pontozás választhat kitérőt. Külön lassítás/helyben forduló minta csak 90 foknál nagyobb waypoint-irányhibánál és ilyen veszély hiányában van. A fékezési korlát és minden jelölt ütközésszűrése megmarad, nincs kikényszerített előremenet. A globális útvonal és a waypointok sorrendje változatlan. Új naplómezők: `avoidance_priority`, `reorient`, továbbá a radiánban mért `goal_heading_error`.
+- Dinamikus pruning és lookahead már aktív: a `path_tracking::prune_lookahead` a jelenlegi waypoint előtti szakasztól legfeljebb 25 waypointtal előre keres elérhető, legközelebbi szakaszprojekciót. Az aktív index nem lép vissza, és egy ciklusban több elhagyott pontot is kihagyhat. A DWA célja a projekciótól előrefelé, a megmaradt pálya ívhosszán kijelölt pont; nem külön kézzel választott kerülőcél. A névleges lookahead 0,35 m plusz a sebesség abszolút értékének 1,2-szerese, legfeljebb 0,80 m. Például állva 0,35 m, 0,25 m/s-nál 0,65 m. Az eredeti Python előretekintési segédfüggvényétől ez eltér, hogy a lassabb fizikai robot sebessége is ténylegesen befolyásolja a távolságot.
+- Pruning-biztonság: a robot és a projekció, illetve a lookahead-cél közti egyenes összeköttetést az inflált térképen ellenőrizzük; falon vagy ismeretlen cellán át nem választunk új visszacsatlakozást. Blokkolt lookahead esetén a távolság felezhető, 0,05 m-ig vizsgálva, végül az elérhető projekció használható. Ha nincs elérhető projekció, nem történik pruning, az addigi waypoint marad; a DWA ütközésszűrése ekkor is aktív. A mozgó akadályok vizsgálata továbbra is a DWA feladata. A globális út és a waypointlista nem változik. Lejárt számításnál a pruning indexét az adapter visszaállítja.
+- Új pruning-naplómezők: `pruned`, `lookahead`, `target_index`; a `target` és `goal_heading_error` már a tényleges lookahead-célra vonatkozik. A meglévő `test_path_tracking.cpp` új esetei több pont elhagyását, monotonitást, sebességfüggést, blokkolt összeköttetést és végcélra korlátozást fednek le. Ezeket a felhasználó kérésének megfelelően nem futtattuk; helyi C++/ROS build és Gazebo-próba sem történt.
 - A LiDAR-illesztés visszaállt a `6a38f98` állapotra: közeli felületi pontok mediáneltolása, legalább két egyezés, az eredeti sebességsimítás. A kölcsönös párosítást, 50%-os átfedési küszöböt és a sebességtartást visszavontuk. A visszaállítás fájltartalmát Gittel összehasonlítottuk. A zajos becslések ismert kockázata fennmarad; ennek külön vizsgálatához friss futási adatok szükségesek.
 - A C++ adapter mért keréksebességből indul, pontos szenzoridőbélyeghez kér TF-et, késő transzformációhoz korlátos üzenetsorokat tart, az akadályokat a robotállapot idejére igazítja. Friss adatok és számítási határidő nélkül megáll. Ugyanabban a map koordinátakeretben érkező új térkép nem indít új globális tervezést.
 - A fizikai illesztés bemenete nem a Matplotlib pontos akadálymodellje: LiDAR-felületi pontok, becsült akadálysebesség, kerék-odometria és késleltetett TF érkezik. A megállás okát friss `DIAG_CONTROL cpp`, `DIAG_LIDAR`, `DIAG_TF_CPP` adatokkal kell elkülöníteni; lehet elégtelen sebességbecslés, üres megengedett jelölthalmaz, célfüggvény vagy késleltetés. Az új javítások eredményessége még nincs futással igazolva.
@@ -5286,12 +5289,80 @@ int main(int argc, char ** argv) {
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <functional>
 #include <limits>
 #include <utility>
 #include <vector>
 
 namespace path_tracking {
 using Path = std::vector<std::pair<double, double>>;
+
+struct TrackingTarget {
+  std::size_t waypoint{0}, target_index{0};
+  std::pair<double, double> projection, target;
+  double lookahead{0.35};
+};
+
+inline TrackingTarget prune_lookahead(
+  const Path & path, std::size_t current, double x, double y, double velocity,
+  const std::function<bool(const std::pair<double, double> &)> & reachable) {
+  TrackingTarget result;
+  if (path.empty()) return result;
+  current = std::min(current, path.size() - 1);
+  result.waypoint = result.target_index = current;
+  result.projection = result.target = path[current];
+  result.lookahead = std::clamp(0.35 + std::abs(velocity) * 1.2, 0.35, 0.80);
+  if (path.size() == 1) return result;
+  const std::size_t first = current > 0 ? current - 1 : 0;
+  const std::size_t end = std::min(path.size() - 1, current + 25);
+  std::size_t segment = first;
+  bool found = false;
+  double nearest = std::numeric_limits<double>::infinity();
+  for (std::size_t index = first; index < end; ++index) {
+    const double delta_x = path[index + 1].first - path[index].first;
+    const double delta_y = path[index + 1].second - path[index].second;
+    const double length_squared = delta_x * delta_x + delta_y * delta_y;
+    const double fraction = length_squared > 0.0 ? std::clamp(
+      ((x - path[index].first) * delta_x + (y - path[index].second) * delta_y) / length_squared, 0.0, 1.0) : 0.0;
+    const std::pair<double, double> projected{
+      path[index].first + fraction * delta_x, path[index].second + fraction * delta_y};
+    const double distance = std::hypot(projected.first - x, projected.second - y);
+    if (distance >= nearest || !reachable(projected)) continue;
+    nearest = distance;
+    found = true;
+    segment = index;
+    result.projection = projected;
+    result.waypoint = std::max(current, index + (fraction > 1e-9 ? 1 : 0));
+  }
+  if (!found) return result;
+  const auto along_path = [&](double remaining) {
+    auto start = result.projection;
+    for (std::size_t index = segment + 1; index < path.size(); ++index) {
+      const double delta_x = path[index].first - start.first;
+      const double delta_y = path[index].second - start.second;
+      const double length = std::hypot(delta_x, delta_y);
+      if (length > 0.0 && remaining < length) {
+        return std::make_pair(std::pair<double, double>{start.first + remaining / length * delta_x,
+                                                       start.second + remaining / length * delta_y}, index);
+      }
+      remaining -= length;
+      start = path[index];
+    }
+    return std::make_pair(path.back(), path.size() - 1);
+  };
+  for (double lookahead = result.lookahead; lookahead >= 0.05; lookahead *= 0.5) {
+    const auto candidate = along_path(lookahead);
+    if (!reachable(candidate.first)) continue;
+    result.target = candidate.first;
+    result.target_index = candidate.second;
+    result.lookahead = lookahead;
+    return result;
+  }
+  result.target = result.projection;
+  result.target_index = result.waypoint;
+  result.lookahead = 0.0;
+  return result;
+}
 
 inline double distance_to_path(const Path & path, std::size_t first, std::size_t last,
                                double x, double y) {
@@ -5450,7 +5521,7 @@ public:
     timer_ = rclcpp::create_timer(this, get_clock(), rclcpp::Duration::from_seconds(config_.dt),
                                  [this]() { control(); });
     RCLCPP_INFO(get_logger(),
-      "DIAG_CONFIG backend=cpp-python-reference schema=cpp-dwa-3 lidar_fov=360 dt=%.3f horizon=%.3f radius=%.3f "
+      "DIAG_CONFIG backend=cpp-python-reference schema=cpp-dwa-4 lidar_fov=360 pruning=25 dt=%.3f horizon=%.3f radius=%.3f "
       "half_axle=%.4f wheel_max=%.3f weights=(%.1f,%.1f,%.1f) dynamic_clearance_weight=%.1f",
       config_.dt, config_.predict_time, config_.radius, config_.half_axle,
       config_.wheel_max, config_.alpha, config_.beta, config_.gamma, config_.dynamic_clearance_weight);
@@ -5648,22 +5719,20 @@ private:
     const double tolerance = std::max(0.05, std::min(0.2, goal_distance * 0.2));
     if (goal_distance <= tolerance) { active_ = false; stop("finished"); return; }
     const auto previous_waypoint = waypoint_;
-    if (waypoint_ + 1 < waypoints_.size()) {
-      const auto & current = waypoints_[waypoint_];
-      const auto & next = waypoints_[waypoint_ + 1];
-      const bool passed = (current.first - state_.x) * (next.first - current.first) +
-        (current.second - state_.y) * (next.second - current.second) < 0.0;
-      if ((std::hypot(current.first - state_.x, current.second - state_.y) <= tolerance || passed) &&
-          std::abs(state_.velocity) <= 0.3) ++waypoint_;
-    }
+    const auto tracking = path_tracking::prune_lookahead(
+      waypoints_, waypoint_, state_.x, state_.y, state_.velocity,
+      [this](const planner::Point & point) {
+        return grid_.safe(planner::Path{{state_.x, state_.y}, point});
+      });
+    waypoint_ = tracking.waypoint;
     auto obstacles = obstacles_;
     for (auto & obstacle : obstacles) {
       obstacle.x += obstacle.vx * (odom_stamp_ - obstacle_stamp_);
       obstacle.y += obstacle.vy * (odom_stamp_ - obstacle_stamp_);
     }
     const auto start = std::chrono::steady_clock::now();
-    const auto result = planner::optimise(config_, state_, waypoints_[waypoint_],
-                                          waypoint_ + 1 == waypoints_.size(), obstacles);
+    const auto result = planner::optimise(config_, state_, tracking.target,
+                        tracking.target == waypoints_.back(), obstacles);
     const double compute_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
     if (now().seconds() - std::min(odom_stamp_, obstacle_stamp_) > std::max(0.5, 3.0 * config_.dt)) {
       waypoint_ = previous_waypoint;
@@ -5681,15 +5750,16 @@ private:
     active_pub_->publish(status);
     RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000,
       "DIAG_CONTROL cpp reason=%s pose=(%.3f,%.3f,%.3f) measured=(%.3f,%.3f) "
-      "waypoint=%zu/%zu target=(%.3f,%.3f) observed=%zu pairs=%zu admissible=%zu "
+      "waypoint=%zu/%zu pruned=%zu lookahead=%.3f target_index=%zu target=(%.3f,%.3f) observed=%zu pairs=%zu admissible=%zu "
       "cmd=(%.3f,%.3f) avoidance_priority=%d reorient=%d goal_heading_error=%.3f odom_age=%.3f obstacle_age=%.3f compute_ms=%.2f",
       result.found ? "command" : "braking_no_pair", state_.x, state_.y, state_.yaw,
-      state_.velocity, state_.angular, waypoint_, waypoints_.size(), waypoints_[waypoint_].first,
-      waypoints_[waypoint_].second, obstacles.size(), result.candidates, result.admissible,
+      state_.velocity, state_.angular, waypoint_, waypoints_.size(), waypoint_ - previous_waypoint,
+      tracking.lookahead, tracking.target_index, tracking.target.first, tracking.target.second,
+      obstacles.size(), result.candidates, result.admissible,
       command.linear.x, command.angular.z,
       result.approaching_obstacle, result.reorient,
-      planner::angle_error(std::atan2(waypoints_[waypoint_].second - state_.y,
-                  waypoints_[waypoint_].first - state_.x) - state_.yaw),
+      planner::angle_error(std::atan2(tracking.target.second - state_.y,
+          tracking.target.first - state_.x) - state_.yaw),
       now().seconds() - odom_stamp_, now().seconds() - obstacle_stamp_, compute_ms);
   }
 
@@ -6135,6 +6205,27 @@ int main() {
         "A crossing obstacle must still be detected");
       require(!path_tracking::collision_course(0.5, 0.0, 0.0, 0.0, 0.34, 2.0),
         "Constant safe separation is not a closing threat");
+      path_tracking::Path dense;
+      for (int index = 0; index <= 30; ++index) dense.emplace_back(index * 0.2, 0.0);
+      const auto reachable = [](const std::pair<double, double> &) { return true; };
+      const auto pruned = path_tracking::prune_lookahead(dense, 1, 1.1, 0.4, 0.0, reachable);
+      require(pruned.waypoint == 6, "Prune multiple passed points after a detour");
+      near(pruned.projection.first, 1.1, "Project onto the nearest forward segment");
+      near(pruned.target.first, 1.45, "Look ahead along arc length from the projection");
+      const auto faster = path_tracking::prune_lookahead(dense, 1, 1.1, 0.4, 0.25, reachable);
+      near(faster.lookahead, 0.65, "Increase lookahead with actual TurtleBot speeds");
+      near(faster.target.first, 1.75, "Move the DWA target forward with speed");
+      require(path_tracking::prune_lookahead(dense, 8, 1.1, 0.4, 0.0, reachable).waypoint >= 8,
+        "Never move the pruning index backward");
+      const auto obstructed = path_tracking::prune_lookahead(dense, 1, 1.1, 0.4, 0.25,
+        [](const std::pair<double, double> & point) { return point.first <= 1.7; });
+      near(obstructed.lookahead, 0.325, "Shorten a blocked lookahead connector");
+      near(obstructed.target.first, 1.425, "Use only a reachable forward target");
+      const auto blocked = path_tracking::prune_lookahead(dense, 1, 1.1, 0.4, 0.0,
+        [](const std::pair<double, double> &) { return false; });
+      require(blocked.waypoint == 1, "Do not prune across an unreachable connector");
+      const auto finish = path_tracking::prune_lookahead(dense, 29, 5.95, 0.0, 0.25, reachable);
+      require(finish.target == dense.back(), "Clamp lookahead to the final goal");
       std::cout << "Path tracking regression checks passed\n";
 }
 ~~~~~
