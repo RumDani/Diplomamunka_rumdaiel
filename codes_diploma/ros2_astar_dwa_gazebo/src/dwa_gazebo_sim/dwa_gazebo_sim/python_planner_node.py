@@ -4,6 +4,8 @@ import copy
 import math
 import time
 import traceback
+from collections import deque
+from threading import Lock
 
 import rclpy
 from geometry_msgs.msg import PoseStamped, Twist
@@ -81,6 +83,11 @@ class PythonPlannerNode(Node):
         self.odom_stamp = self.obstacle_stamp = None
         self.obstacles = []
         self.pending_tick = None
+        self.sensor_lock = Lock()
+        self.pending_odometry = deque(maxlen=50)
+        self.pending_obstacles = deque(maxlen=10)
+        self.pending_scans = deque(maxlen=10)
+        self.last_tf_queue_log = -math.inf
         self.control_group = MutuallyExclusiveCallbackGroup()
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
@@ -92,17 +99,18 @@ class PythonPlannerNode(Node):
         self.marker_pub = self.create_publisher(MarkerArray, "/astar_dwa_markers", 10)
         self.active_pub = self.create_publisher(Bool, "/controller_active", latched)
         self.done_pub = self.create_publisher(Header, "/control_done", 10)
-        self.create_subscription(Odometry, "/odom", self.odom, 10)
+        self.create_subscription(Odometry, "/odom", self.queue_odometry, 10)
         self.create_subscription(OccupancyGrid, "/map", self.map_received, latched,
                      callback_group=self.control_group)
         self.create_subscription(PoseStamped, "/goal_pose", self.goal, 10,
                      callback_group=self.control_group)
-        self.create_subscription(PointCloud2, "/tracked_obstacles", self.tracked, 10)
-        self.create_subscription(LaserScan, "/scan", self.scan, qos_profile_sensor_data)
+        self.create_subscription(PointCloud2, "/tracked_obstacles", self.queue_obstacles, 10)
+        self.create_subscription(LaserScan, "/scan", self.queue_scan, qos_profile_sensor_data)
         self.create_subscription(Header, "/control_tick", self.control_tick, 10,
                      callback_group=self.control_group)
         self.create_timer(self.config.dt, self.timer, callback_group=self.control_group)
         self.display_clock = Clock(clock_type=ClockType.STEADY_TIME)
+        self.create_timer(0.02, self.process_sensor_inputs, clock=self.display_clock)
         self.create_timer(0.5, self.publish_scene, clock=self.display_clock,
                   callback_group=self.control_group)
         if self.declare_parameter("gazebo_path_debug", False).value:
@@ -162,12 +170,57 @@ class PythonPlannerNode(Node):
             f"pairs={len(result.get('all_pairs', []))} admissible={len(result.get('safe_pairs', []))} "
             f"cmd=({linear:.3f},{angular:.3f}) compute_ms={compute_ms:.1f}")
 
-    def odom(self, message):
+    def queue_odometry(self, message):
+        self.pending_odometry.append(message)
+
+    def queue_obstacles(self, message):
+        if self.obstacle_source == "tracked":
+            self.pending_obstacles.append(message)
+
+    def queue_scan(self, message):
+        if self.obstacle_source == "scan":
+            self.pending_scans.append(message)
+
+    def process_sensor_inputs(self):
         if not self.map_ready:
             return
+        now = self.get_clock().now().nanoseconds * 1e-9
+        maximum_age = max(0.5, 3 * self.config.dt)
+        diagnostics = []
+        for name, pending, process in (("odom", self.pending_odometry, self.odom),
+                                       ("tracked", self.pending_obstacles, self.tracked),
+                                       ("scan", self.pending_scans, self.scan)):
+            messages = tuple(pending)
+            processed_stamp = None
+            for message in reversed(messages):
+                stamp = self.seconds(message.header.stamp)
+                if not 0 <= now - stamp <= maximum_age:
+                    continue
+                source = message.header.frame_id
+                if source != self.map_frame and not self.tf_buffer.can_transform(
+                        self.map_frame, source, Time.from_msg(message.header.stamp)):
+                    continue
+                if process(message):
+                    processed_stamp = stamp
+                    break
+            retained = [message for message in messages
+                        if -maximum_age <= now - self.seconds(message.header.stamp) <= maximum_age and
+                        (processed_stamp is None or self.seconds(message.header.stamp) > processed_stamp)]
+            pending.clear()
+            pending.extend(retained)
+            diagnostics.append(f"{name}:pending={len(pending)},processed_stamp={processed_stamp}")
+        wall_time = time.monotonic()
+        if wall_time - self.last_tf_queue_log >= 2.0:
+            self.last_tf_queue_log = wall_time
+            self.get_logger().info(f"DIAG_TF_QUEUE sim_t={now:.3f} streams={diagnostics}")
+        self.run_pending_tick()
+
+    def odom(self, message):
+        if not self.map_ready:
+            return False
         transform = self.frame_transform(message.header.frame_id, message.header.stamp)
         if transform is None:
-            return
+            return False
         offset_x, offset_y, offset_yaw = transform
         orientation = message.pose.pose.orientation
         x, y = message.pose.pose.position.x, message.pose.pose.position.y
@@ -182,8 +235,10 @@ class PythonPlannerNode(Node):
         state.w_L = (state.v - self.config.b * state.w) / self.config.r_kerek
         state.w_R = (state.v + self.config.b * state.w) / self.config.r_kerek
         state.odom_stamp = self.seconds(message.header.stamp)
-        self.state = state
-        self.odom_stamp = state.odom_stamp
+        with self.sensor_lock:
+            self.state = state
+            self.odom_stamp = state.odom_stamp
+        return True
 
     @staticmethod
     def seconds(stamp):
@@ -329,32 +384,34 @@ class PythonPlannerNode(Node):
 
     def tracked(self, message):
         if self.obstacle_source != "tracked" or not self.map_ready:
-            return
+            return False
         transform = self.frame_transform(message.header.frame_id, message.header.stamp)
         if transform is None:
-            return
+            return False
         offset_x, offset_y, yaw = transform
         cosine, sine = math.cos(yaw), math.sin(yaw)
-        self.obstacles = [Obstacle(offset_x + cosine * float(row[0]) - sine * float(row[1]),
+        obstacles = [Obstacle(offset_x + cosine * float(row[0]) - sine * float(row[1]),
                                    offset_y + sine * float(row[0]) + cosine * float(row[1]),
                                    radius=float(row[2]),
                                    vx=cosine * float(row[3]) - sine * float(row[4]),
                                    vy=sine * float(row[3]) + cosine * float(row[4]))
                           for row in point_cloud2.read_points(
                               message, field_names=("x", "y", "radius", "vx", "vy"), skip_nans=True)]
-        self.obstacle_stamp = self.seconds(message.header.stamp)
-        self.run_pending_tick()
+        with self.sensor_lock:
+            self.obstacles = obstacles
+            self.obstacle_stamp = self.seconds(message.header.stamp)
+        return True
 
     def scan(self, message):
         if self.obstacle_source != "scan" or self.odom_stamp is None:
-            return
+            return False
         try:
             transform = self.tf_buffer.lookup_transform(
                 self.map_frame, message.header.frame_id, Time.from_msg(message.header.stamp)
             ).transform
         except TransformException:
             self.get_logger().warning("Waiting for scan-to-map TF.", throttle_duration_sec=2.0)
-            return
+            return False
         rotation = transform.rotation
         sensor_yaw = math.atan2(2 * (rotation.w * rotation.z + rotation.x * rotation.y),
                                 1 - 2 * (rotation.y ** 2 + rotation.z ** 2))
@@ -368,8 +425,10 @@ class PythonPlannerNode(Node):
             if any(math.hypot(x - wall.x, y - wall.y) < wall.radius + 0.05 for wall in self.statics):
                 continue
             obstacles.append(Obstacle(x, y, radius=0.0))
-        self.obstacles = obstacles
-        self.obstacle_stamp = self.seconds(message.header.stamp)
+        with self.sensor_lock:
+            self.obstacles = obstacles
+            self.obstacle_stamp = self.seconds(message.header.stamp)
+        return True
 
     def control_tick(self, message):
         if self.external_clock:
@@ -395,28 +454,30 @@ class PythonPlannerNode(Node):
         self.control_sequence += 1
         compute_start = time.perf_counter()
         now = self.get_clock().now().nanoseconds * 1e-9
-        if not self.active or self.odom_stamp is None or self.obstacle_stamp is None:
+        with self.sensor_lock:
+            state = copy.copy(self.state)
+            observed = list(self.obstacles)
+            odom_stamp = self.odom_stamp
+            obstacle_stamp = self.obstacle_stamp
+        if not self.active or odom_stamp is None or obstacle_stamp is None:
             self.cmd_pub.publish(Twist())
             if not self.map_ready:
                 reason = "waiting_map"
-            elif self.odom_stamp is None:
+            elif odom_stamp is None:
                 reason = "waiting_odometry"
-            elif self.obstacle_stamp is None:
+            elif obstacle_stamp is None:
                 reason = "waiting_obstacles"
             else:
                 reason = "inactive"
-            self.log_control(reason)
+            self.log_control(reason, state=state, observed=observed, obstacle_stamp=obstacle_stamp)
             return
-        if now - min(self.odom_stamp, self.obstacle_stamp) > max(0.5, 3 * self.config.dt):
+        if now - min(odom_stamp, obstacle_stamp) > max(0.5, 3 * self.config.dt):
             self.cmd_pub.publish(Twist())
             self.get_logger().warning("Stale odometry/obstacles: stopping.", throttle_duration_sec=2.0)
-            self.log_control("stale_input")
+            self.log_control("stale_input", state=state, observed=observed, obstacle_stamp=obstacle_stamp)
             return
         previous_waypoint = self.planner.waypoint_index
         try:
-            state = copy.copy(self.state)
-            observed = list(self.obstacles)
-            obstacle_stamp = self.obstacle_stamp
             sample_stamp = min(state.odom_stamp, obstacle_stamp)
             visible = []
             for obstacle in self.statics + observed:

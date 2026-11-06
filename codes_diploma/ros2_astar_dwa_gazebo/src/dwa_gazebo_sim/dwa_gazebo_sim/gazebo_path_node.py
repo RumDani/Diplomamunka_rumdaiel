@@ -63,6 +63,8 @@ class GazeboPathDisplay:
         self.latest = self.drawn = self.pending = None
         self.drawn_source = self.pending_source = None
         self.model_pose = self.pending_model_pose = None
+        self.fixed_alignment = None
+        self.alignment_frame = None
         self.path_frame = None
         self.odometry = deque(maxlen=200)
         self.ground_truth = None
@@ -92,6 +94,13 @@ class GazeboPathDisplay:
     def world_points(self):
         if not self.latest:
             return self.latest
+        if self.fixed_alignment is not None and self.alignment_frame == self.path_frame:
+            self.model_pose = self.fixed_alignment
+            offset_x, offset_y, yaw = self.fixed_alignment
+            cosine, sine = math.cos(yaw), math.sin(yaw)
+            return tuple((offset_x + cosine * point_x - sine * point_y,
+                          offset_y + sine * point_x + cosine * point_y)
+                         for point_x, point_y in self.latest)
         if self.ground_truth is None or not self.odometry or not self.path_frame:
             self.node.get_logger().warning(
                 "DIAG_PATH reason=waiting_alignment", throttle_duration_sec=5.0)
@@ -135,6 +144,11 @@ class GazeboPathDisplay:
         self.model_pose = (anchors[0][0], anchors[0][1],
                            math.atan2(anchors[1][1] - anchors[0][1],
                                       anchors[1][0] - anchors[0][0]))
+        self.fixed_alignment = self.model_pose
+        self.alignment_frame = self.path_frame
+        self.node.get_logger().info(
+            f"DIAG_PATH reason=alignment_locked frame={self.path_frame} "
+            f"world_transform={self.fixed_alignment} navigation_feedback=false")
         return projected
 
     def tick(self):

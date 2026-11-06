@@ -38,6 +38,12 @@ class GazeboSimulationAdapter:
                   for index, obstacle in enumerate(self.obstacles)
                   if crossing_enabled or index == 1]
         self.obstacles = [obstacle for _, obstacle in obstacle_specs]
+        self.obstacle_names = [name for name, _ in obstacle_specs]
+        self.oncoming_start_x = float(node.declare_parameter("oncoming_start_x", 2.4).value)
+        if not math.isfinite(self.oncoming_start_x):
+            raise ValueError("oncoming_start_x must be finite")
+        self.robot_odom_x = None
+        self.oncoming_started = False
         self.active = False
         self.last_time = node.get_clock().now().nanoseconds * 1e-9
         self.odom_pub = node.create_publisher(Odometry, "/odom", 10)
@@ -67,7 +73,8 @@ class GazeboSimulationAdapter:
             "simulation-only adapter; velocity-driven obstacles; physical cmd_vel control")
         node.get_logger().info(
             f"DIAG_SCENARIO crossing_enabled={crossing_enabled} "
-            f"moving_models={[name for name, _ in obstacle_specs]}")
+            f"moving_models={[name for name, _ in obstacle_specs]} "
+            f"oncoming_start_x={self.oncoming_start_x}")
 
     def set_active(self, message):
         self.active = message.data
@@ -104,6 +111,7 @@ class GazeboSimulationAdapter:
         mapped.child_frame_id = message.child_frame_id or self.odom_child
         mapped.pose.pose.position.x += self.start[0]
         mapped.pose.pose.position.y += self.start[1]
+        self.robot_odom_x = mapped.pose.pose.position.x
         self.odom_pub.publish(mapped)
         transform = TransformStamped()
         transform.header, transform.child_frame_id = mapped.header, mapped.child_frame_id
@@ -144,12 +152,18 @@ class GazeboSimulationAdapter:
     def tick(self):
         now = self.node.get_clock().now().nanoseconds * 1e-9
         dt, self.last_time = max(0.0, now - self.last_time), now
-        if self.active:
-            for obstacle in self.obstacles:
+        if (self.active and not self.oncoming_started and self.robot_odom_x is not None and
+                self.robot_odom_x >= self.oncoming_start_x):
+            self.oncoming_started = True
+            self.node.get_logger().info(
+                f"DIAG_SCENARIO event=oncoming_started sim_t={now:.3f} "
+                f"robot_odom_x={self.robot_odom_x:.3f} threshold={self.oncoming_start_x}")
+        for name, obstacle, publisher in zip(self.obstacle_names, self.obstacles, self.obstacle_commands):
+            moving = self.active and (name != "moving_obstacle_2" or self.oncoming_started)
+            if moving:
                 obstacle.move(dt)
-        for obstacle, publisher in zip(self.obstacles, self.obstacle_commands):
             command = Twist()
-            if self.active:
+            if moving:
                 command.linear.x, command.linear.y = obstacle.vx, obstacle.vy
             publisher.publish(command)
 
