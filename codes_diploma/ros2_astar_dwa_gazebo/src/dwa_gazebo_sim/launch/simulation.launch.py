@@ -176,7 +176,7 @@ def generate_launch_description():
                       description="Include the crossing obstacle; false keeps only the oncoming obstacle"),
         DeclareLaunchArgument("enable_camera", default_value="false", choices=["true", "false"],
                       description="Enable unused camera rendering in the runtime TurtleBot model"),
-        DeclareLaunchArgument("oncoming_start_x", default_value="2.4",
+        DeclareLaunchArgument("oncoming_start_x", default_value="0.0",
                       description="Start the oncoming obstacle after the robot reaches this odom x in metres"),
         DeclareLaunchArgument("map_resolution", default_value="0.10",
                       description="SLAM grid cell size in metres"),

@@ -39,7 +39,7 @@ class GazeboSimulationAdapter:
                   if crossing_enabled or index == 1]
         self.obstacles = [obstacle for _, obstacle in obstacle_specs]
         self.obstacle_names = [name for name, _ in obstacle_specs]
-        self.oncoming_start_x = float(node.declare_parameter("oncoming_start_x", 2.4).value)
+        self.oncoming_start_x = float(node.declare_parameter("oncoming_start_x", 0.0).value)
         if not math.isfinite(self.oncoming_start_x):
             raise ValueError("oncoming_start_x must be finite")
         self.robot_odom_x = None
@@ -159,7 +159,7 @@ class GazeboSimulationAdapter:
                 f"DIAG_SCENARIO event=oncoming_started sim_t={now:.3f} "
                 f"robot_odom_x={self.robot_odom_x:.3f} threshold={self.oncoming_start_x}")
         for name, obstacle, publisher in zip(self.obstacle_names, self.obstacles, self.obstacle_commands):
-            moving = self.active and (name != "moving_obstacle_2" or self.oncoming_started)
+            moving = self.oncoming_started if name == "moving_obstacle_2" else self.active
             if moving:
                 obstacle.move(dt)
             command = Twist()
