@@ -39,6 +39,9 @@ struct Command { double velocity{0.0}, angular{0.0}, left{0.0}, right{0.0}; };
 struct Result {
 	Command command;
 	std::size_t candidates{0}, admissible{0};
+	std::size_t rejected_velocity{0}, rejected_dynamic{0}, rejected_braking{0};
+	std::size_t rejected_dynamic_now{0};
+	std::size_t forward_pairs{0};
 	bool found{false};
 	bool reorient{false}, approaching_obstacle{false};
 };
@@ -71,6 +74,7 @@ struct Trajectory {
 	double distance{10.0};
 	double dynamic_clearance{std::numeric_limits<double>::infinity()};
 	bool dynamic_collision{false};
+	bool initial_dynamic_collision{false};
 };
 
 inline Trajectory trajectory_distance(const Config & config, const State & state,
@@ -90,6 +94,7 @@ inline Trajectory trajectory_distance(const Config & config, const State & state
 				if (result.distance == 10.0) result.distance = travelled;
 				if (moving) {
 					result.dynamic_collision = true;
+					result.initial_dynamic_collision = step == 0;
 					return result;
 				}
 			}
@@ -156,11 +161,22 @@ inline Result optimise(const Config & config, const State & state, Point goal,
 		for (double right : right_samples) {
 			++result.candidates;
 			const auto command = kinematics(left, right, config);
-			if (command.velocity < 0.0 || command.velocity > velocity_limit + 1e-9) continue;
+			if (command.velocity < 0.0 || command.velocity > velocity_limit + 1e-9) {
+				++result.rejected_velocity;
+				continue;
+			}
 			const auto trajectory = trajectory_distance(config, state, command, visible);
-			if (trajectory.dynamic_collision ||
-					command.velocity > std::sqrt(2.0 * config.acceleration * trajectory.distance)) continue;
+			if (trajectory.dynamic_collision) {
+				++result.rejected_dynamic;
+				if (trajectory.initial_dynamic_collision) ++result.rejected_dynamic_now;
+				continue;
+			}
+			if (command.velocity > std::sqrt(2.0 * config.acceleration * trajectory.distance)) {
+				++result.rejected_braking;
+				continue;
+			}
 			++result.admissible;
+			if (command.velocity > 0.01) ++result.forward_pairs;
 			State predicted = state;
 			for (std::size_t step = 0; step * config.dt < horizon; ++step) update(predicted, config, command);
 			const double heading = std::atan2(goal.second - predicted.y, goal.first - predicted.x);

@@ -79,7 +79,7 @@ public:
     timer_ = rclcpp::create_timer(this, get_clock(), rclcpp::Duration::from_seconds(config_.dt),
                                  [this]() { control(); });
     RCLCPP_INFO(get_logger(),
-      "DIAG_CONFIG backend=cpp-python-reference schema=cpp-dwa-4 lidar_fov=360 pruning=25 dt=%.3f horizon=%.3f radius=%.3f "
+      "DIAG_CONFIG backend=cpp-python-reference schema=cpp-dwa-5 lidar_fov=360 pruning=25 dt=%.3f horizon=%.3f radius=%.3f "
       "half_axle=%.4f wheel_max=%.3f weights=(%.1f,%.1f,%.1f) dynamic_clearance_weight=%.1f",
       config_.dt, config_.predict_time, config_.radius, config_.half_axle,
       config_.wheel_max, config_.alpha, config_.beta, config_.gamma, config_.dynamic_clearance_weight);
@@ -306,14 +306,24 @@ private:
     std_msgs::msg::Bool status;
     status.data = active_;
     active_pub_->publish(status);
+    std::size_t moving_points = 0;
+    double max_obstacle_speed = 0.0;
+    for (const auto & obstacle : obstacles) {
+      const double speed = std::hypot(obstacle.vx, obstacle.vy);
+      if (speed > 0.0) ++moving_points;
+      max_obstacle_speed = std::max(max_obstacle_speed, speed);
+    }
     RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000,
       "DIAG_CONTROL cpp reason=%s pose=(%.3f,%.3f,%.3f) measured=(%.3f,%.3f) "
       "waypoint=%zu/%zu pruned=%zu lookahead=%.3f target_index=%zu target=(%.3f,%.3f) observed=%zu pairs=%zu admissible=%zu "
+      "reject_velocity=%zu reject_dynamic=%zu reject_dynamic_now=%zu reject_braking=%zu forward_pairs=%zu moving_points=%zu max_obstacle_speed=%.3f "
       "cmd=(%.3f,%.3f) avoidance_priority=%d reorient=%d goal_heading_error=%.3f odom_age=%.3f obstacle_age=%.3f compute_ms=%.2f",
       result.found ? "command" : "braking_no_pair", state_.x, state_.y, state_.yaw,
       state_.velocity, state_.angular, waypoint_, waypoints_.size(), waypoint_ - previous_waypoint,
       tracking.lookahead, tracking.target_index, tracking.target.first, tracking.target.second,
       obstacles.size(), result.candidates, result.admissible,
+      result.rejected_velocity, result.rejected_dynamic, result.rejected_dynamic_now, result.rejected_braking,
+      result.forward_pairs, moving_points, max_obstacle_speed,
       command.linear.x, command.angular.z,
       result.approaching_obstacle, result.reorient,
       planner::angle_error(std::atan2(tracking.target.second - state_.y,

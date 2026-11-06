@@ -21,18 +21,20 @@ A snapshot a követett forrás-, konfigurációs, csomagolási és tesztfájlok 
 - Kiinduló, korábban pusholt állapot: `d8bfb61`, ág: `cpp-rethink`. Az alábbi snapshot már az ezt követő C++-átállást tartalmazza.
 - VÉGLEGES CÉL: az eredeti, Matplotlibben a felhasználó szerint jól működő Python `DWA+A.py` A* + DWA megvalósítás ötleteinek és döntési logikájának átültetése C++ / ROS 2 / fizikai Gazebo környezetbe. A felhasználó a szimulációban kizárólag C++ navigációs vezérlőt kér. A DWA válassza a kitérő mozgást, majd folytatódjon az eredeti waypointkövetés. Külön kézzel kijelölt oldalsó kerülőcél és új kerülési algoritmus nem kell, ilyen nincs az aktív C++ magban.
 - Az eredeti `robot.py`, `DWA.py`, `DWA+A.py`, `simulation.py`, az `astar_project` és a védett A* folyamatábra nem módosítható e javításokhoz. Csak a ROS/Gazebo integráció változzon. Teszteket csak kérésre kell indítani; a felhasználó másik gépen tesztel. Dokumentációs és ábrafrissítések a kódcsomag kivételével halasztottak.
-- Regressziós állapot: a `6a38f98` változatnál a felhasználó jobb kitérést, de hibás visszatérést jelzett. Az `eef1d43` csomag után teljes megállást és az akadály általi eltolást jelentett. Ehhez az új próbához friss napló nem érkezett, ezért a konkrét megállási ok nem bizonyított. A legújabb módosítás visszaveszi az általános ráfordulási sebességkorlátot, a pontozási normalizálást és a LiDAR-szigorítást. Teljes, sikeres kitérés-visszatérés-célbaérés még nincs igazolva.
+- Legújabb futási bizonyíték: a pruningos változatban a robot kb. t=18 s-nél a (3,032; 1,673) lokalizált pozíción megáll, `reason=braking_no_pair pairs=64 admissible=0 reorient=0` mellett. Ez nem a külön visszafordulási ág fékezése. A Gazebo tényleges pozíciója ezután x=3,02-ről kb. 0,66 m-re változik, miközben a kerék-odometria (2,882; 2,007) és a vezérlő pozíciója lényegében állandó. Ez az eltolás és az érzékelt állapot befagyásának erős bizonyítéka. A jelölteket kizáró konkrét szűrő a régi naplóban még nem különíthető el. Teljes, sikeres kitérés-visszatérés-célbaérés továbbra sincs igazolva.
 - A korábbi NumPy-backend és annak eltérő pontozási/kerülési próbálkozásai törölve. A C++ mag nem tartalmazza a régi C++ külön visszatérési üzemmódját és pályabüntetéseit sem. A LiDAR-segédfolyamat felületi pontillesztéses sebességbecslése megmaradt; pontossága nincs fizikai méréssel igazolva.
 - Az eredeti Pythonhoz képest tudatos fizikai eltérés: a kerékminták nem léphetik túl a kerékhatárt, míg a NumPy arange végpontja túlcsúszhatott. A C++ és Python numerikus azonosságát nem ellenőriztük; azonos adatokon összehasonlítás szükséges.
 - Legújabb szimulációs hangolás: a szembejövő `moving_obstacle_2` pályája y=2,1 m helyett y=1,7 m. A y=2,4 m-nél kezdődő vízszintes fal és a 0,18 m sugarú akadály közti felületi rés így 0,12 m helyett 0,52 m. A falak változatlanok. Az aktív Gazebo-segédnode szembejövő akadálysebessége 0,25-ről 0,26 m/s-ra nőtt, tehát 4%-kal gyorsabb.
 - Legújabb DWA-hangolás: a teljes predikció alatt várható legkisebb, mozgó akadályhoz tartozó ráhagyáson felüli távolság külön pontszámot kap; 0 és 0,6 m között lineárisan nő, felette telítődik. A `dynamic_clearance_weight` ROS/launch-paraméter alapértéke 4,0. A mozgó akadállyal előre jelzett ütközés kizárja a jelöltet, nulla robotsebességnél is; a statikus fékút-szűrés, waypointkövetés és az eredeti három pontszám megmarad. Ez célzott fizikai hangolás, nem numerikusan azonos Python-port. Az új hangolás fizikai eredményessége még nem igazolt.
-- A 360 fokos, 3 méteres LiDAR-ellenőrzés megmarad. A célfüggvényben ismét a `6a38f98` változat méter alapú akadály-ívhossz pontszáma szerepel; a 10-zel osztott normalizálást visszavontuk. Ezért a pontszámok eltérő skálájának ismert kockázata jelenleg fennmarad. A `DIAG_CONFIG` jelölése `schema=cpp-dwa-4 lidar_fov=360 pruning=25`.
+- A 360 fokos, 3 méteres LiDAR-ellenőrzés megmarad. A célfüggvényben ismét a `6a38f98` változat méter alapú akadály-ívhossz pontszáma szerepel; a 10-zel osztott normalizálást visszavontuk. Ezért a pontszámok eltérő skálájának ismert kockázata jelenleg fennmarad. A `DIAG_CONFIG` jelölése `schema=cpp-dwa-5 lidar_fov=360 pruning=25`.
 - Szűkített visszatérés új célpont nélkül: először a mozgó akadályok és a robot aktuális sebességének egyenletes továbbhaladásából várható ütközési veszélyt nézzük a predikciós horizonton. Ilyen veszélynél nincs waypoint-irányhibából eredő sebességkorlátozás, a korábbi DWA-pontozás választhat kitérőt. Külön lassítás/helyben forduló minta csak 90 foknál nagyobb waypoint-irányhibánál és ilyen veszély hiányában van. A fékezési korlát és minden jelölt ütközésszűrése megmarad, nincs kikényszerített előremenet. A globális útvonal és a waypointok sorrendje változatlan. Új naplómezők: `avoidance_priority`, `reorient`, továbbá a radiánban mért `goal_heading_error`.
 - Dinamikus pruning és lookahead már aktív: a `path_tracking::prune_lookahead` a jelenlegi waypoint előtti szakasztól legfeljebb 25 waypointtal előre keres elérhető, legközelebbi szakaszprojekciót. Az aktív index nem lép vissza, és egy ciklusban több elhagyott pontot is kihagyhat. A DWA célja a projekciótól előrefelé, a megmaradt pálya ívhosszán kijelölt pont; nem külön kézzel választott kerülőcél. A névleges lookahead 0,35 m plusz a sebesség abszolút értékének 1,2-szerese, legfeljebb 0,80 m. Például állva 0,35 m, 0,25 m/s-nál 0,65 m. Az eredeti Python előretekintési segédfüggvényétől ez eltér, hogy a lassabb fizikai robot sebessége is ténylegesen befolyásolja a távolságot.
 - Pruning-biztonság: a robot és a projekció, illetve a lookahead-cél közti egyenes összeköttetést az inflált térképen ellenőrizzük; falon vagy ismeretlen cellán át nem választunk új visszacsatlakozást. Blokkolt lookahead esetén a távolság felezhető, 0,05 m-ig vizsgálva, végül az elérhető projekció használható. Ha nincs elérhető projekció, nem történik pruning, az addigi waypoint marad; a DWA ütközésszűrése ekkor is aktív. A mozgó akadályok vizsgálata továbbra is a DWA feladata. A globális út és a waypointlista nem változik. Lejárt számításnál a pruning indexét az adapter visszaállítja.
 - Új pruning-naplómezők: `pruned`, `lookahead`, `target_index`; a `target` és `goal_heading_error` már a tényleges lookahead-célra vonatkozik. A meglévő `test_path_tracking.cpp` új esetei több pont elhagyását, monotonitást, sebességfüggést, blokkolt összeköttetést és végcélra korlátozást fednek le. Ezeket a felhasználó kérésének megfelelően nem futtattuk; helyi C++/ROS build és Gazebo-próba sem történt.
 - A LiDAR-illesztés visszaállt a `6a38f98` állapotra: közeli felületi pontok mediáneltolása, legalább két egyezés, az eredeti sebességsimítás. A kölcsönös párosítást, 50%-os átfedési küszöböt és a sebességtartást visszavontuk. A visszaállítás fájltartalmát Gittel összehasonlítottuk. A zajos becslések ismert kockázata fennmarad; ennek külön vizsgálatához friss futási adatok szükségesek.
 - A C++ adapter mért keréksebességből indul, pontos szenzoridőbélyeghez kér TF-et, késő transzformációhoz korlátos üzenetsorokat tart, az akadályokat a robotállapot idejére igazítja. Friss adatok és számítási határidő nélkül megáll. Ugyanabban a map koordinátakeretben érkező új térkép nem indít új globális tervezést.
+- Lokalizációs javítás: mentett térképes `slam_mode=localization` módban a launch a `minimum_travel_distance` és `minimum_travel_heading` paramétert 0,0-ra állítja, hogy álló kerék-odometria ne akadályozza a scan-feldolgozást. Mapping módban 0,1 m/rad marad, a `minimum_time_interval` mindkét módban a meglévő 0,1 s. A `DIAG_SLAM_CONFIG` kiírja a `scan_motion_threshold` értéket. Az upstream SLAM Toolbox `shouldProcessScan` kódja odometriai elmozdulás alapján kihagyhat méréseket: https://github.com/SteveMacenski/slam_toolbox/blob/ros2/src/slam_toolbox_common.cpp . A célgépen telepített verzió viselkedése és a módosítás hatása még nincs futással ellenőrizve. Ez nem kapcsol Gazebo ground truth adatot a navigációba, és önmagában nem oldja meg a DWA jelöltelfogyását.
+- Viselkedést nem módosító DWA-diagnosztika: `reject_velocity`, `reject_dynamic`, `reject_braking` a kizárási okokat számolja; ezek és az `admissible` összege adja a `pairs` értékét. A `reject_dynamic_now` a dinamikus kizárások azon része, amely már t=0-nál, a mozgó akadály biztonsági zónáján belül történik; ez nem feltétlenül fizikai érintkezés. A `forward_pairs` a megengedett, 0,01 m/s feletti jelöltek száma. A `moving_points` és `max_obstacle_speed` a DWA-nak átadott akadálybecslést mutatja. A biztonsági szűréseket és a pontozást e diagnosztikai csomag nem lazítja.
 - A fizikai illesztés bemenete nem a Matplotlib pontos akadálymodellje: LiDAR-felületi pontok, becsült akadálysebesség, kerék-odometria és késleltetett TF érkezik. A megállás okát friss `DIAG_CONTROL cpp`, `DIAG_LIDAR`, `DIAG_TF_CPP` adatokkal kell elkülöníteni; lehet elégtelen sebességbecslés, üres megengedett jelölthalmaz, célfüggvény vagy késleltetés. Az új javítások eredményessége még nincs futással igazolva.
 - Következő munka: C++/ROS build és Gazebo-futtatás a célgépen; `DIAG_CONFIG backend=cpp-python-reference`, `DIAG_CONTROL cpp`, `DIAG_TF_CPP` és `DIAG_LIDAR` naplók értékelése. Ne helyettesítsd a hibakeresést vak előremenettel, akadályadatok elhagyásával vagy biztonsági időkorlátok kikapcsolásával.
 - Helyi ROS/Gazebo-futás és numerikus összehasonlítás nem történt. A korábbi editor- és szintaxisellenőrzés nem bizonyítja a helyes akadálykerülést.
@@ -5521,7 +5523,7 @@ public:
     timer_ = rclcpp::create_timer(this, get_clock(), rclcpp::Duration::from_seconds(config_.dt),
                                  [this]() { control(); });
     RCLCPP_INFO(get_logger(),
-      "DIAG_CONFIG backend=cpp-python-reference schema=cpp-dwa-4 lidar_fov=360 pruning=25 dt=%.3f horizon=%.3f radius=%.3f "
+      "DIAG_CONFIG backend=cpp-python-reference schema=cpp-dwa-5 lidar_fov=360 pruning=25 dt=%.3f horizon=%.3f radius=%.3f "
       "half_axle=%.4f wheel_max=%.3f weights=(%.1f,%.1f,%.1f) dynamic_clearance_weight=%.1f",
       config_.dt, config_.predict_time, config_.radius, config_.half_axle,
       config_.wheel_max, config_.alpha, config_.beta, config_.gamma, config_.dynamic_clearance_weight);
@@ -5748,14 +5750,24 @@ private:
     std_msgs::msg::Bool status;
     status.data = active_;
     active_pub_->publish(status);
+    std::size_t moving_points = 0;
+    double max_obstacle_speed = 0.0;
+    for (const auto & obstacle : obstacles) {
+      const double speed = std::hypot(obstacle.vx, obstacle.vy);
+      if (speed > 0.0) ++moving_points;
+      max_obstacle_speed = std::max(max_obstacle_speed, speed);
+    }
     RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000,
       "DIAG_CONTROL cpp reason=%s pose=(%.3f,%.3f,%.3f) measured=(%.3f,%.3f) "
       "waypoint=%zu/%zu pruned=%zu lookahead=%.3f target_index=%zu target=(%.3f,%.3f) observed=%zu pairs=%zu admissible=%zu "
+      "reject_velocity=%zu reject_dynamic=%zu reject_dynamic_now=%zu reject_braking=%zu forward_pairs=%zu moving_points=%zu max_obstacle_speed=%.3f "
       "cmd=(%.3f,%.3f) avoidance_priority=%d reorient=%d goal_heading_error=%.3f odom_age=%.3f obstacle_age=%.3f compute_ms=%.2f",
       result.found ? "command" : "braking_no_pair", state_.x, state_.y, state_.yaw,
       state_.velocity, state_.angular, waypoint_, waypoints_.size(), waypoint_ - previous_waypoint,
       tracking.lookahead, tracking.target_index, tracking.target.first, tracking.target.second,
       obstacles.size(), result.candidates, result.admissible,
+      result.rejected_velocity, result.rejected_dynamic, result.rejected_dynamic_now, result.rejected_braking,
+      result.forward_pairs, moving_points, max_obstacle_speed,
       command.linear.x, command.angular.z,
       result.approaching_obstacle, result.reorient,
       planner::angle_error(std::atan2(tracking.target.second - state_.y,
@@ -5843,6 +5855,9 @@ struct Command { double velocity{0.0}, angular{0.0}, left{0.0}, right{0.0}; };
 struct Result {
 	Command command;
 	std::size_t candidates{0}, admissible{0};
+	std::size_t rejected_velocity{0}, rejected_dynamic{0}, rejected_braking{0};
+	std::size_t rejected_dynamic_now{0};
+	std::size_t forward_pairs{0};
 	bool found{false};
 	bool reorient{false}, approaching_obstacle{false};
 };
@@ -5875,6 +5890,7 @@ struct Trajectory {
 	double distance{10.0};
 	double dynamic_clearance{std::numeric_limits<double>::infinity()};
 	bool dynamic_collision{false};
+	bool initial_dynamic_collision{false};
 };
 
 inline Trajectory trajectory_distance(const Config & config, const State & state,
@@ -5894,6 +5910,7 @@ inline Trajectory trajectory_distance(const Config & config, const State & state
 				if (result.distance == 10.0) result.distance = travelled;
 				if (moving) {
 					result.dynamic_collision = true;
+					result.initial_dynamic_collision = step == 0;
 					return result;
 				}
 			}
@@ -5960,11 +5977,22 @@ inline Result optimise(const Config & config, const State & state, Point goal,
 		for (double right : right_samples) {
 			++result.candidates;
 			const auto command = kinematics(left, right, config);
-			if (command.velocity < 0.0 || command.velocity > velocity_limit + 1e-9) continue;
+			if (command.velocity < 0.0 || command.velocity > velocity_limit + 1e-9) {
+				++result.rejected_velocity;
+				continue;
+			}
 			const auto trajectory = trajectory_distance(config, state, command, visible);
-			if (trajectory.dynamic_collision ||
-					command.velocity > std::sqrt(2.0 * config.acceleration * trajectory.distance)) continue;
+			if (trajectory.dynamic_collision) {
+				++result.rejected_dynamic;
+				if (trajectory.initial_dynamic_collision) ++result.rejected_dynamic_now;
+				continue;
+			}
+			if (command.velocity > std::sqrt(2.0 * config.acceleration * trajectory.distance)) {
+				++result.rejected_braking;
+				continue;
+			}
 			++result.admissible;
+			if (command.velocity > 0.01) ++result.forward_pairs;
 			State predicted = state;
 			for (std::size_t step = 0; step * config.dt < horizon; ++step) update(predicted, config, command);
 			const double heading = std::atan2(goal.second - predicted.y, goal.first - predicted.x);
@@ -7451,6 +7479,7 @@ def start_reference(context):
     if not math.isfinite(map_resolution) or map_resolution <= 0:
         raise RuntimeError("Map resolution must be finite and positive")
     slam_executable = "localization_slam_toolbox_node" if slam_mode == "localization" else "async_slam_toolbox_node"
+    scan_motion_threshold = 0.0 if slam_mode == "localization" else 0.1
     slam_config = os.path.join(package_share, "config", "slam.yaml")
     if start_environment and not os.path.isfile(slam_config):
         raise RuntimeError(
@@ -7467,6 +7496,8 @@ def start_reference(context):
                      "map_start_pose": initial_pose, "resolution": map_resolution,
                      "odom_frame": "odom", "map_frame": "map", "base_frame": "base_link",
                      "scan_topic": "/scan", "max_laser_range": 3.0,
+                     "minimum_travel_distance": scan_motion_threshold,
+                     "minimum_travel_heading": scan_motion_threshold,
                      "use_lifecycle_manager": False}],
     )
     runtime_world = write_world_with_pose_odometry(
@@ -7511,7 +7542,7 @@ def start_reference(context):
         ),
         LogInfo(msg=f"DIAG_SLAM_CONFIG executable={slam_executable} mode={slam_mode} "
                     f"map_file={map_file!r} initial_pose={initial_pose} "
-                    f"resolution={map_resolution} params_file={slam_config}",
+                    f"resolution={map_resolution} scan_motion_threshold={scan_motion_threshold} params_file={slam_config}",
                 condition=IfCondition(LaunchConfiguration("start_environment"))),
         slam_node,
         RegisterEventHandler(
