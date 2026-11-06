@@ -9,6 +9,24 @@ from codes_diploma.robot import robotstate, update
 
 
 def optimisation(config, state, goal, obstacle_list):
+    maximum_velocity = config.w_kerek_max * config.r_kerek
+    target_heading = math.atan2(goal.y - state.y, goal.x - state.x)
+    initial_heading_error = math.atan2(math.sin(target_heading - state.irany),
+                                       math.cos(target_heading - state.irany))
+    turning_velocity = maximum_velocity * max(0.0, math.cos(initial_heading_error))
+    reachable_velocity = max(0.0, state.v - config.a_max * config.dt)
+    velocity_limit = max(turning_velocity, reachable_velocity)
+    candidates = pairstochoose(config, state)
+    wheel_step = config.a_max / config.r_kerek * config.dt
+    left_min = max(-config.w_kerek_max, state.w_L - wheel_step)
+    left_max = min(config.w_kerek_max, state.w_L + wheel_step)
+    right_min = max(-config.w_kerek_max, state.w_R - wheel_step)
+    right_max = min(config.w_kerek_max, state.w_R + wheel_step)
+    rotation_min, rotation_max = max(left_min, -right_max), min(left_max, -right_min)
+    if rotation_min <= rotation_max:
+        left = min(rotation_max, max(rotation_min, -initial_heading_error * config.b / config.r_kerek))
+        angular = -left * config.r_kerek / config.b
+        candidates.append([0.0, angular, left, -left])
     obstacles = np.asarray([
         (obstacle.x, obstacle.y, obstacle.radius, obstacle.vx, obstacle.vy)
         for obstacle in obstacle_list
@@ -26,6 +44,7 @@ def optimisation(config, state, goal, obstacle_list):
     future_x = obstacles[None, :, 0] + times[:, None] * obstacles[None, :, 3]
     future_y = obstacles[None, :, 1] + times[:, None] * obstacles[None, :, 4]
     distances = {}
+    dynamic_collisions = set()
 
     def trajectory_distance(pair):
         velocity, _, left, right = pair
@@ -40,8 +59,11 @@ def optimisation(config, state, goal, obstacle_list):
             for step_index in range(len(times)):
                 separations = np.hypot(predicted.x - future_x[step_index],
                                        predicted.y - future_y[step_index])
-                if np.any(separations <= thresholds):
+                collisions = separations <= thresholds
+                if np.any(collisions) and result == 10.0:
                     result = travelled
+                if np.any(collisions & ~static):
+                    dynamic_collisions.add(key)
                     break
                 update(predicted, config, left, right, config.dt)
                 travelled += abs(velocity) * config.dt
@@ -50,10 +72,15 @@ def optimisation(config, state, goal, obstacle_list):
 
     safe_pairs = []
     allow_reverse = getattr(config, "allow_reverse", False)
-    for pair in pairstochoose(config, state):
+    for pair in candidates:
         if not allow_reverse and pair[0] < 0.0:
             continue
+        if (abs(pair[2]) > config.w_kerek_max + 1e-9 or
+                abs(pair[3]) > config.w_kerek_max + 1e-9 or pair[0] > velocity_limit + 1e-9):
+            continue
         collision_distance = trajectory_distance(pair)
+        if (pair[2], pair[3]) in dynamic_collisions:
+            continue
         if abs(pair[0]) <= math.sqrt(2 * config.a_max * collision_distance):
             safe_pairs.append(pair)
     if not safe_pairs:
@@ -64,7 +91,6 @@ def optimisation(config, state, goal, obstacle_list):
     if goal_distance < 1.0:
         prediction_time = max(0.5, goal_distance * 2.0)
     score_times = np.arange(0, prediction_time, config.dt)
-    maximum_velocity = config.w_kerek_max * config.r_kerek
     best_score = -float("inf")
     best_pair = None
     for pair in safe_pairs:
@@ -82,9 +108,9 @@ def optimisation(config, state, goal, obstacle_list):
         distance_score = trajectory_distance(pair)
         slowdown_distance = getattr(goal, "slow_down_distance", 0.8)
         if not getattr(goal, "slow_down", True) and goal_distance > slowdown_distance:
-            velocity_score = velocity / maximum_velocity
+            velocity_score = 1.0 - abs(turning_velocity - velocity) / maximum_velocity
         else:
-            target_velocity = min(maximum_velocity, max(0.08, goal_distance * 1.4))
+            target_velocity = min(turning_velocity, max(0.08, goal_distance * 1.4))
             velocity_score = 1.0 - abs(target_velocity - velocity) / maximum_velocity
         score = (config.Alfa * heading_score + config.Beta * distance_score +
                  config.Gamma * velocity_score)

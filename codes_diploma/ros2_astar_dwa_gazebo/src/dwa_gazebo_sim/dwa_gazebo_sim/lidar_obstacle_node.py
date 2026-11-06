@@ -3,6 +3,8 @@
 import math
 import time
 
+import numpy as np
+
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
@@ -11,6 +13,19 @@ from sensor_msgs.msg import LaserScan, PointCloud2, PointField
 from sensor_msgs_py import point_cloud2
 from std_msgs.msg import Header
 from tf2_ros import Buffer, TransformException, TransformListener
+
+
+def estimate_cluster_translation(current, previous, initial):
+    translation = np.asarray(initial, dtype=float)
+    for _ in range(3):
+        offsets = current[:, None, :] - (previous[None, :, :] + translation)
+        squared_distances = np.sum(offsets * offsets, axis=2)
+        nearest = np.argmin(squared_distances, axis=1)
+        matched = squared_distances[np.arange(len(current)), nearest] <= 0.15 ** 2
+        if np.count_nonzero(matched) < 2:
+            return None
+        translation = np.median(current[matched] - previous[nearest[matched]], axis=0)
+    return translation
 
 
 class LidarObstacleNode(Node):
@@ -62,7 +77,9 @@ class LidarObstacleNode(Node):
             last_index = index
         dt = None if self.last_stamp is None else stamp - self.last_stamp
         tracks, points, used = [], [], set()
+        motion_fits = 0
         for cluster in clusters:
+            surface = np.asarray(cluster[::max(1, (len(cluster) + 63) // 64)], dtype=float)
             x = sum(point[0] for point in cluster) / len(cluster)
             y = sum(point[1] for point in cluster) / len(cluster)
             vx = vy = 0.0
@@ -74,10 +91,15 @@ class LidarObstacleNode(Node):
                     if error < 0.35:
                         old = self.previous[index]
                         used.add(index)
-                        vx, vy = 0.6 * old[2] + 0.4 * (x - old[0]) / dt, 0.6 * old[3] + 0.4 * (y - old[1]) / dt
-                        if math.hypot(vx, vy) < 0.06:
-                            vx = vy = 0.0
-            tracks.append((x, y, vx, vy))
+                        translation = estimate_cluster_translation(
+                            surface, old[4], (old[2] * dt, old[3] * dt))
+                        if translation is not None:
+                            motion_fits += 1
+                            vx = 0.6 * old[2] + 0.4 * float(translation[0]) / dt
+                            vy = 0.6 * old[3] + 0.4 * float(translation[1]) / dt
+                            if math.hypot(vx, vy) < 0.06:
+                                vx = vy = 0.0
+            tracks.append((x, y, vx, vy, surface))
             points.extend((point[0], point[1], 0.0, 0.0, vx, vy) for point in cluster)
         self.previous, self.last_stamp = tracks, stamp
         fields = [PointField(name=name, offset=4 * index, datatype=PointField.FLOAT32, count=1)
@@ -95,6 +117,7 @@ class LidarObstacleNode(Node):
                 f"DIAG_LIDAR seq={self.scan_sequence} stamp={stamp:.3f} age={age:.3f} "
                 f"frame={self.tracking_frame} scan_dt={dt} rays={len(message.ranges)} "
                 f"points={len(points)} clusters={len(clusters)} matches={len(used)} "
+                f"motion_fits={motion_fits} "
                 f"moving_clusters={moving} max_speed={max_speed:.3f} "
                 f"sensor_xy=({transform.translation.x:.3f},{transform.translation.y:.3f})")
 

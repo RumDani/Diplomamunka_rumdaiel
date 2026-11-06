@@ -74,6 +74,7 @@ class PythonPlannerNode(Node):
             from .python_dwa import optimisation
             optimizer = optimisation
         self.planner = load_planner_class(optimizer)(self.grid, config=self.config, diagonal=True)
+        self.config.enable_waypoint_slowdown = True
         self.pending_goal = self.default_goal if self.declare_parameter("autostart", False).value else None
         self.requested_goal = None
         self.active = False
