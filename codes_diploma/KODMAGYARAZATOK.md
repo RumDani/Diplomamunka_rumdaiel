@@ -3019,3 +3019,24 @@ Ellenőrzés: a C++ editor-diagnosztikája hibamentes. ROS-build, teszt és
 Gazebo-futás nem történt; a sikeres kikerülés nincs igazolva. Az új induló
 marker `cpp-world-pose-scan-tracking-v2`; ennek hiánya régi buildre utal.
 A Python-szimulátor és a felhasználó által védett folyamatábra változatlan.
+
+
+## 20. Kétakadályos Gazebo-teszt és az elakadás javítása
+
+### Mi volt a hiba?
+A robot a `(2.0–2.3, 1.75–1.85)` környékén megállt: a napló `lookahead=0.000`, `forward_pairs=0` értéket és helyben forgást mutatott. A `path_tracking.hpp` `prune_lookahead()` függvénye akkor is a pálya vetületére állította a célpontot, ha nem volt elérhető előretekintési pont, vagy nem volt elérhető vetület. Így a célpont a robot alatt volt, nem adódott előremutató parancs.
+
+### Javítás
+- `path_tracking.hpp`: mindkét esetben `along_path(lookahead)` adja a célt, vagyis az úton előre lévő pontot. A blokkolt esetben nincs metszés (`waypoint == 1` marad). A teszt: `test_path_tracking.cpp`.
+- `reference_planner.hpp`: ha a DWA-nak nincs megengedett parancsa, biztonságos, helyben forgó tartalék parancs.
+- `reference_controller.cpp`: a statikus térképhez tartozó LiDAR-pontok cellánként statikus akadályként egyesülnek, így a fal nem jelenik meg zajos mozgó akadályként.
+- `lidar_obstacle_node.py`: a 0.35 m/s feletti becsült sebességet statikusnak tekinti (zaj).
+
+### Forgatókönyv (szimuláció)
+Szembejövő akadály: `(6.8, 2.0)`-ról, `(-0.26, 0)` m/s sebességgel, amint az odom `x >= oncoming_start_x` (0). Oldalról érkező: `(2.4, 0.4)`-ről, `(0, +0.20)` m/s sebességgel, amint `x >= crossing_start_x` (0.8). Példa: ha a robot x=0.8-nál jár, a másodperc törtrésze alatt mindkét akadály mozgásban van; 0.26 m/s mellett a szembejövő kb. 5 m-t kb. 19 s alatt tesz meg szimulációs időben.
+
+### Eredmény
+Cél `(6.5, 4.2)`: mindkét akadály elindult, `avoidance_priority=1`, a kikerülés látható, a futás `reason=finished` állapottal ért véget. Valós idő: a szimuláció ~0.1–0.2-es valós idejű tényezővel 2–4 percig tart.
+
+### Korlát
+Csak szimuláció; hardveren nem tesztelt. Valós robotnál a paramétereket újra kell hangolni, és kell hardveres vészleállító.

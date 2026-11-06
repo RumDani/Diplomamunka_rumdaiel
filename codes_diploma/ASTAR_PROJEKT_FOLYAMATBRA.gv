@@ -323,5 +323,22 @@ digraph AStarCurrentCode {
         py_plan -> py_cmd
     }
 
+    subgraph cluster_cpp_two_obstacles {
+        label="C++ vezérlő: kétakadályos Gazebo-teszt és elakadás-javítás"
+        style="rounded"
+        color="#7c3aed"
+        cx_scan [label="/scan -> lidar_obstacle_node\nklaszterezés + követés -> /tracked_obstacles\n0.35 m/s feletti becslés = statikus", fillcolor="#ede9fe"]
+        cx_static [label="reference_controller: statikus térkép-LiDAR pontok\ncellánként statikus akadályként egyesítve"]
+        cx_prune [label="prune_lookahead (path_tracking.hpp)\nnincs elérhető cél/vetület -> along_path(lookahead)\nnem lookahead=0 a vetületen", fillcolor="#fef3c7"]
+        cx_dwa [label="DWA optimise (reference_planner.hpp)\nnincs megengedett parancs -> biztonságos helyben forgás"]
+        cx_scene [label="python_simulation_node: szembejövő (6.8, 2.0) odom x>=0\noldalról érkező x>=crossing_start_x (0.8)", fillcolor="#dbeafe"]
+        cx_cmd [label="/cmd_vel -> Gazebo\nDIAG_CONTROL reason=finished", shape=parallelogram, fillcolor="#99f6e4"]
+        cx_scene -> cx_scan [label="mozgó akadályok"]
+        cx_scan -> cx_static
+        cx_static -> cx_prune
+        cx_prune -> cx_dwa
+        cx_dwa -> cx_cmd
+    }
+
     labelloc="t"
 }
