@@ -8,9 +8,11 @@ import rclpy
 from geometry_msgs.msg import TransformStamped, Twist
 from nav_msgs.msg import Odometry
 from rclpy.node import Node
-from rclpy.qos import DurabilityPolicy, QoSProfile
+from rclpy.qos import DurabilityPolicy, QoSProfile, qos_profile_sensor_data
+from rclpy.time import Time
+from sensor_msgs.msg import LaserScan
 from std_msgs.msg import Bool
-from tf2_ros import StaticTransformBroadcaster, TransformBroadcaster
+from tf2_ros import Buffer, StaticTransformBroadcaster, TransformBroadcaster, TransformListener
 
 from .python_reference import create_gazebo_scene
 from .gazebo_path_node import GazeboPathDisplay
@@ -21,6 +23,11 @@ class GazeboSimulationAdapter:
         self.node = node
         self.ground_truth = None
         self.last_diagnostic_wall = -math.inf
+        self.last_tf_diagnostic_wall = -math.inf
+        self.last_odom_stamp = None
+        self.last_odom_child = None
+        self.tf_buffer = Buffer(node=node)
+        self.tf_listener = TransformListener(self.tf_buffer, node)
         if not node.has_parameter("world_file"):
             node.declare_parameter("world_file", "")
         world_file = node.get_parameter("world_file").value
@@ -33,8 +40,9 @@ class GazeboSimulationAdapter:
             for index in range(len(self.obstacles))]
         latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
         node.create_subscription(Bool, "/controller_active", self.set_active, latched)
-        node.create_subscription(Odometry, "/gazebo/wheel_odom", self.odom, 10)
-        node.create_subscription(Odometry, "/gazebo/ground_truth_odom", self.record_ground_truth, 10)
+        node.create_subscription(Odometry, "/gazebo/wheel_odom", self.odom, qos_profile_sensor_data)
+        node.create_subscription(Odometry, "/gazebo/ground_truth_odom", self.record_ground_truth, qos_profile_sensor_data)
+        node.create_subscription(LaserScan, "/scan", self.inspect_scan_tf, qos_profile_sensor_data)
         self.tf = TransformBroadcaster(node)
         self.static_tf = StaticTransformBroadcaster(node)
         self.odom_child = node.declare_parameter("odom_child_frame", "base_footprint").value
@@ -59,6 +67,29 @@ class GazeboSimulationAdapter:
     def record_ground_truth(self, message):
         self.ground_truth = message
 
+    def inspect_scan_tf(self, message):
+        wall_time = time.monotonic()
+        if wall_time - self.last_tf_diagnostic_wall < 2.0:
+            return
+        self.last_tf_diagnostic_wall = wall_time
+        stamp = Time.from_msg(message.header.stamp)
+        scan_age = (self.node.get_clock().now().nanoseconds - stamp.nanoseconds) * 1e-9
+        odom_delta = None if self.last_odom_stamp is None else (
+            self.last_odom_stamp - stamp.nanoseconds) * 1e-9
+        checks = []
+        for target, source in (("base_link", message.header.frame_id),
+                               ("odom", "base_link"), ("map", "odom")):
+            ready, detail = self.tf_buffer.can_transform(
+                target, source, stamp, return_debug_tuple=True)
+            latest = self.tf_buffer.can_transform(target, source, Time())
+            checks.append(f"{target}<-{source}:at_scan={ready},latest={latest},detail={detail}")
+        self.node.get_logger().info(
+            f"DIAG_TF scan_stamp={stamp.nanoseconds * 1e-9:.3f} scan_age={scan_age:.3f} "
+            f"scan_frame={message.header.frame_id} odom_received={self.last_odom_stamp is not None} "
+            f"wheel_publishers={self.node.count_publishers('/gazebo/wheel_odom')} "
+            f"odom_minus_scan={odom_delta} configured_child={self.odom_child} "
+            f"received_child={self.last_odom_child} checks={checks}")
+
     def odom(self, message):
         mapped = copy.deepcopy(message)
         mapped.header.frame_id = "odom"
@@ -73,6 +104,8 @@ class GazeboSimulationAdapter:
         transform.transform.translation.z = mapped.pose.pose.position.z
         transform.transform.rotation = mapped.pose.pose.orientation
         self.tf.sendTransform(transform)
+        self.last_odom_stamp = Time.from_msg(mapped.header.stamp).nanoseconds
+        self.last_odom_child = mapped.child_frame_id
         wall_time = time.monotonic()
         if wall_time - self.last_diagnostic_wall >= 2.0:
             self.last_diagnostic_wall = wall_time
