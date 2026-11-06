@@ -163,6 +163,21 @@ Az `initial_x/y/yaw` a mentett térképben adott becslés, nem a Gazebo robotjá
 A `map_file` kiterjesztés nélküli előtag: ugyanahhoz a mentéshez tartozó `.posegraph` és `.data` kell.
 Az út RViz-ben és Gazebóban ugyanabból a `/astar_path`-ból rajzolódik; a Gazebo-illesztés csak vizualizáció, nem vezérlési visszacsatolás.
 
+### Kétakadályos teszt (RViz nélkül is)
+
+Az A terminál indítása után két mozgó akadály aktív alapból: a szembejövő (`moving_obstacle_2`, kezdet (6.8, 2.0)) a robot `odom x ≥ oncoming_start_x` (alap 0) esetén, az oldalról érkező (`moving_obstacle_1`) `odom x ≥ crossing_start_x` (alap 0.8) esetén indul. Kikapcsolás: `enable_crossing_obstacle:=false`.
+
+Cél megadása RViz helyett (új, előkészített terminálban; a feliratkozó ~40 s után érhető el, ezért ismételd, amíg a naplóban `DIAG_GOAL cpp` megjelenik):
+
+```bash
+ros2 topic pub --once /goal_pose geometry_msgs/msg/PoseStamped "{header: {frame_id: map}, pose: {position: {x: 6.5, y: 4.2}, orientation: {w: 1.0}}}"
+```
+
+Sikeres futás a naplóban: `DIAG_SCENARIO event=oncoming_started`, `event=crossing_started`, végül `DIAG_CONTROL cpp reason=finished`. A futás szimulációs sebességgel ~2–4 percig tart.
+
+Ha Ctrl+C után újraindításkor régi szimuláció zavar, keresd meg és állítsd le a megmaradt `gz sim` szerver PID-jét (`pgrep -a gz`, majd `kill <PID>`).
+Ha `.sh` szkriptet Windowsban szerkesztesz, WSL-ben előtte: `tr -d '\r' < in.sh > /tmp/in.sh`.
+
 ## Új térkép vagy felülírás
 
 Állíts le minden futást, majd ismételd az **1. és 2. fázist**, a régi mentés biztonsági másolatával; ezután a **3. fázissal** indulj.
