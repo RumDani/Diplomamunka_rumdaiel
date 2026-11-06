@@ -1,2 +1,0 @@
-[console_scripts]
-dwa_node = dwa_planner.dwa_node:main

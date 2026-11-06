@@ -1,6 +1,8 @@
 __pycache__/
 *.py[cod]
 *$py.class
+.venv/
+~$*
 
 # ROS 2 / Gazebo generated files
 build/
