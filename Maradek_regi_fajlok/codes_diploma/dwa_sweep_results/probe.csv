@@ -1,0 +1,5 @@
+scenario,alpha,beta,gamma,predict_time,safety_margin,reached,sim_time_s,path_m,avg_speed_mps,min_clearance_m,collision_steps,collision,no_command_steps
+S1,5,0,3,3,0.15,True,23.7,6.18,0.261,-0.268,15,True,51
+S1,5,20,3,3,0.15,True,25.6,6.48,0.253,0.108,0,False,10
+S2,5,0,3,3,0.15,True,25.8,6.18,0.24,-0.271,18,True,68
+S2,5,20,3,3,0.15,True,25.4,6.46,0.254,0.05,0,False,12
