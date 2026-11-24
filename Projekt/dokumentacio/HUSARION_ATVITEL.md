@@ -1,8 +1,10 @@
-# A* + DWA átvitele Husarion ROSbotra
+# A* + DWA a Husarion ROSbot 2-n (ROS 2 Foxy)
 
-## Cél és jelenlegi korlát
+## Cél és rögzített környezet
 
-Az átültetés célja, hogy a Gazebo helyett a ROSbot adja a szenzoradatokat, és a vezérlő a robot driverén keresztül küldjön sebességparancsokat. Az aktív Gazebo-vezérlő C++ ROS 2 node-ja, az akadálykövető pedig Python segédnode; a teljes Gazebo launch nem használható közvetlenül a roboton, mert Gazebót indít, TurtleBot-paramétereket olvas ki, és `use_sim_time:=true` beállítást használ. A vezérlő hardverfüggetlen ROS-üzenetekkel dolgozik, de a ROSboton való működés még **nem igazolt**: a ROS-verziót, témákat, koordinátakereteket, paramétereket és a hajtás viselkedését a konkrét roboton kell ellenőrizni.
+**Célhardver: Husarion ROSbot 2. Meglévő rendszer: ROS 2 Foxy, `colcon` és C++ compiler.** Nem telepítünk rendszer-csomagot, nem használunk `sudo apt`, `pip` vagy `rosdep install` parancsot. A fejlesztés a felhasználói könyvtárban lévő saját ROS workspace-be kerül; a `colcon build` csak ezt a workspace overlay-t építi és az `install/` alkönyvtárába telepít, a robot rendszer-ROS-át nem írja át.
+
+Az aktív Gazebo-vezérlő C++ ROS 2 node-ja, az akadálykövető Python segédnode; a teljes Gazebo launch nem futtatható közvetlenül a roboton, mert Gazebót indít, TurtleBot-paramétereket olvas ki, és `use_sim_time:=true` beállítást használ. A cél a robot saját bringupjának, lokalizációjának és driverének használata. A ROSboton való működés még **nincs hardveren igazolva**; előbb ellenőrizni kell, hogy a meglévő Foxy-környezet tartalmazza-e az adott források fordításához és futtatásához szükséges függőségeket.
 
 ## Adatút és szükséges interfészek
 
@@ -19,13 +21,49 @@ A ROSbot gyári bringupja adja a LiDAR-t, az odometriát, a TF-et és a `/cmd_ve
 
 ## Lépésről lépésre
 
-### 1. Azonosítsd a robotot és készíts biztonságos teszttervet
+### 1. Rögzítsd a már telepített környezetet
 
-Jegyezd fel a ROSbot pontos modelljét és ROS 2 disztribúcióját, a LiDAR típusát, a gyári bringup parancsát, a ROS-témák nevét és a TF-frame-eket. Ellenőrizd a ROS-verzió és a projekt függőségeinek kompatibilitását; a fejlesztői Gazebo-workspace nem feltétlenül telepíthető változtatás nélkül a robot gyári rendszerére. Készíts szabad, sík tesztterületet, legyen kéznél működő fizikai vészleállító és egy felügyelő személy; a kezdeti próbán ne legyen ember vagy mozgó akadály a robot útjában.
+Jegyezd fel a ROSbot 2 gyári rendszerének ROS 2 Foxy setup fájlját, a LiDAR típusát, a gyári bringup parancsát, a témák és TF-frame-ek nevét. A további parancsokban a rendszer által már biztosított ROS környezetet használd; ne frissítsd és ne cseréld le a robot rendszerét. Készíts szabad, sík tesztterületet, legyen kéznél működő fizikai vészleállító és felügyelő személy; az első próbán ne legyen ember vagy mozgó akadály a robot útjában.
 
-### 2. Fordítsd le és ellenőrizd a csomagokat
+### 2. Ellenőrizd a meglévő függőségeket telepítés nélkül
 
-Építsd az `astar_dwa_controller` és `dwa_gazebo_sim` ROS-csomagot a robot ROS-verziójával kompatibilis workspace-ben, a hiányzó függőségeket annak hivatalos csomagkezelőjével telepítve. A Gazebo launchot ne indítsd el: a fizikai robothoz csak a gyári bringup és a két szükséges node kell. Ha a ROSbot gyári környezete nem teszi lehetővé a csomagok biztonságos telepítését, a fordítást külön, kompatibilis ROS-gépen végezd, majd a workspace-et a dokumentált ROS-módszerrel juttasd el a robotra.
+Töltsd be a roboton már meglévő ROS 2 Foxy környezetet, majd ellenőrizd a fordító- és Python-függőségeket. A hiányzó komponensnél állj meg: ne telepítsd, hanem a meglevő robot-stackhez igazítsd a megvalósítást.
+
+```bash
+source /opt/ros/foxy/setup.bash
+command -v colcon
+command -v c++
+ros2 pkg prefix rclcpp
+ros2 pkg prefix ament_cmake_python
+ros2 pkg prefix geometry_msgs
+ros2 pkg prefix tf2_ros
+ros2 pkg prefix nav_msgs
+ros2 pkg prefix visualization_msgs
+python3 -c "import numpy, rclpy, sensor_msgs_py, tf2_ros; print('ROSbot dependencies available')"
+```
+
+Ha a Foxy setup más helyen van, a `source` sort a már működő ROSbot bringup termináljából vedd át. A `ros2 pkg prefix` és az importpróba csak ellenőriz; nem telepít semmit. Az `astar_dwa_controller` C++ csomagját építsd a roboton futó Foxyval, ne a fejlesztői Jazzy/Gazebo buildből másold át a binárist. A Gazebo csomagot ne válaszd ki buildre: annak manifestje Gazebo/TurtleBot függőségeket is deklarál, a roboton ezek nem szükségesek.
+
+Egy privát workspace-ben tartsd meg a CMake által elvárt könyvtárszerkezetet:
+
+```text
+~/rosbot_ws/src/rosbot_project/Gazebo_ROS2/
+├── python_deps/
+└── src/
+    ├── astar_dwa_controller/
+    └── dwa_gazebo_sim/
+```
+
+Másold vagy másold át SSH-val a forrásokat ebbe a felhasználói könyvtár alatti struktúrába; a `build/`, `install/` és `log/` könyvtárakat ne vidd át. A projektből a `python_deps`, az `astar_dwa_controller`, valamint a tracker forrása kell. A csomag CMake-fájlja a `python_deps` mappát relatív útvonalon keresi, ezért a szerkezetet ne lapítsd ki. A workspace gyökeréből:
+
+```bash
+cd ~/rosbot_ws
+source /opt/ros/foxy/setup.bash
+colcon build --packages-select astar_dwa_controller
+source install/setup.bash
+```
+
+Ez a build a C++ vezérlőt a `~/rosbot_ws/install` overlay-be teszi, nem a rendszerbe. Ha a fordítás egy már meglévő Foxy-függőség hiánya miatt megáll, ne telepíts csomagot: rögzítsd a hibát, és a forrást kell a meglévő Foxy API-hoz vagy a már elérhető könyvtárakhoz igazítani.
 
 ### 3. Indítsd el a gyári bringupot, még vezérlő nélkül
 
@@ -62,15 +100,16 @@ Ha van a teszthelyszínhez illő, ROS 2-kompatibilis mentett térkép, töltsd b
 
 ### 6. Indítsd el önállóan a LiDAR-akadálykövetőt
 
-Csak a scan és a TF ellenőrzése után indítsd el az akadálykövető node-ot, valós idő használatával:
+Csak a scan és a TF ellenőrzése után indítsd el az akadálykövetőt. Mivel ez a node jelenleg a Gazebo segédcsomag része, a hiányzó Gazebo függőségek miatt ne buildeld a teljes `dwa_gazebo_sim` csomagot. Ha a fenti Python importellenőrzés sikeres, a meglévő Foxy környezetben közvetlenül a forrásból is futtatható, a saját útvonalad behelyettesítésével:
 
 ```bash
-ros2 run dwa_gazebo_sim lidar_obstacle_node --ros-args \
+python3 ~/rosbot_ws/src/rosbot_project/Gazebo_ROS2/src/dwa_gazebo_sim/dwa_gazebo_sim/lidar_obstacle_node.py \
+  --ros-args \
   -p use_sim_time:=false \
   -p tracking_frame:=odom
 ```
 
-Ha más a scan- vagy odometria-téma/frame neve, igazítsd a remapet és a `tracking_frame` értéket a ROSbothoz. Ellenőrizd a `/tracked_obstacles` témát és a node `DIAG_LIDAR` naplóit; a `frame`, `age`, `points`, `clusters`, `motion_fits` és `tf_missing` mezők segítenek eldönteni, hogy valódi, friss adat érkezik-e. Először álló, ismert akadállyal ellenőrizz, majd – a vészleállítót készenlétben tartva – lassan mozgó tárggyal. A sebességbecslés helyességét ne feltételezd pusztán attól, hogy a pontfelhő látszik.
+Ha más a scan- vagy odometria-téma/frame neve, igazítsd a remapet és a `tracking_frame` értéket. Ellenőrizd a `/tracked_obstacles` témát és a `DIAG_LIDAR` naplókat; a `frame`, `age`, `points`, `clusters`, `motion_fits` és `tf_missing` mezők jelzik, hogy friss adat érkezik-e. Először álló akadállyal ellenőrizz, majd csak biztonságos körülmények között mozgó tárggyal. Ha az importellenőrzés hiányzó Python-csomagot jelez, ne használd a `pip`-et: a következő implementációs lépés a tracker átírása a roboton már meglévő ROS/C++ függőségekre vagy a gyári akadálydetektorra történő illesztése.
 
 ### 7. Mérd fel a robotparamétereket, és készíts külön paraméterfájlt
 

@@ -9,6 +9,10 @@ Projekt/
 └── dokumentacio/        jegyzetek (kódmagyarázat, tapasztalatok, Husarion-átvitel)
 ```
 
+## ROSbot 2
+
+A Husarion ROSbot 2-re, meglévő ROS 2 Foxy környezethez készült telepítés nélküli overlay-build és lépésenkénti átviteli útmutató: [dokumentacio/HUSARION_ATVITEL.md](dokumentacio/HUSARION_ATVITEL.md). A leírás nem telepít rendszerfüggőségeket, és a hardveres működés még nincs igazolva.
+
 ## 1. Python_szimulacio\codes_diploma\
 | Fájl | Mit csinál |
 |---|---|
